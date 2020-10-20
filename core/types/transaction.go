@@ -240,9 +240,15 @@ func (tx *Transaction) AsMessage(s Signer) (Message, error) {
 		checkNonce: true,
 	}
 
-	var err error
-	msg.from, err = Sender(s, tx)
-	return msg, err
+	if sc := tx.from.Load(); sc != nil {
+		sigCache := sc.(sigCache)
+		msg.from=sigCache.from
+	}else{
+		panic("bug here")
+	}
+
+
+	return msg, nil
 }
 
 // WithSignature returns a new transaction with the given signature.
