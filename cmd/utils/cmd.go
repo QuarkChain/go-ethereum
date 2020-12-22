@@ -164,6 +164,7 @@ func ImportChain(chain *core.BlockChain, fn string) error {
 			return fmt.Errorf("invalid block %d: %v", n, err)
 		}
 	}
+	common.DebugInfo.Print()
 	return nil
 }
 

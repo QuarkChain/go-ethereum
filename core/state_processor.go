@@ -81,6 +81,15 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 	return receipts, allLogs, *usedGas, nil
 }
 
+func (p *StateProcessor) PallProcess(blockList *types.Block, statedb *state.StateDB, cfg vm.Config) (types.Receipts, []*types.Log, uint64, error) {
+	pm := NewPallTxManage(blockList, statedb, p.bc)
+	if pm.txLen != 0 {
+		<-pm.ch
+	}
+	receipts, allLogs, usedGas := pm.GetReceiptsAndLogs()
+	return receipts, allLogs, usedGas, nil
+}
+
 // ApplyTransaction attempts to apply a transaction to the given state database
 // and uses the input parameters for its environment. It returns the receipt
 // for the transaction, gas used and an error if the transaction failed,
@@ -107,11 +116,17 @@ func ApplyTransaction(config *params.ChainConfig, bc ChainContext, author *commo
 	} else {
 		root = statedb.IntermediateRoot(config.IsEIP158(header.Number)).Bytes()
 	}
-	*usedGas += result.UsedGas
+	if usedGas != nil {
+		*usedGas += result.UsedGas
+	}
+	statedb.CalReadAndWrite()
 
 	// Create a new receipt for the transaction, storing the intermediate root and gas used by the tx
 	// based on the eip phase, we're passing whether the root touch-delete accounts.
-	receipt := types.NewReceipt(root, result.Failed(), *usedGas)
+	receipt := types.NewReceipt(root, result.Failed(), 0)
+	if usedGas != nil {
+		receipt = types.NewReceipt(root, result.Failed(), *usedGas)
+	}
 	receipt.TxHash = tx.Hash()
 	receipt.GasUsed = result.UsedGas
 	// if the transaction created a contract, store the creation address in the receipt.

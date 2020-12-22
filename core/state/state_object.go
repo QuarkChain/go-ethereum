@@ -20,8 +20,10 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"github.com/ethereum/go-ethereum/trie"
 	"io"
 	"math/big"
+	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -64,10 +66,12 @@ func (s Storage) Copy() Storage {
 // Account values can be accessed and modified through the object.
 // Finally, call CommitTrie to write the modified storage trie into a database.
 type stateObject struct {
-	address  common.Address
-	addrHash common.Hash // hash of ethereum address of the account
-	data     Account
-	db       *StateDB
+	pendingmu      sync.Mutex
+	lastWriteIndex int
+	address        common.Address
+	addrHash       common.Hash // hash of ethereum address of the account
+	data           Account
+	db             *StateDB
 
 	// DB error.
 	// State objects are used by the consensus core and VM which are
@@ -190,13 +194,6 @@ func (s *stateObject) GetCommittedState(db Database, key common.Hash) common.Has
 	if s.fakeStorage != nil {
 		return s.fakeStorage[key]
 	}
-	// If we have a pending write or clean cached, return that
-	if value, pending := s.pendingStorage[key]; pending {
-		return value
-	}
-	if value, cached := s.originStorage[key]; cached {
-		return value
-	}
 	// If no live objects are available, attempt to use snapshots
 	var (
 		enc []byte
@@ -217,12 +214,18 @@ func (s *stateObject) GetCommittedState(db Database, key common.Hash) common.Has
 		}
 		enc, err = s.db.snap.Storage(s.addrHash, crypto.Keccak256Hash(key.Bytes()))
 	}
+
+	dbKey := makeFastDbKey(s.address, s.data.Incarnation, key)
+	if value, exist := s.db.MergedSts.GetStorage(dbKey); exist {
+		return value
+	}
+
 	// If snapshot unavailable or reading from it failed, load from the database
 	if s.db.snap == nil || err != nil {
 		if metrics.EnabledExpensive {
 			defer func(start time.Time) { s.db.StorageReads += time.Since(start) }(time.Now())
 		}
-		if enc, err = s.getTrie(db).TryGet(makeFastDbKey(s.address, s.data.Incarnation, key)); err != nil {
+		if enc, err = s.getTrie(db).TryGet(dbKey); err != nil {
 			s.setError(err)
 			return common.Hash{}
 		}
@@ -236,18 +239,18 @@ func (s *stateObject) GetCommittedState(db Database, key common.Hash) common.Has
 		value.SetBytes(content)
 	}
 	s.originStorage[key] = value
+	s.db.MergedSts.setStorage(dbKey, value)
 	return value
 }
 
 // SetState updates a value in account storage.
-func (s *stateObject) SetState(db Database, key, value common.Hash) {
+func (s *stateObject) SetState(db Database, key, value, prev common.Hash) {
 	// If the fake storage is set, put the temporary state update here.
 	if s.fakeStorage != nil {
 		s.fakeStorage[key] = value
 		return
 	}
 	// If the new value is the same as old, don't set
-	prev := s.GetState(db, key)
 	if prev == value {
 		return
 	}
@@ -317,7 +320,7 @@ func (s *stateObject) updateTrie(db Database) Trie {
 		return nil
 	}
 	// Make sure all dirty slots are finalized into the pending storage area
-	s.finalise()
+	//s.finalise()
 	if len(s.pendingStorage) == 0 {
 		return s.trie
 	}
@@ -335,14 +338,13 @@ func (s *stateObject) updateTrie(db Database) Trie {
 			s.db.snapStorage[s.addrHash] = storage
 		}
 	}
+
 	// Insert all the pending updates into the trie
 	tr := s.getTrie(db)
+	if !isCommit {
+		return tr
+	}
 	for key, value := range s.pendingStorage {
-		// Skip noop changes, persist actual changes
-		if value == s.originStorage[key] {
-			continue
-		}
-		s.originStorage[key] = value
 
 		var v []byte
 		if (value == common.Hash{}) {
@@ -356,9 +358,6 @@ func (s *stateObject) updateTrie(db Database) Trie {
 		if storage != nil {
 			storage[crypto.Keccak256Hash(key[:])] = v // v will be nil if value is 0x00
 		}
-	}
-	if len(s.pendingStorage) > 0 {
-		s.pendingStorage = make(Storage)
 	}
 	return tr
 }
@@ -438,12 +437,17 @@ func (s *stateObject) ReturnGas(gas *big.Int) {}
 func (s *stateObject) deepCopy(db *StateDB) *stateObject {
 	stateObject := newObject(db, s.address, s.data)
 	if s.trie != nil {
-		stateObject.trie = db.db.CopyTrie(s.trie)
+		stateObject.trie = trie.NewFastDB(db.db.TrieDB())
 	}
 	stateObject.code = s.code
-	stateObject.dirtyStorage = s.dirtyStorage.Copy()
-	stateObject.originStorage = s.originStorage.Copy()
-	stateObject.pendingStorage = s.pendingStorage.Copy()
+	s.pendingmu.Lock()
+	for k, v := range s.pendingStorage {
+		stateObject.pendingStorage[k] = v
+	}
+	for k, v := range s.dirtyStorage {
+		stateObject.pendingStorage[k] = v
+	}
+	s.pendingmu.Unlock()
 	stateObject.suicided = s.suicided
 	stateObject.dirtyCode = s.dirtyCode
 	stateObject.deleted = s.deleted
@@ -461,9 +465,10 @@ func (s *stateObject) Address() common.Address {
 
 // Code returns the contract code associated with this object, if any.
 func (s *stateObject) Code(db Database) []byte {
-	if s.code != nil {
-		return s.code
+	if code, exist := s.db.MergedSts.getOriginCode(s.addrHash, common.BytesToHash(s.CodeHash())); exist {
+		return code
 	}
+
 	if bytes.Equal(s.CodeHash(), emptyCodeHash) {
 		return nil
 	}
@@ -472,6 +477,7 @@ func (s *stateObject) Code(db Database) []byte {
 		s.setError(fmt.Errorf("can't load code hash %x: %v", s.CodeHash(), err))
 	}
 	s.code = code
+	s.db.MergedSts.setOriginCode(s.addrHash, common.BytesToHash(s.CodeHash()), code)
 	return code
 }
 
@@ -492,8 +498,7 @@ func (s *stateObject) CodeSize(db Database) int {
 	return size
 }
 
-func (s *stateObject) SetCode(codeHash common.Hash, code []byte) {
-	prevcode := s.Code(s.db.db)
+func (s *stateObject) SetCode(codeHash common.Hash, code, prevcode []byte) {
 	s.db.journal.append(codeChange{
 		account:  &s.address,
 		prevhash: s.CodeHash(),

@@ -216,7 +216,7 @@ func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas 
 			}
 			return nil, gas, nil
 		}
-		evm.StateDB.CreateAccount(addr, false)
+		evm.StateDB.CreateAccount(addr, true)
 	}
 	evm.Transfer(evm.StateDB, caller.Address(), addr, value)
 

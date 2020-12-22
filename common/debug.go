@@ -18,10 +18,13 @@ package common
 
 import (
 	"fmt"
+	"github.com/shirou/gopsutil/cpu"
+	"github.com/shirou/gopsutil/mem"
 	"os"
 	"runtime"
 	"runtime/debug"
 	"strings"
+	"time"
 )
 
 // Report gives off a warning requesting the user to submit an issue to the github tracker.
@@ -50,3 +53,47 @@ func PrintDepricationWarning(str string) {
 
 `, line, emptyLine, str, emptyLine, line)
 }
+
+type DebugTime struct {
+	ExecuteTx     time.Duration
+	ValidateBlock time.Duration
+	WriteBlock    time.Duration
+	CommitTrie    time.Duration
+	TxLen         int
+}
+
+func NewDebugTime() *DebugTime {
+	d := &DebugTime{
+		ExecuteTx:     time.Duration(0),
+		ValidateBlock: time.Duration(0),
+		WriteBlock:    time.Duration(0),
+		CommitTrie:    time.Duration(0),
+	}
+	go d.cpuAndMem()
+	return d
+
+}
+
+func (d *DebugTime) cpuAndMem() {
+	for true {
+		v, _ := mem.VirtualMemory()
+		res, _ := cpu.Times(false)
+		fmt.Println("mem info", v)
+		fmt.Println("cpu info", res)
+		time.Sleep(10 * time.Minute)
+	}
+}
+
+func (d *DebugTime) Print() {
+	fmt.Println("总的交易数目", d.TxLen)
+
+	fmt.Println("执行区块用时", d.ExecuteTx)
+	fmt.Println("验证区块用时", d.ValidateBlock)
+	fmt.Println("写入区块用时", d.WriteBlock)
+	fmt.Println("写入trie用时", d.CommitTrie)
+}
+
+var (
+	DebugInfo         = NewDebugTime()
+	BlockExecuteBatch = int(1)
+)
