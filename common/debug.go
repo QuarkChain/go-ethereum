@@ -22,6 +22,7 @@ import (
 	"runtime"
 	"runtime/debug"
 	"strings"
+	"time"
 )
 
 // Report gives off a warning requesting the user to submit an issue to the github tracker.
@@ -50,3 +51,34 @@ func PrintDepricationWarning(str string) {
 
 `, line, emptyLine, str, emptyLine, line)
 }
+
+type DebugTime struct {
+	ExecuteTx     time.Duration
+	ValidateBlock time.Duration
+	WriteBlock    time.Duration
+	CommitTrie    time.Duration
+	TxLen         int
+}
+
+func NewDebugTime() *DebugTime {
+	d := &DebugTime{
+		TxLen:         0,
+		ExecuteTx:     time.Duration(0),
+		ValidateBlock: time.Duration(0),
+		WriteBlock:    time.Duration(0),
+		CommitTrie:    time.Duration(0),
+	}
+	return d
+}
+
+func (d *DebugTime) Print() {
+	fmt.Println("tx len", d.TxLen)
+	fmt.Println("process block time", d.ExecuteTx)
+	fmt.Println("validate block time", d.ValidateBlock)
+	fmt.Println("write block time", d.WriteBlock)
+	fmt.Println("write trie time", d.CommitTrie)
+}
+
+var (
+	DebugInfo = NewDebugTime()
+)

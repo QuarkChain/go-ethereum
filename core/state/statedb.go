@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"math/big"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -62,8 +63,9 @@ func (n *proofList) Delete(key []byte) error {
 // * Contracts
 // * Accounts
 type StateDB struct {
-	db   Database
-	trie Trie
+	OrigForCalAccessList *OriginStorage
+	db                   Database
+	trie                 Trie
 
 	snaps         *snapshot.Tree
 	snap          snapshot.Snapshot
@@ -120,15 +122,16 @@ func New(root common.Hash, db Database, snaps *snapshot.Tree) (*StateDB, error) 
 		return nil, err
 	}
 	sdb := &StateDB{
-		db:                  db,
-		trie:                tr,
-		snaps:               snaps,
-		stateObjects:        make(map[common.Address]*stateObject),
-		stateObjectsPending: make(map[common.Address]struct{}),
-		stateObjectsDirty:   make(map[common.Address]struct{}),
-		logs:                make(map[common.Hash][]*types.Log),
-		preimages:           make(map[common.Hash][]byte),
-		journal:             newJournal(),
+		OrigForCalAccessList: NewOriginStorage(),
+		db:                   db,
+		trie:                 tr,
+		snaps:                snaps,
+		stateObjects:         make(map[common.Address]*stateObject),
+		stateObjectsPending:  make(map[common.Address]struct{}),
+		stateObjectsDirty:    make(map[common.Address]struct{}),
+		logs:                 make(map[common.Hash][]*types.Log),
+		preimages:            make(map[common.Hash][]byte),
+		journal:              newJournal(),
 	}
 	if sdb.snaps != nil {
 		if sdb.snap = sdb.snaps.Snapshot(root); sdb.snap != nil {
@@ -492,6 +495,28 @@ func (s *StateDB) getStateObject(addr common.Address) *stateObject {
 	return nil
 }
 
+func (s *StateDB) getStateObjectFromDB(addr common.Address) *stateObject {
+	var (
+		data *Account
+		err  error
+	)
+
+	enc, err := s.trie.TryGet(addr.Bytes())
+	if err != nil {
+		s.setError(fmt.Errorf("getDeleteStateObject (%x) error: %v", addr.Bytes(), err))
+		return nil
+	}
+	if len(enc) == 0 {
+		return nil
+	}
+	data = new(Account)
+	if err := rlp.DecodeBytes(enc, data); err != nil {
+		log.Error("Failed to decode state object", "addr", addr, "err", err)
+		return nil
+	}
+	return newObject(s, addr, *data)
+}
+
 // getDeletedStateObject is similar to getStateObject, but instead of returning
 // nil for a deleted state object, it returns the actual object with the deleted
 // flag set. This is needed by the state journal to revert to the correct s-
@@ -555,7 +580,58 @@ func (s *StateDB) getDeletedStateObject(addr common.Address) *stateObject {
 }
 
 func (s *StateDB) setStateObject(object *stateObject) {
+	s.OrigForCalAccessList.SetAccount(object.address)
 	s.stateObjects[object.Address()] = object
+}
+
+// PreLoadAccount: preload account from access list
+func (s *StateDB) PreLoadAccount(addresses []common.Address) {
+	ll := len(addresses)
+	var g sync.WaitGroup
+	res := make(chan *stateObject, ll)
+	g.Add(ll)
+	for _, addr := range addresses {
+		addr := addr
+		go func() {
+			defer g.Done()
+			res <- s.getStateObjectFromDB(addr)
+		}()
+	}
+	g.Wait()
+	for index := 0; index < ll; index++ {
+		v := <-res
+		if v != nil {
+			s.stateObjects[v.address] = v
+			v.getTrie(s.db)
+		}
+	}
+	close(res)
+}
+
+// PreLoadStorage:preLoad storage from access list
+func (s *StateDB) PreLoadStorage(addrs []common.Address, hashes []common.Hash) {
+	lenStorage := len(addrs)
+	var g sync.WaitGroup
+
+	g.Add(lenStorage)
+	batch := 64
+	if lenStorage < batch {
+		batch = lenStorage
+	}
+	for index := 0; index < batch; index++ {
+		start := index
+		go func() {
+			for i := start; i < lenStorage; i += batch {
+				obj := s.getStateObject(addrs[i])
+				if obj != nil {
+					obj.preLoadCommittedStateFromDB(s.db, hashes[i])
+				}
+				g.Done()
+			}
+		}()
+	}
+	g.Wait()
+
 }
 
 // GetOrNewStateObject retrieves a state object or create a new state object if nil.

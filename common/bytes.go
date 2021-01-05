@@ -17,7 +17,10 @@
 // Package common contains various helper functions.
 package common
 
-import "encoding/hex"
+import (
+	"encoding/binary"
+	"encoding/hex"
+)
 
 // ToHex returns the hex representation of b, prefixed with '0x'.
 // For empty slices, the return value is "0x0".
@@ -155,4 +158,22 @@ func TrimRightZeroes(s []byte) []byte {
 		}
 	}
 	return s[:idx]
+}
+
+func Uint64ToBytes(n uint64) []byte {
+	Bytes := make([]byte, 8)
+	binary.BigEndian.PutUint64(Bytes, n)
+	return Bytes
+}
+
+var (
+	// CalAccessList
+	//		true:generate access list
+	//		false:use access list
+	CalAccessList = false
+)
+
+type AccessList struct {
+	Address Address
+	Hashs   []Hash
 }

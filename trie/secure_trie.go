@@ -181,12 +181,13 @@ func (t *SecureTrie) NodeIterator(start []byte) NodeIterator {
 // The caller must not hold onto the return value because it will become
 // invalid on the next call to hashKey or secKey.
 func (t *SecureTrie) hashKey(key []byte) []byte {
+	var hashKeyBuf [common.HashLength]byte
 	h := newHasher(false)
 	h.sha.Reset()
 	h.sha.Write(key)
-	h.sha.Read(t.hashKeyBuf[:])
+	h.sha.Read(hashKeyBuf[:])
 	returnHasherToPool(h)
-	return t.hashKeyBuf[:]
+	return hashKeyBuf[:]
 }
 
 // getSecKeyCache returns the current secure key cache, creating a new one if

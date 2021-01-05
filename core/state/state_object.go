@@ -18,16 +18,86 @@ package state
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
-	"io"
-	"math/big"
-	"time"
-
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/ethdb/leveldb"
 	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/rlp"
+	"io"
+	"math/big"
+	"sync"
+	"time"
 )
+
+var (
+	// AccessListDB: store generated data(key:blockNumber  value:access list)
+	AccessListDB, _ = leveldb.New("./accessList_eth", 512, 512, "")
+
+	// BlockNumToAccessList: Preprocess the access list corresponding to the block
+	BlockNumToAccessList = make(map[int][]common.AccessList, 0)
+)
+
+func init() {
+	if common.CalAccessList {
+		return
+	}
+
+	// import block from 800w to 820w
+	start := 8000000
+	end := 8200000
+
+	fmt.Println("preLoad access list", "from", start, "to", end)
+	for index := start; index <= end; index++ {
+		data, err := AccessListDB.Get(common.Uint64ToBytes(uint64(index)))
+		list := make([]common.AccessList, 0)
+		if len(data) == 0 || err != nil {
+
+		} else {
+			if err := json.Unmarshal(data, &list); err != nil {
+				panic(err)
+			}
+		}
+		BlockNumToAccessList[index] = list
+	}
+	fmt.Println("preLoad access list", "size", len(BlockNumToAccessList))
+}
+
+type OriginStorage struct {
+	Data map[common.Address]Storage
+	mu   sync.Mutex
+}
+
+func NewOriginStorage() *OriginStorage {
+	return &OriginStorage{
+		Data: make(map[common.Address]Storage, 0),
+	}
+}
+
+func (o *OriginStorage) SetAccount(addr common.Address) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if _, ok := o.Data[addr]; !ok {
+		o.Data[addr] = make(Storage)
+	}
+}
+
+func (o *OriginStorage) SetOrigin(addr common.Address, key, value common.Hash) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if _, ok := o.Data[addr]; !ok {
+		o.Data[addr] = make(Storage)
+	}
+	o.Data[addr][key] = value
+}
+
+func (o *OriginStorage) GetData(addr common.Address, hash common.Hash) common.Hash {
+	if _, ok := o.Data[addr]; !ok {
+		return common.Hash{}
+	}
+	return o.Data[addr][hash]
+}
 
 var emptyCodeHash = crypto.Keccak256(nil)
 
@@ -182,6 +252,17 @@ func (s *stateObject) GetState(db Database, key common.Hash) common.Hash {
 	return s.GetCommittedState(db, key)
 }
 
+func (s *stateObject) preLoadCommittedStateFromDB(db Database, key common.Hash) {
+	t := s.getTrie(db)
+	enc, _ := t.TryGet(key.Bytes())
+	var value common.Hash
+	if len(enc) > 0 {
+		_, content, _, _ := rlp.Split(enc)
+		value.SetBytes(content)
+	}
+	s.db.OrigForCalAccessList.SetOrigin(s.address, key, value)
+}
+
 // GetCommittedState retrieves a value from the committed account storage trie.
 func (s *stateObject) GetCommittedState(db Database, key common.Hash) common.Hash {
 	// If the fake storage is set, only lookup the state here(in the debugging mode)
@@ -195,6 +276,13 @@ func (s *stateObject) GetCommittedState(db Database, key common.Hash) common.Has
 	if value, cached := s.originStorage[key]; cached {
 		return value
 	}
+
+	if !common.CalAccessList {
+		load := s.db.OrigForCalAccessList.GetData(s.address, key)
+		s.originStorage[key] = load
+		return load
+	}
+
 	// If no live objects are available, attempt to use snapshots
 	var (
 		enc []byte
@@ -222,6 +310,7 @@ func (s *stateObject) GetCommittedState(db Database, key common.Hash) common.Has
 		}
 		if enc, err = s.getTrie(db).TryGet(key.Bytes()); err != nil {
 			s.setError(err)
+			s.db.OrigForCalAccessList.SetOrigin(s.address, key, common.Hash{})
 			return common.Hash{}
 		}
 	}
@@ -234,6 +323,7 @@ func (s *stateObject) GetCommittedState(db Database, key common.Hash) common.Has
 		value.SetBytes(content)
 	}
 	s.originStorage[key] = value
+	s.db.OrigForCalAccessList.SetOrigin(s.address, key, common.Hash{})
 	return value
 }
 

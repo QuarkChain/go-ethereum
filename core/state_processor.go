@@ -17,6 +17,7 @@
 package core
 
 import (
+	"encoding/json"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/consensus/misc"
@@ -65,6 +66,23 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 	if p.config.DAOForkSupport && p.config.DAOForkBlock != nil && p.config.DAOForkBlock.Cmp(block.Number()) == 0 {
 		misc.ApplyDAOHardFork(statedb)
 	}
+	if !common.CalAccessList {
+		accessList := state.BlockNumToAccessList[int(block.NumberU64())]
+		if len(accessList) != 0 {
+			storagePairAddr := make([]common.Address, 0)
+			storagePairHash := make([]common.Hash, 0)
+			addresses := make([]common.Address, 0)
+			for _, v := range accessList {
+				addresses = append(addresses, v.Address)
+				for _, hash := range v.Hashs {
+					storagePairAddr = append(storagePairAddr, v.Address)
+					storagePairHash = append(storagePairHash, hash)
+				}
+			}
+			statedb.PreLoadAccount(addresses)
+			statedb.PreLoadStorage(storagePairAddr, storagePairHash)
+		}
+	}
 	// Iterate over and process the individual transactions
 	for i, tx := range block.Transactions() {
 		statedb.Prepare(tx.Hash(), block.Hash(), i)
@@ -78,6 +96,28 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
 	p.engine.Finalize(p.bc, header, statedb, block.Transactions(), block.Uncles())
 
+	if common.CalAccessList {
+		accessList := make([]common.AccessList, 0)
+		for addr, sts := range statedb.OrigForCalAccessList.Data {
+			t := common.AccessList{
+				Address: addr,
+				Hashs:   make([]common.Hash, 0),
+			}
+			for key, _ := range sts {
+				t.Hashs = append(t.Hashs, key)
+			}
+			accessList = append(accessList, t)
+		}
+		if len(accessList) != 0 {
+			data, err := json.Marshal(accessList)
+			if err != nil {
+				panic(err)
+			}
+			if err := state.AccessListDB.Put(common.Uint64ToBytes(block.NumberU64()), data); err != nil {
+				panic(err)
+			}
+		}
+	}
 	return receipts, allLogs, *usedGas, nil
 }
 
