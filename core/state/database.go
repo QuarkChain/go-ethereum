@@ -17,6 +17,7 @@
 package state
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
 
@@ -43,6 +44,8 @@ type Database interface {
 
 	// OpenStorageTrie opens the storage trie of an account.
 	OpenStorageTrie(addrHash, root common.Hash) (Trie, error)
+
+	OpenStorageTrieNew(address common.Address, incarnation uint64) (Trie, error)
 
 	// CopyTrie returns an independent copy of the given trie.
 	CopyTrie(Trie) Trie
@@ -129,12 +132,27 @@ type cachingDB struct {
 
 // OpenTrie opens the main account trie at a specific root hash.
 func (db *cachingDB) OpenTrie(root common.Hash) (Trie, error) {
+	if common.FastDBMode {
+		return trie.NewFastDB(db.db), nil
+	}
 	return trie.NewSecure(root, db.db)
 }
 
 // OpenStorageTrie opens the storage trie of an account.
 func (db *cachingDB) OpenStorageTrie(addrHash, root common.Hash) (Trie, error) {
+	if common.FastDBMode {
+		panic("unsupported")
+	}
 	return trie.NewSecure(root, db.db)
+}
+
+func (db *cachingDB) OpenStorageTrieNew(address common.Address, incarnation uint64) (Trie, error) {
+	prefix := make([]byte, len(address)+1+8+1)
+	copy(prefix, address[:])
+	prefix[len(address)] = '/'
+	binary.PutUvarint(prefix[len(address)+1:], incarnation)
+	prefix[len(prefix)-1] = '/'
+	return trie.NewFastDBWithPrefix(db.db, prefix), nil
 }
 
 // CopyTrie returns an independent copy of the given trie.

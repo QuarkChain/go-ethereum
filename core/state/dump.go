@@ -123,9 +123,9 @@ func (s *StateDB) DumpToCollector(c DumpCollector, excludeCode, excludeStorage, 
 			panic(err)
 		}
 		account := DumpAccount{
-			Balance:  data.Balance.String(),
-			Nonce:    data.Nonce,
-			Root:     common.Bytes2Hex(data.Root[:]),
+			Balance: data.Balance.String(),
+			Nonce:   data.Nonce,
+			//Root:     common.Bytes2Hex(data.Root[:]),
 			CodeHash: common.Bytes2Hex(data.CodeHash),
 		}
 		addrBytes := s.trie.GetKey(it.Key)

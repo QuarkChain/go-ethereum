@@ -77,6 +77,7 @@ The dumpgenesis command dumps the genesis block configuration in JSON format to 
 		ArgsUsage: "<filename> (<filename 2> ... <filename N>) ",
 		Flags: []cli.Flag{
 			utils.DataDirFlag,
+			utils.IsFastDBMOde,
 			utils.CacheFlag,
 			utils.SyncModeFlag,
 			utils.GCModeFlag,
@@ -280,7 +281,8 @@ func importChain(ctx *cli.Context) error {
 
 	stack, _ := makeConfigNode(ctx)
 	defer stack.Close()
-
+	common.FastDBMode = ctx.GlobalBool(utils.IsFastDBMOde.Name)
+	fmt.Println("=========IsFastMode============", common.FastDBMode)
 	chain, db := utils.MakeChain(ctx, stack, false)
 	defer db.Close()
 

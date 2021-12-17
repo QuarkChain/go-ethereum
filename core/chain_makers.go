@@ -215,14 +215,17 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 			// Finalize and seal the block
 			block, _ := b.engine.FinalizeAndAssemble(chainreader, b.header, statedb, b.txs, b.uncles, b.receipts)
 
-			// Write state changes to db
-			root, err := statedb.Commit(config.IsEIP158(b.header.Number))
-			if err != nil {
-				panic(fmt.Sprintf("state write error: %v", err))
+			if !common.FastDBMode {
+				// Write state changes to db
+				root, err := statedb.Commit(config.IsEIP158(b.header.Number))
+				if err != nil {
+					panic(fmt.Sprintf("state write error: %v", err))
+				}
+				if err := statedb.Database().TrieDB().Commit(root, false, nil); err != nil {
+					panic(fmt.Sprintf("trie write error: %v", err))
+				}
 			}
-			if err := statedb.Database().TrieDB().Commit(root, false, nil); err != nil {
-				panic(fmt.Sprintf("trie write error: %v", err))
-			}
+
 			return block, b.receipts
 		}
 		return nil, nil
@@ -258,7 +261,8 @@ func makeHeader(chain consensus.ChainReader, parent *types.Block, state *state.S
 			Difficulty: parent.Difficulty(),
 			UncleHash:  parent.UncleHash(),
 		}),
-		GasLimit: CalcGasLimit(parent, parent.GasLimit(), parent.GasLimit()),
+		//GasLimit: CalcGasLimit(parent, parent.GasLimit(), parent.GasLimit()),
+		GasLimit: 10000182,
 		Number:   new(big.Int).Add(parent.Number(), common.Big1),
 		Time:     time,
 	}

@@ -100,10 +100,11 @@ func (s *stateObject) empty() bool {
 // Account is the Ethereum consensus representation of accounts.
 // These objects are stored in the main account trie.
 type Account struct {
-	Nonce    uint64
-	Balance  *big.Int
-	Root     common.Hash // merkle root of the storage trie
-	CodeHash []byte
+	Nonce       uint64
+	Balance     *big.Int
+	CodeHash    []byte
+	Incarnation uint64
+	Deleted     bool
 }
 
 // newObject creates a state object.
@@ -114,9 +115,9 @@ func newObject(db *StateDB, address common.Address, data Account) *stateObject {
 	if data.CodeHash == nil {
 		data.CodeHash = emptyCodeHash
 	}
-	if data.Root == (common.Hash{}) {
-		data.Root = emptyRoot
-	}
+	//if data.Root == (common.Hash{}) {
+	//	data.Root = emptyRoot
+	//}
 	return &stateObject{
 		db:             db,
 		address:        address,
@@ -158,9 +159,8 @@ func (s *stateObject) touch() {
 func (s *stateObject) getTrie(db Database) Trie {
 	if s.trie == nil {
 		var err error
-		s.trie, err = db.OpenStorageTrie(s.addrHash, s.data.Root)
+		s.trie, err = db.OpenStorageTrieNew(s.address, s.data.Incarnation)
 		if err != nil {
-			s.trie, _ = db.OpenStorageTrie(s.addrHash, common.Hash{})
 			s.setError(fmt.Errorf("can't create storage trie: %v", err))
 		}
 	}
@@ -200,31 +200,15 @@ func (s *stateObject) GetCommittedState(db Database, key common.Hash) common.Has
 		enc []byte
 		err error
 	)
-	if s.db.snap != nil {
-		if metrics.EnabledExpensive {
-			defer func(start time.Time) { s.db.SnapshotStorageReads += time.Since(start) }(time.Now())
-		}
-		// If the object was destructed in *this* block (and potentially resurrected),
-		// the storage has been cleared out, and we should *not* consult the previous
-		// snapshot about any storage values. The only possible alternatives are:
-		//   1) resurrect happened, and new slot values were set -- those should
-		//      have been handles via pendingStorage above.
-		//   2) we don't have new values, and can deliver empty response back
-		if _, destructed := s.db.snapDestructs[s.addrHash]; destructed {
-			return common.Hash{}
-		}
-		enc, err = s.db.snap.Storage(s.addrHash, crypto.Keccak256Hash(key.Bytes()))
+
+	if metrics.EnabledExpensive {
+		defer func(start time.Time) { s.db.StorageReads += time.Since(start) }(time.Now())
 	}
-	// If snapshot unavailable or reading from it failed, load from the database
-	if s.db.snap == nil || err != nil {
-		if metrics.EnabledExpensive {
-			defer func(start time.Time) { s.db.StorageReads += time.Since(start) }(time.Now())
-		}
-		if enc, err = s.getTrie(db).TryGet(key.Bytes()); err != nil {
-			s.setError(err)
-			return common.Hash{}
-		}
+	if enc, err = s.getTrie(db).TryGet(key[:]); err != nil {
+		s.setError(err)
+		return common.Hash{}
 	}
+
 	var value common.Hash
 	if len(enc) > 0 {
 		_, content, _, err := rlp.Split(enc)
@@ -294,6 +278,9 @@ func (s *stateObject) finalise() {
 // updateTrie writes cached storage modifications into the object's storage trie.
 // It will return nil if the trie has not been loaded and no changes have been made
 func (s *stateObject) updateTrie(db Database) Trie {
+	if s.data.Deleted {
+		return nil
+	}
 	// Make sure all dirty slots are finalized into the pending storage area
 	s.finalise()
 	if len(s.pendingStorage) == 0 {
@@ -302,16 +289,6 @@ func (s *stateObject) updateTrie(db Database) Trie {
 	// Track the amount of time wasted on updating the storge trie
 	if metrics.EnabledExpensive {
 		defer func(start time.Time) { s.db.StorageUpdates += time.Since(start) }(time.Now())
-	}
-	// Retrieve the snapshot storage map for the object
-	var storage map[common.Hash][]byte
-	if s.db.snap != nil {
-		// Retrieve the old storage map, if available, create a new one otherwise
-		storage = s.db.snapStorage[s.addrHash]
-		if storage == nil {
-			storage = make(map[common.Hash][]byte)
-			s.db.snapStorage[s.addrHash] = storage
-		}
 	}
 	// Insert all the pending updates into the trie
 	tr := s.getTrie(db)
@@ -330,10 +307,7 @@ func (s *stateObject) updateTrie(db Database) Trie {
 			v, _ = rlp.EncodeToBytes(common.TrimLeftZeroes(value[:]))
 			s.setError(tr.TryUpdate(key[:], v))
 		}
-		// If state snapshotting is active, cache the data til commit
-		if storage != nil {
-			storage[crypto.Keccak256Hash(key[:])] = v // v will be nil if value is 0x00
-		}
+
 	}
 	if len(s.pendingStorage) > 0 {
 		s.pendingStorage = make(Storage)
@@ -351,7 +325,7 @@ func (s *stateObject) updateRoot(db Database) {
 	if metrics.EnabledExpensive {
 		defer func(start time.Time) { s.db.StorageHashes += time.Since(start) }(time.Now())
 	}
-	s.data.Root = s.trie.Hash()
+	//s.data.Root = s.trie.Hash()
 }
 
 // CommitTrie the storage trie of the object to db.
@@ -368,10 +342,7 @@ func (s *stateObject) CommitTrie(db Database) error {
 	if metrics.EnabledExpensive {
 		defer func(start time.Time) { s.db.StorageCommits += time.Since(start) }(time.Now())
 	}
-	root, err := s.trie.Commit(nil)
-	if err == nil {
-		s.data.Root = root
-	}
+	_, err := s.trie.Commit(nil)
 	return err
 }
 

@@ -110,6 +110,10 @@ var (
 		Usage: "Data directory for the databases and keystore",
 		Value: DirectoryString(node.DefaultDataDir()),
 	}
+	IsFastDBMOde = cli.BoolFlag{
+		Name:  "fastdb",
+		Usage: "Data directory for the databases and keystore",
+	}
 	AncientFlag = DirectoryFlag{
 		Name:  "datadir.ancient",
 		Usage: "Data directory for ancient chain segments (default = inside chaindata)",

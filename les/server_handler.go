@@ -639,15 +639,15 @@ func (h *serverHandler) handleMsg(p *clientPeer, wg *sync.WaitGroup) error {
 						}
 					default:
 						// Account key specified, open a storage trie
-						account, err := h.getAccount(statedb.TrieDB(), root, common.BytesToHash(request.AccKey))
+						//account, err := h.getAccount(statedb.TrieDB(), root, common.BytesToHash(request.AccKey))
 						if err != nil {
 							p.Log().Warn("Failed to retrieve account for proof", "block", header.Number, "hash", header.Hash(), "account", common.BytesToHash(request.AccKey), "err", err)
 							p.bumpInvalid()
 							continue
 						}
-						trie, err = statedb.OpenStorageTrie(common.BytesToHash(request.AccKey), account.Root)
+						trie, err = statedb.OpenStorageTrie(common.BytesToHash(request.AccKey), common.Hash{})
 						if trie == nil || err != nil {
-							p.Log().Warn("Failed to open storage trie for proof", "block", header.Number, "hash", header.Hash(), "account", common.BytesToHash(request.AccKey), "root", account.Root, "err", err)
+							p.Log().Warn("Failed to open storage trie for proof", "block", header.Number, "hash", header.Hash(), "account", common.BytesToHash(request.AccKey), "root", common.Hash{}, "err", err)
 							continue
 						}
 					}

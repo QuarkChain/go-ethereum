@@ -53,6 +53,10 @@ func (db *odrDatabase) OpenStorageTrie(addrHash, root common.Hash) (state.Trie, 
 	return &odrTrie{db: db, id: StorageTrieID(db.id, addrHash, root)}, nil
 }
 
+func (db *odrDatabase) OpenStorageTrieNew(address common.Address, incarnation uint64) (state.Trie, error) {
+	panic("unsupported")
+}
+
 func (db *odrDatabase) CopyTrie(t state.Trie) state.Trie {
 	switch t := t.(type) {
 	case *odrTrie:
