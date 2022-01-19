@@ -206,16 +206,11 @@ func missingBlocks(chain *core.BlockChain, blocks []*types.Block) []*types.Block
 	head := chain.CurrentBlock()
 	for i, block := range blocks {
 		// If we're behind the chain head, only check block, state is available at head
-		if head.NumberU64() > block.NumberU64() {
-			if !chain.HasBlock(block.Hash(), block.NumberU64()) {
-				return blocks[i:]
-			}
+		if head.NumberU64() >= block.NumberU64() {
 			continue
 		}
 		// If we're above the chain head, state availability is a must
-		if !chain.HasBlockAndState(block.Hash(), block.NumberU64()) {
-			return blocks[i:]
-		}
+		return blocks[i:]
 	}
 	return nil
 }

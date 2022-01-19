@@ -21,7 +21,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"math/big"
 	"sort"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -200,66 +199,6 @@ func WriteHeadBlockHash(db ethdb.KeyValueWriter, hash common.Hash) {
 	}
 }
 
-// ReadHeadFastBlockHash retrieves the hash of the current fast-sync head block.
-func ReadHeadFastBlockHash(db ethdb.KeyValueReader) common.Hash {
-	data, _ := db.Get(headFastBlockKey)
-	if len(data) == 0 {
-		return common.Hash{}
-	}
-	return common.BytesToHash(data)
-}
-
-// WriteHeadFastBlockHash stores the hash of the current fast-sync head block.
-func WriteHeadFastBlockHash(db ethdb.KeyValueWriter, hash common.Hash) {
-	if err := db.Put(headFastBlockKey, hash.Bytes()); err != nil {
-		log.Crit("Failed to store last fast block's hash", "err", err)
-	}
-}
-
-// ReadLastPivotNumber retrieves the number of the last pivot block. If the node
-// full synced, the last pivot will always be nil.
-func ReadLastPivotNumber(db ethdb.KeyValueReader) *uint64 {
-	data, _ := db.Get(lastPivotKey)
-	if len(data) == 0 {
-		return nil
-	}
-	var pivot uint64
-	if err := rlp.DecodeBytes(data, &pivot); err != nil {
-		log.Error("Invalid pivot block number in database", "err", err)
-		return nil
-	}
-	return &pivot
-}
-
-// WriteLastPivotNumber stores the number of the last pivot block.
-func WriteLastPivotNumber(db ethdb.KeyValueWriter, pivot uint64) {
-	enc, err := rlp.EncodeToBytes(pivot)
-	if err != nil {
-		log.Crit("Failed to encode pivot block number", "err", err)
-	}
-	if err := db.Put(lastPivotKey, enc); err != nil {
-		log.Crit("Failed to store pivot block number", "err", err)
-	}
-}
-
-// ReadFastTrieProgress retrieves the number of tries nodes fast synced to allow
-// reporting correct numbers across restarts.
-func ReadFastTrieProgress(db ethdb.KeyValueReader) uint64 {
-	data, _ := db.Get(fastTrieProgressKey)
-	if len(data) == 0 {
-		return 0
-	}
-	return new(big.Int).SetBytes(data).Uint64()
-}
-
-// WriteFastTrieProgress stores the fast sync trie process counter to support
-// retrieving it across restarts.
-func WriteFastTrieProgress(db ethdb.KeyValueWriter, count uint64) {
-	if err := db.Put(fastTrieProgressKey, new(big.Int).SetUint64(count).Bytes()); err != nil {
-		log.Crit("Failed to store fast sync trie progress", "err", err)
-	}
-}
-
 // ReadTxIndexTail retrieves the number of oldest indexed block
 // whose transaction indices has been indexed. If the corresponding entry
 // is non-existent in database it means the indexing has been finished.
@@ -340,43 +279,6 @@ func ReadHeader(db ethdb.Reader, hash common.Hash, number uint64) *types.Header 
 	return header
 }
 
-// WriteHeader stores a block header into the database and also stores the hash-
-// to-number mapping.
-func WriteHeader(db ethdb.KeyValueWriter, header *types.Header) {
-	var (
-		hash   = header.Hash()
-		number = header.Number.Uint64()
-	)
-	// Write the hash -> number mapping
-	WriteHeaderNumber(db, hash, number)
-
-	// Write the encoded header
-	data, err := rlp.EncodeToBytes(header)
-	if err != nil {
-		log.Crit("Failed to RLP encode header", "err", err)
-	}
-	key := headerKey(number, hash)
-	if err := db.Put(key, data); err != nil {
-		log.Crit("Failed to store header", "err", err)
-	}
-}
-
-// DeleteHeader removes all block header data associated with a hash.
-func DeleteHeader(db ethdb.KeyValueWriter, hash common.Hash, number uint64) {
-	deleteHeaderWithoutNumber(db, hash, number)
-	if err := db.Delete(headerNumberKey(hash)); err != nil {
-		log.Crit("Failed to delete hash to number mapping", "err", err)
-	}
-}
-
-// deleteHeaderWithoutNumber removes only the block header but does not remove
-// the hash to number mapping.
-func deleteHeaderWithoutNumber(db ethdb.KeyValueWriter, hash common.Hash, number uint64) {
-	if err := db.Delete(headerKey(number, hash)); err != nil {
-		log.Crit("Failed to delete header", "err", err)
-	}
-}
-
 // isCanon is an internal utility method, to check whether the given number/hash
 // is part of the ancient (canon) set.
 func isCanon(reader ethdb.AncientReader, number uint64, hash common.Hash) bool {
@@ -422,13 +324,6 @@ func ReadCanonicalBodyRLP(db ethdb.Reader, number uint64) rlp.RawValue {
 	return data
 }
 
-// WriteBodyRLP stores an RLP encoded block body into the database.
-func WriteBodyRLP(db ethdb.KeyValueWriter, hash common.Hash, number uint64, rlp rlp.RawValue) {
-	if err := db.Put(blockBodyKey(number, hash), rlp); err != nil {
-		log.Crit("Failed to store block body", "err", err)
-	}
-}
-
 // HasBody verifies the existence of a block body corresponding to the hash.
 func HasBody(db ethdb.Reader, hash common.Hash, number uint64) bool {
 	if isCanon(db, number, hash) {
@@ -452,70 +347,6 @@ func ReadBody(db ethdb.Reader, hash common.Hash, number uint64) *types.Body {
 		return nil
 	}
 	return body
-}
-
-// WriteBody stores a block body into the database.
-func WriteBody(db ethdb.KeyValueWriter, hash common.Hash, number uint64, body *types.Body) {
-	data, err := rlp.EncodeToBytes(body)
-	if err != nil {
-		log.Crit("Failed to RLP encode body", "err", err)
-	}
-	WriteBodyRLP(db, hash, number, data)
-}
-
-// DeleteBody removes all block body data associated with a hash.
-func DeleteBody(db ethdb.KeyValueWriter, hash common.Hash, number uint64) {
-	if err := db.Delete(blockBodyKey(number, hash)); err != nil {
-		log.Crit("Failed to delete block body", "err", err)
-	}
-}
-
-// ReadTdRLP retrieves a block's total difficulty corresponding to the hash in RLP encoding.
-func ReadTdRLP(db ethdb.Reader, hash common.Hash, number uint64) rlp.RawValue {
-	var data []byte
-	db.ReadAncients(func(reader ethdb.AncientReader) error {
-		// Check if the data is in ancients
-		if isCanon(reader, number, hash) {
-			data, _ = reader.Ancient(freezerDifficultyTable, number)
-			return nil
-		}
-		// If not, try reading from leveldb
-		data, _ = db.Get(headerTDKey(number, hash))
-		return nil
-	})
-	return data
-}
-
-// ReadTd retrieves a block's total difficulty corresponding to the hash.
-func ReadTd(db ethdb.Reader, hash common.Hash, number uint64) *big.Int {
-	data := ReadTdRLP(db, hash, number)
-	if len(data) == 0 {
-		return nil
-	}
-	td := new(big.Int)
-	if err := rlp.Decode(bytes.NewReader(data), td); err != nil {
-		log.Error("Invalid block total difficulty RLP", "hash", hash, "err", err)
-		return nil
-	}
-	return td
-}
-
-// WriteTd stores the total difficulty of a block into the database.
-func WriteTd(db ethdb.KeyValueWriter, hash common.Hash, number uint64, td *big.Int) {
-	data, err := rlp.EncodeToBytes(td)
-	if err != nil {
-		log.Crit("Failed to RLP encode block total difficulty", "err", err)
-	}
-	if err := db.Put(headerTDKey(number, hash), data); err != nil {
-		log.Crit("Failed to store block total difficulty", "err", err)
-	}
-}
-
-// DeleteTd removes all block total difficulty data associated with a hash.
-func DeleteTd(db ethdb.KeyValueWriter, hash common.Hash, number uint64) {
-	if err := db.Delete(headerTDKey(number, hash)); err != nil {
-		log.Crit("Failed to delete block total difficulty", "err", err)
-	}
 }
 
 // HasReceipts verifies the existence of all the transaction receipts belonging
@@ -591,30 +422,6 @@ func ReadReceipts(db ethdb.Reader, hash common.Hash, number uint64, config *para
 		return nil
 	}
 	return receipts
-}
-
-// WriteReceipts stores all the transaction receipts belonging to a block.
-func WriteReceipts(db ethdb.KeyValueWriter, hash common.Hash, number uint64, receipts types.Receipts) {
-	// Convert the receipts into their storage form and serialize them
-	storageReceipts := make([]*types.ReceiptForStorage, len(receipts))
-	for i, receipt := range receipts {
-		storageReceipts[i] = (*types.ReceiptForStorage)(receipt)
-	}
-	bytes, err := rlp.EncodeToBytes(storageReceipts)
-	if err != nil {
-		log.Crit("Failed to encode block receipts", "err", err)
-	}
-	// Store the flattened receipt slice
-	if err := db.Put(blockReceiptsKey(number, hash), bytes); err != nil {
-		log.Crit("Failed to store block receipts", "err", err)
-	}
-}
-
-// DeleteReceipts removes all receipt data associated with a block hash.
-func DeleteReceipts(db ethdb.KeyValueWriter, hash common.Hash, number uint64) {
-	if err := db.Delete(blockReceiptsKey(number, hash)); err != nil {
-		log.Crit("Failed to delete block receipts", "err", err)
-	}
 }
 
 // storedReceiptRLP is the storage encoding of a receipt.
@@ -715,16 +522,9 @@ func ReadBlock(db ethdb.Reader, hash common.Hash, number uint64) *types.Block {
 	return types.NewBlockWithHeader(header).WithBody(body.Transactions, body.Uncles)
 }
 
-// WriteBlock serializes a block into the database, header and body separately.
-func WriteBlock(db ethdb.KeyValueWriter, block *types.Block) {
-	WriteBody(db, block.Hash(), block.NumberU64(), block.Body())
-	WriteHeader(db, block.Header())
-}
-
 // WriteAncientBlock writes entire block data into ancient store and returns the total written size.
-func WriteAncientBlocks(db ethdb.AncientWriter, blocks []*types.Block, receipts []types.Receipts, td *big.Int) (int64, error) {
+func WriteAncientBlocks(db ethdb.AncientWriter, blocks []*types.Block, receipts []types.Receipts) (int64, error) {
 	var (
-		tdSum      = new(big.Int).Set(td)
 		stReceipts []*types.ReceiptForStorage
 	)
 	return db.ModifyAncients(func(op ethdb.AncientWriteOp) error {
@@ -735,10 +535,7 @@ func WriteAncientBlocks(db ethdb.AncientWriter, blocks []*types.Block, receipts 
 				stReceipts = append(stReceipts, (*types.ReceiptForStorage)(receipt))
 			}
 			header := block.Header()
-			if i > 0 {
-				tdSum.Add(tdSum, header.Difficulty)
-			}
-			if err := writeAncientBlock(op, block, header, stReceipts, tdSum); err != nil {
+			if err := writeAncientBlock(op, block, header, stReceipts); err != nil {
 				return err
 			}
 		}
@@ -746,7 +543,7 @@ func WriteAncientBlocks(db ethdb.AncientWriter, blocks []*types.Block, receipts 
 	})
 }
 
-func writeAncientBlock(op ethdb.AncientWriteOp, block *types.Block, header *types.Header, receipts []*types.ReceiptForStorage, td *big.Int) error {
+func writeAncientBlock(op ethdb.AncientWriteOp, block *types.Block, header *types.Header, receipts []*types.ReceiptForStorage) error {
 	num := block.NumberU64()
 	if err := op.AppendRaw(freezerHashTable, num, block.Hash().Bytes()); err != nil {
 		return fmt.Errorf("can't add block %d hash: %v", num, err)
@@ -760,27 +557,7 @@ func writeAncientBlock(op ethdb.AncientWriteOp, block *types.Block, header *type
 	if err := op.Append(freezerReceiptTable, num, receipts); err != nil {
 		return fmt.Errorf("can't append block %d receipts: %v", num, err)
 	}
-	if err := op.Append(freezerDifficultyTable, num, td); err != nil {
-		return fmt.Errorf("can't append block %d total difficulty: %v", num, err)
-	}
 	return nil
-}
-
-// DeleteBlock removes all block data associated with a hash.
-func DeleteBlock(db ethdb.KeyValueWriter, hash common.Hash, number uint64) {
-	DeleteReceipts(db, hash, number)
-	DeleteHeader(db, hash, number)
-	DeleteBody(db, hash, number)
-	DeleteTd(db, hash, number)
-}
-
-// DeleteBlockWithoutNumber removes all block data associated with a hash, except
-// the hash to number mapping.
-func DeleteBlockWithoutNumber(db ethdb.KeyValueWriter, hash common.Hash, number uint64) {
-	DeleteReceipts(db, hash, number)
-	deleteHeaderWithoutNumber(db, hash, number)
-	DeleteBody(db, hash, number)
-	DeleteTd(db, hash, number)
 }
 
 const badBlockToKeep = 10

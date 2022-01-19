@@ -236,7 +236,7 @@ func init() {
 		// See cmd/utils/flags_legacy.go
 		utils.ShowDeprecated,
 		// See snapshot.go
-		snapshotCommand,
+		// snapshotCommand,
 	}
 	sort.Sort(cli.CommandsByName(app.Commands))
 

@@ -36,15 +36,6 @@ var (
 	// headBlockKey tracks the latest known full block's hash.
 	headBlockKey = []byte("LastBlock")
 
-	// headFastBlockKey tracks the latest known incomplete block's hash during fast sync.
-	headFastBlockKey = []byte("LastFast")
-
-	// lastPivotKey tracks the last pivot block used by fast sync (to reenable on sethead).
-	lastPivotKey = []byte("LastPivot")
-
-	// fastTrieProgressKey tracks the number of trie entries imported during fast sync.
-	fastTrieProgressKey = []byte("TrieSync")
-
 	// snapshotDisabledKey flags that the snapshot should not be maintained due to initial sync.
 	snapshotDisabledKey = []byte("SnapshotDisabled")
 
@@ -112,19 +103,15 @@ const (
 
 	// freezerReceiptTable indicates the name of the freezer receipts table.
 	freezerReceiptTable = "receipts"
-
-	// freezerDifficultyTable indicates the name of the freezer total difficulty table.
-	freezerDifficultyTable = "diffs"
 )
 
 // FreezerNoSnappy configures whether compression is disabled for the ancient-tables.
 // Hashes and difficulties don't compress well.
 var FreezerNoSnappy = map[string]bool{
-	freezerHeaderTable:     false,
-	freezerHashTable:       true,
-	freezerBodiesTable:     false,
-	freezerReceiptTable:    false,
-	freezerDifficultyTable: true,
+	freezerHeaderTable:  false,
+	freezerHashTable:    true,
+	freezerBodiesTable:  false,
+	freezerReceiptTable: false,
 }
 
 // LegacyTxLookupEntry is the legacy TxLookupEntry definition with some unnecessary

@@ -36,7 +36,6 @@ import (
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/log"
-	"github.com/ethereum/go-ethereum/trie"
 	"gopkg.in/urfave/cli.v1"
 )
 
@@ -458,52 +457,8 @@ func dbPut(ctx *cli.Context) error {
 
 // dbDumpTrie shows the key-value slots of a given storage trie
 func dbDumpTrie(ctx *cli.Context) error {
-	if ctx.NArg() < 1 {
-		return fmt.Errorf("required arguments: %v", ctx.Command.ArgsUsage)
-	}
-	stack, _ := makeConfigNode(ctx)
-	defer stack.Close()
-
-	db := utils.MakeChainDatabase(ctx, stack, true)
-	defer db.Close()
-	var (
-		root  []byte
-		start []byte
-		max   = int64(-1)
-		err   error
-	)
-	if root, err = hexutil.Decode(ctx.Args().Get(0)); err != nil {
-		log.Info("Could not decode the root", "error", err)
-		return err
-	}
-	stRoot := common.BytesToHash(root)
-	if ctx.NArg() >= 2 {
-		if start, err = hexutil.Decode(ctx.Args().Get(1)); err != nil {
-			log.Info("Could not decode the seek position", "error", err)
-			return err
-		}
-	}
-	if ctx.NArg() >= 3 {
-		if max, err = strconv.ParseInt(ctx.Args().Get(2), 10, 64); err != nil {
-			log.Info("Could not decode the max count", "error", err)
-			return err
-		}
-	}
-	theTrie, err := trie.New(stRoot, trie.NewDatabase(db))
-	if err != nil {
-		return err
-	}
-	var count int64
-	it := trie.NewIterator(theTrie.NodeIterator(start))
-	for it.Next() {
-		if max > 0 && count == max {
-			fmt.Printf("Exiting after %d values\n", count)
-			break
-		}
-		fmt.Printf("  %d. key %#x: %#x\n", count, it.Key, it.Value)
-		count++
-	}
-	return it.Err
+	// TODO: iterate the storage trie
+	panic("unsupported")
 }
 
 func freezerInspect(ctx *cli.Context) error {

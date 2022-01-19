@@ -651,52 +651,54 @@ type StorageResult struct {
 
 // GetProof returns the Merkle-proof for a given account and optionally some storage keys.
 func (s *PublicBlockChainAPI) GetProof(ctx context.Context, address common.Address, storageKeys []string, blockNrOrHash rpc.BlockNumberOrHash) (*AccountResult, error) {
-	state, _, err := s.b.StateAndHeaderByNumberOrHash(ctx, blockNrOrHash)
-	if state == nil || err != nil {
-		return nil, err
-	}
+	// FastDB doesn't support proof
+	return nil, fmt.Errorf("unsupported")
+	// state, _, err := s.b.StateAndHeaderByNumberOrHash(ctx, blockNrOrHash)
+	// if state == nil || err != nil {
+	// 	return nil, err
+	// }
 
-	storageTrie := state.StorageTrie(address)
-	storageHash := types.EmptyRootHash
-	codeHash := state.GetCodeHash(address)
-	storageProof := make([]StorageResult, len(storageKeys))
+	// storageTrie := state.StorageTrie(address)
+	// storageHash := types.EmptyRootHash
+	// codeHash := state.GetCodeHash(address)
+	// storageProof := make([]StorageResult, len(storageKeys))
 
-	// if we have a storageTrie, (which means the account exists), we can update the storagehash
-	if storageTrie != nil {
-		storageHash = storageTrie.Hash()
-	} else {
-		// no storageTrie means the account does not exist, so the codeHash is the hash of an empty bytearray.
-		codeHash = crypto.Keccak256Hash(nil)
-	}
+	// // if we have a storageTrie, (which means the account exists), we can update the storagehash
+	// if storageTrie != nil {
+	// 	storageHash = storageTrie.Hash()
+	// } else {
+	// 	// no storageTrie means the account does not exist, so the codeHash is the hash of an empty bytearray.
+	// 	codeHash = crypto.Keccak256Hash(nil)
+	// }
 
-	// create the proof for the storageKeys
-	for i, key := range storageKeys {
-		if storageTrie != nil {
-			proof, storageError := state.GetStorageProof(address, common.HexToHash(key))
-			if storageError != nil {
-				return nil, storageError
-			}
-			storageProof[i] = StorageResult{key, (*hexutil.Big)(state.GetState(address, common.HexToHash(key)).Big()), toHexSlice(proof)}
-		} else {
-			storageProof[i] = StorageResult{key, &hexutil.Big{}, []string{}}
-		}
-	}
+	// // create the proof for the storageKeys
+	// for i, key := range storageKeys {
+	// 	if storageTrie != nil {
+	// 		proof, storageError := state.GetStorageProof(address, common.HexToHash(key))
+	// 		if storageError != nil {
+	// 			return nil, storageError
+	// 		}
+	// 		storageProof[i] = StorageResult{key, (*hexutil.Big)(state.GetState(address, common.HexToHash(key)).Big()), toHexSlice(proof)}
+	// 	} else {
+	// 		storageProof[i] = StorageResult{key, &hexutil.Big{}, []string{}}
+	// 	}
+	// }
 
-	// create the accountProof
-	accountProof, proofErr := state.GetProof(address)
-	if proofErr != nil {
-		return nil, proofErr
-	}
+	// // create the accountProof
+	// accountProof, proofErr := state.GetProof(address)
+	// if proofErr != nil {
+	// 	return nil, proofErr
+	// }
 
-	return &AccountResult{
-		Address:      address,
-		AccountProof: toHexSlice(accountProof),
-		Balance:      (*hexutil.Big)(state.GetBalance(address)),
-		CodeHash:     codeHash,
-		Nonce:        hexutil.Uint64(state.GetNonce(address)),
-		StorageHash:  storageHash,
-		StorageProof: storageProof,
-	}, state.Error()
+	// return &AccountResult{
+	// 	Address:      address,
+	// 	AccountProof: toHexSlice(accountProof),
+	// 	Balance:      (*hexutil.Big)(state.GetBalance(address)),
+	// 	CodeHash:     codeHash,
+	// 	Nonce:        hexutil.Uint64(state.GetNonce(address)),
+	// 	StorageHash:  storageHash,
+	// 	StorageProof: storageProof,
+	// }, state.Error()
 }
 
 // GetHeaderByNumber returns the requested canonical block header.

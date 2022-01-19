@@ -308,11 +308,11 @@ func (api *API) traceChain(ctx context.Context, start, end *types.Block, config 
 
 	go func() {
 		var (
-			logged  time.Time
-			number  uint64
-			traced  uint64
-			failed  error
-			parent  common.Hash
+			logged time.Time
+			number uint64
+			traced uint64
+			failed error
+			// parent  common.Hash
 			statedb *state.StateDB
 		)
 		// Ensure everything is properly cleaned up on any exit path
@@ -340,12 +340,12 @@ func (api *API) traceChain(ctx context.Context, start, end *types.Block, config 
 			default:
 			}
 			// clean out any derefs
-			derefsMu.Lock()
-			for _, h := range derefTodo {
-				statedb.Database().TrieDB().Dereference(h)
-			}
-			derefTodo = derefTodo[:0]
-			derefsMu.Unlock()
+			// derefsMu.Lock()
+			// for _, h := range derefTodo {
+			// 	statedb.Database().TrieDB().Dereference(h)
+			// }
+			// derefTodo = derefTodo[:0]
+			// derefsMu.Unlock()
 
 			// Print progress logs if long enough time elapsed
 			if time.Since(logged) > 8*time.Second {
@@ -367,12 +367,12 @@ func (api *API) traceChain(ctx context.Context, start, end *types.Block, config 
 			}
 			if trieDb := statedb.Database().TrieDB(); trieDb != nil {
 				// Hold the reference for tracer, will be released at the final stage
-				trieDb.Reference(block.Root(), common.Hash{})
+				// trieDb.Reference(block.Root(), common.Hash{})
 
 				// Release the parent state because it's already held by the tracer
-				if parent != (common.Hash{}) {
-					trieDb.Dereference(parent)
-				}
+				// if parent != (common.Hash{}) {
+				// 	trieDb.Dereference(parent)
+				// }
 				// Prefer disk if the trie db memory grows too much
 				s1, s2 := trieDb.Size()
 				if !preferDisk && (s1+s2) > defaultTracechainMemLimit {
@@ -380,7 +380,7 @@ func (api *API) traceChain(ctx context.Context, start, end *types.Block, config 
 					preferDisk = true
 				}
 			}
-			parent = block.Root()
+			// parent = block.Root()
 
 			next, err := api.blockByNumber(localctx, rpc.BlockNumber(number+1))
 			if err != nil {

@@ -19,9 +19,7 @@ package trie
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
-	"sync"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -94,12 +92,6 @@ func New(root common.Hash, db *Database) (*Trie, error) {
 		trie.root = rootnode
 	}
 	return trie, nil
-}
-
-// NodeIterator returns an iterator that returns nodes of the trie. Iteration starts at
-// the key after the given start key.
-func (t *Trie) NodeIterator(start []byte) NodeIterator {
-	return newNodeIterator(t, start)
 }
 
 // Get returns the value for key stored in the trie.
@@ -176,64 +168,7 @@ func (t *Trie) TryGetNode(path []byte) ([]byte, int, error) {
 }
 
 func (t *Trie) tryGetNode(origNode node, path []byte, pos int) (item []byte, newnode node, resolved int, err error) {
-	// If non-existent path requested, abort
-	if origNode == nil {
-		return nil, nil, 0, nil
-	}
-	// If we reached the requested path, return the current node
-	if pos >= len(path) {
-		// Although we most probably have the original node expanded, encoding
-		// that into consensus form can be nasty (needs to cascade down) and
-		// time consuming. Instead, just pull the hash up from disk directly.
-		var hash hashNode
-		if node, ok := origNode.(hashNode); ok {
-			hash = node
-		} else {
-			hash, _ = origNode.cache()
-		}
-		if hash == nil {
-			return nil, origNode, 0, errors.New("non-consensus node")
-		}
-		blob, err := t.db.Node(common.BytesToHash(hash))
-		return blob, origNode, 1, err
-	}
-	// Path still needs to be traversed, descend into children
-	switch n := (origNode).(type) {
-	case valueNode:
-		// Path prematurely ended, abort
-		return nil, nil, 0, nil
-
-	case *shortNode:
-		if len(path)-pos < len(n.Key) || !bytes.Equal(n.Key, path[pos:pos+len(n.Key)]) {
-			// Path branches off from short node
-			return nil, n, 0, nil
-		}
-		item, newnode, resolved, err = t.tryGetNode(n.Val, path, pos+len(n.Key))
-		if err == nil && resolved > 0 {
-			n = n.copy()
-			n.Val = newnode
-		}
-		return item, n, resolved, err
-
-	case *fullNode:
-		item, newnode, resolved, err = t.tryGetNode(n.Children[path[pos]], path, pos+1)
-		if err == nil && resolved > 0 {
-			n = n.copy()
-			n.Children[path[pos]] = newnode
-		}
-		return item, n, resolved, err
-
-	case hashNode:
-		child, err := t.resolveHash(n, path[:pos])
-		if err != nil {
-			return nil, n, 1, err
-		}
-		item, newnode, resolved, err := t.tryGetNode(child, path, pos)
-		return item, newnode, resolved + 1, err
-
-	default:
-		panic(fmt.Sprintf("%T: invalid node: %v", origNode, origNode))
-	}
+	panic("unsupported")
 }
 
 // Update associates key with value in the trie. Subsequent calls to
@@ -507,66 +442,19 @@ func (t *Trie) resolve(n node, prefix []byte) (node, error) {
 }
 
 func (t *Trie) resolveHash(n hashNode, prefix []byte) (node, error) {
-	hash := common.BytesToHash(n)
-	if node := t.db.node(hash); node != nil {
-		return node, nil
-	}
-	return nil, &MissingNodeError{NodeHash: hash, Path: prefix}
+	panic("unsupported")
 }
 
 // Hash returns the root hash of the trie. It does not write to the
 // database and can be used even if the trie doesn't have one.
 func (t *Trie) Hash() common.Hash {
-	hash, cached, _ := t.hashRoot()
-	t.root = cached
-	return common.BytesToHash(hash.(hashNode))
+	panic("unsupported")
 }
 
 // Commit writes all nodes to the trie's memory database, tracking the internal
 // and external (for account tries) references.
 func (t *Trie) Commit(onleaf LeafCallback) (common.Hash, int, error) {
-	if t.db == nil {
-		panic("commit called on trie with nil database")
-	}
-	if t.root == nil {
-		return emptyRoot, 0, nil
-	}
-	// Derive the hash for all dirty nodes first. We hold the assumption
-	// in the following procedure that all nodes are hashed.
-	rootHash := t.Hash()
-	h := newCommitter()
-	defer returnCommitterToPool(h)
-
-	// Do a quick check if we really need to commit, before we spin
-	// up goroutines. This can happen e.g. if we load a trie for reading storage
-	// values, but don't write to it.
-	if _, dirty := t.root.cache(); !dirty {
-		return rootHash, 0, nil
-	}
-	var wg sync.WaitGroup
-	if onleaf != nil {
-		h.onleaf = onleaf
-		h.leafCh = make(chan *leaf, leafChanSize)
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			h.commitLoop(t.db)
-		}()
-	}
-	newRoot, committed, err := h.Commit(t.root, t.db)
-	if onleaf != nil {
-		// The leafch is created in newCommitter if there was an onleaf callback
-		// provided. The commitLoop only _reads_ from it, and the commit
-		// operation was the sole writer. Therefore, it's safe to close this
-		// channel here.
-		close(h.leafCh)
-		wg.Wait()
-	}
-	if err != nil {
-		return common.Hash{}, 0, err
-	}
-	t.root = newRoot
-	return rootHash, committed, nil
+	panic("unsupported")
 }
 
 // hashRoot calculates the root hash of the given trie

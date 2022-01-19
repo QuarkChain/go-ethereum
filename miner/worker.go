@@ -452,11 +452,6 @@ func (w *worker) mainLoop() {
 	defer w.txsSub.Unsubscribe()
 	defer w.chainHeadSub.Unsubscribe()
 	defer w.chainSideSub.Unsubscribe()
-	defer func() {
-		if w.current != nil && w.current.state != nil {
-			w.current.state.StopPrefetcher()
-		}
-	}()
 
 	for {
 		select {
@@ -685,7 +680,6 @@ func (w *worker) makeCurrent(parent *types.Block, header *types.Header) error {
 	if err != nil {
 		return err
 	}
-	state.StartPrefetcher("miner")
 
 	env := &environment{
 		signer:    types.MakeSigner(w.chainConfig, header.Number),
@@ -706,11 +700,6 @@ func (w *worker) makeCurrent(parent *types.Block, header *types.Header) error {
 	// Keep track of transactions which return errors so they can be removed
 	env.tcount = 0
 
-	// Swap out the old work with the new one, terminating any leftover prefetcher
-	// processes in the mean time and starting a new one.
-	if w.current != nil && w.current.state != nil {
-		w.current.state.StopPrefetcher()
-	}
 	w.current = env
 	return nil
 }

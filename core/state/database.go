@@ -18,7 +18,6 @@ package state
 
 import (
 	"errors"
-	"fmt"
 
 	"github.com/VictoriaMetrics/fastcache"
 	"github.com/ethereum/go-ethereum/common"
@@ -45,9 +44,6 @@ type Database interface {
 	// OpenStorageTrie opens the storage trie of an account.
 	OpenStorageTrie(addrHash, root common.Hash) (Trie, error)
 
-	// CopyTrie returns an independent copy of the given trie.
-	CopyTrie(Trie) Trie
-
 	// ContractCode retrieves a particular contract's code.
 	ContractCode(addrHash, codeHash common.Hash) ([]byte, error)
 
@@ -60,12 +56,6 @@ type Database interface {
 
 // Trie is a Ethereum Merkle Patricia trie.
 type Trie interface {
-	// GetKey returns the sha3 preimage of a hashed key that was previously used
-	// to store a value.
-	//
-	// TODO(fjl): remove this when SecureTrie is removed
-	GetKey([]byte) []byte
-
 	// TryGet returns the value for key stored in the trie. The value bytes must
 	// not be modified by the caller. If a node was not found in the database, a
 	// trie.MissingNodeError is returned.
@@ -91,19 +81,6 @@ type Trie interface {
 	// Commit writes all nodes to the trie's memory database, tracking the internal
 	// and external (for account tries) references.
 	Commit(onleaf trie.LeafCallback) (common.Hash, int, error)
-
-	// NodeIterator returns an iterator that returns nodes of the trie. Iteration
-	// starts at the key after the given start key.
-	NodeIterator(startKey []byte) trie.NodeIterator
-
-	// Prove constructs a Merkle proof for key. The result contains all encoded nodes
-	// on the path to the value at key. The value itself is also included in the last
-	// node and can be retrieved by verifying the proof.
-	//
-	// If the trie does not contain a value for key, the returned proof contains all
-	// nodes of the longest existing prefix of the key (at least the root), ending
-	// with the node that proves the absence of the key.
-	Prove(key []byte, fromLevel uint, proofDb ethdb.KeyValueWriter) error
 }
 
 // NewDatabase creates a backing store for state. The returned database is safe for
@@ -133,30 +110,12 @@ type cachingDB struct {
 
 // OpenTrie opens the main account trie at a specific root hash.
 func (db *cachingDB) OpenTrie(root common.Hash) (Trie, error) {
-	tr, err := trie.NewSecure(root, db.db)
-	if err != nil {
-		return nil, err
-	}
-	return tr, nil
+	return trie.NewFastDB(db.db), nil
 }
 
 // OpenStorageTrie opens the storage trie of an account.
 func (db *cachingDB) OpenStorageTrie(addrHash, root common.Hash) (Trie, error) {
-	tr, err := trie.NewSecure(root, db.db)
-	if err != nil {
-		return nil, err
-	}
-	return tr, nil
-}
-
-// CopyTrie returns an independent copy of the given trie.
-func (db *cachingDB) CopyTrie(t Trie) Trie {
-	switch t := t.(type) {
-	case *trie.SecureTrie:
-		return t.Copy()
-	default:
-		panic(fmt.Errorf("unknown trie type %T", t))
-	}
+	return trie.NewFastDB(db.db), nil
 }
 
 // ContractCode retrieves a particular contract's code.
@@ -164,7 +123,7 @@ func (db *cachingDB) ContractCode(addrHash, codeHash common.Hash) ([]byte, error
 	if code := db.codeCache.Get(nil, codeHash.Bytes()); len(code) > 0 {
 		return code, nil
 	}
-	code := rawdb.ReadCode(db.db.DiskDB(), codeHash)
+	code := rawdb.ReadCode(db.db, codeHash)
 	if len(code) > 0 {
 		db.codeCache.Set(codeHash.Bytes(), code)
 		db.codeSizeCache.Add(codeHash, len(code))
@@ -180,7 +139,7 @@ func (db *cachingDB) ContractCodeWithPrefix(addrHash, codeHash common.Hash) ([]b
 	if code := db.codeCache.Get(nil, codeHash.Bytes()); len(code) > 0 {
 		return code, nil
 	}
-	code := rawdb.ReadCodeWithPrefix(db.db.DiskDB(), codeHash)
+	code := rawdb.ReadCodeWithPrefix(db.db, codeHash)
 	if len(code) > 0 {
 		db.codeCache.Set(codeHash.Bytes(), code)
 		db.codeSizeCache.Add(codeHash, len(code))

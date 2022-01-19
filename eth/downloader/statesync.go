@@ -22,7 +22,6 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethdb"
@@ -315,7 +314,7 @@ func newStateSync(d *Downloader, root common.Hash) *stateSync {
 func (s *stateSync) run() {
 	close(s.started)
 	if s.d.snapSync {
-		s.err = s.d.SnapSyncer.Sync(s.root, s.cancel)
+		s.err = fmt.Errorf("unsupported")
 	} else {
 		s.err = s.loop()
 	}
@@ -610,6 +609,6 @@ func (s *stateSync) updateStats(written, duplicate, unexpected int, duration tim
 		log.Info("Imported new state entries", "count", written, "elapsed", common.PrettyDuration(duration), "processed", s.d.syncStatsState.processed, "pending", s.d.syncStatsState.pending, "trieretry", len(s.trieTasks), "coderetry", len(s.codeTasks), "duplicate", s.d.syncStatsState.duplicate, "unexpected", s.d.syncStatsState.unexpected)
 	}
 	if written > 0 {
-		rawdb.WriteFastTrieProgress(s.d.stateDB, s.d.syncStatsState.processed)
+		// rawdb.WriteFastTrieProgress(s.d.stateDB, s.d.syncStatsState.processed)
 	}
 }

@@ -18,6 +18,7 @@ package state
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"math/big"
@@ -77,7 +78,7 @@ type stateObject struct {
 	dbErr error
 
 	// Write caches.
-	trie Trie // storage trie, which becomes non-nil on first access
+	trie Trie // KV trie
 	code Code // contract bytecode, which gets set when code is loaded
 
 	originStorage  Storage // Storage cache of original entries to dedup rewrites, reset for every transaction
@@ -99,16 +100,16 @@ func (s *stateObject) empty() bool {
 }
 
 // newObject creates a state object.
-func newObject(db *StateDB, address common.Address, data types.StateAccount) *stateObject {
+func newObject(db *StateDB, address common.Address, data types.StateAccount, trie Trie) *stateObject {
 	if data.Balance == nil {
 		data.Balance = new(big.Int)
 	}
 	if data.CodeHash == nil {
 		data.CodeHash = emptyCodeHash
 	}
-	if data.Root == (common.Hash{}) {
-		data.Root = emptyRoot
-	}
+	//if data.Root == (common.Hash{}) {
+	//	data.Root = emptyRoot
+	//}
 	return &stateObject{
 		db:             db,
 		address:        address,
@@ -117,6 +118,7 @@ func newObject(db *StateDB, address common.Address, data types.StateAccount) *st
 		originStorage:  make(Storage),
 		pendingStorage: make(Storage),
 		dirtyStorage:   make(Storage),
+		trie:           trie,
 	}
 }
 
@@ -147,27 +149,6 @@ func (s *stateObject) touch() {
 	}
 }
 
-func (s *stateObject) getTrie(db Database) Trie {
-	if s.trie == nil {
-		// Try fetching from prefetcher first
-		// We don't prefetch empty tries
-		if s.data.Root != emptyRoot && s.db.prefetcher != nil {
-			// When the miner is creating the pending state, there is no
-			// prefetcher
-			s.trie = s.db.prefetcher.trie(s.data.Root)
-		}
-		if s.trie == nil {
-			var err error
-			s.trie, err = db.OpenStorageTrie(s.addrHash, s.data.Root)
-			if err != nil {
-				s.trie, _ = db.OpenStorageTrie(s.addrHash, common.Hash{})
-				s.setError(fmt.Errorf("can't create storage trie: %v", err))
-			}
-		}
-	}
-	return s.trie
-}
-
 // GetState retrieves a value from the account storage trie.
 func (s *stateObject) GetState(db Database, key common.Hash) common.Hash {
 	// If the fake storage is set, only lookup the state here(in the debugging mode)
@@ -183,6 +164,17 @@ func (s *stateObject) GetState(db Database, key common.Hash) common.Hash {
 	return s.GetCommittedState(db, key)
 }
 
+func (s *stateObject) storageKey(key []byte) []byte {
+	newKey := make([]byte, len(s.address)+1+8+1)
+	copy(newKey, s.address[:])
+	newKey[len(s.address)] = '/'
+	binary.PutUvarint(newKey[len(s.address)+1:], s.data.Incarnation)
+	newKey[len(newKey)-1] = '/'
+
+	newKey = append(newKey, key...)
+	return newKey
+}
+
 // GetCommittedState retrieves a value from the committed account storage trie.
 func (s *stateObject) GetCommittedState(db Database, key common.Hash) common.Hash {
 	// If the fake storage is set, only lookup the state here(in the debugging mode)
@@ -196,13 +188,14 @@ func (s *stateObject) GetCommittedState(db Database, key common.Hash) common.Has
 	if value, cached := s.originStorage[key]; cached {
 		return value
 	}
-	// If no live objects are available, attempt to use snapshots
+	// If no live objects are available, attempt to use db
 	var (
 		enc   []byte
 		err   error
 		meter *time.Duration
 	)
 	readStart := time.Now()
+
 	if metrics.EnabledExpensive {
 		// If the snap is 'under construction', the first lookup may fail. If that
 		// happens, we don't want to double-count the time elapsed. Thus this
@@ -213,37 +206,20 @@ func (s *stateObject) GetCommittedState(db Database, key common.Hash) common.Has
 			}
 		}()
 	}
-	if s.db.snap != nil {
-		if metrics.EnabledExpensive {
-			meter = &s.db.SnapshotStorageReads
-		}
-		// If the object was destructed in *this* block (and potentially resurrected),
-		// the storage has been cleared out, and we should *not* consult the previous
-		// snapshot about any storage values. The only possible alternatives are:
-		//   1) resurrect happened, and new slot values were set -- those should
-		//      have been handles via pendingStorage above.
-		//   2) we don't have new values, and can deliver empty response back
-		if _, destructed := s.db.snapDestructs[s.addrHash]; destructed {
-			return common.Hash{}
-		}
-		enc, err = s.db.snap.Storage(s.addrHash, crypto.Keccak256Hash(key.Bytes()))
+	if meter != nil {
+		// If we already spent time checking the snapshot, account for it
+		// and reset the readStart
+		*meter += time.Since(readStart)
+		readStart = time.Now()
 	}
-	// If the snapshot is unavailable or reading from it fails, load from the database.
-	if s.db.snap == nil || err != nil {
-		if meter != nil {
-			// If we already spent time checking the snapshot, account for it
-			// and reset the readStart
-			*meter += time.Since(readStart)
-			readStart = time.Now()
-		}
-		if metrics.EnabledExpensive {
-			meter = &s.db.StorageReads
-		}
-		if enc, err = s.getTrie(db).TryGet(key.Bytes()); err != nil {
-			s.setError(err)
-			return common.Hash{}
-		}
+	if metrics.EnabledExpensive {
+		meter = &s.db.StorageReads
 	}
+	if enc, err = s.trie.TryGet(s.storageKey(key[:])); err != nil {
+		s.setError(err)
+		return common.Hash{}
+	}
+
 	var value common.Hash
 	if len(enc) > 0 {
 		_, content, _, err := rlp.Split(enc)
@@ -302,15 +278,8 @@ func (s *stateObject) setState(key, value common.Hash) {
 // finalise moves all dirty storage slots into the pending area to be hashed or
 // committed later. It is invoked at the end of every transaction.
 func (s *stateObject) finalise(prefetch bool) {
-	slotsToPrefetch := make([][]byte, 0, len(s.dirtyStorage))
 	for key, value := range s.dirtyStorage {
 		s.pendingStorage[key] = value
-		if value != s.originStorage[key] {
-			slotsToPrefetch = append(slotsToPrefetch, common.CopyBytes(key[:])) // Copy needed for closure
-		}
-	}
-	if s.db.prefetcher != nil && prefetch && len(slotsToPrefetch) > 0 && s.data.Root != emptyRoot {
-		s.db.prefetcher.prefetch(s.data.Root, slotsToPrefetch)
 	}
 	if len(s.dirtyStorage) > 0 {
 		s.dirtyStorage = make(Storage)
@@ -320,22 +289,20 @@ func (s *stateObject) finalise(prefetch bool) {
 // updateTrie writes cached storage modifications into the object's storage trie.
 // It will return nil if the trie has not been loaded and no changes have been made
 func (s *stateObject) updateTrie(db Database) Trie {
+	if s.data.Deleted {
+		return nil
+	}
 	// Make sure all dirty slots are finalized into the pending storage area
-	s.finalise(false) // Don't prefetch anymore, pull directly if need be
+	s.finalise(false)
 	if len(s.pendingStorage) == 0 {
 		return s.trie
 	}
-	// Track the amount of time wasted on updating the storage trie
+	// Track the amount of time wasted on updating the storge trie
 	if metrics.EnabledExpensive {
 		defer func(start time.Time) { s.db.StorageUpdates += time.Since(start) }(time.Now())
 	}
-	// The snapshot storage map for the object
-	var storage map[common.Hash][]byte
 	// Insert all the pending updates into the trie
-	tr := s.getTrie(db)
-	hasher := s.db.hasher
-
-	usedStorage := make([][]byte, 0, len(s.pendingStorage))
+	tr := s.trie
 	for key, value := range s.pendingStorage {
 		// Skip noop changes, persist actual changes
 		if value == s.originStorage[key] {
@@ -345,29 +312,15 @@ func (s *stateObject) updateTrie(db Database) Trie {
 
 		var v []byte
 		if (value == common.Hash{}) {
-			s.setError(tr.TryDelete(key[:]))
+			s.setError(tr.TryDelete(s.storageKey(key[:])))
 			s.db.StorageDeleted += 1
 		} else {
 			// Encoding []byte cannot fail, ok to ignore the error.
 			v, _ = rlp.EncodeToBytes(common.TrimLeftZeroes(value[:]))
-			s.setError(tr.TryUpdate(key[:], v))
+			s.setError(tr.TryUpdate(s.storageKey(key[:]), v))
 			s.db.StorageUpdated += 1
 		}
-		// If state snapshotting is active, cache the data til commit
-		if s.db.snap != nil {
-			if storage == nil {
-				// Retrieve the old storage map, if available, create a new one otherwise
-				if storage = s.db.snapStorage[s.addrHash]; storage == nil {
-					storage = make(map[common.Hash][]byte)
-					s.db.snapStorage[s.addrHash] = storage
-				}
-			}
-			storage[crypto.HashData(hasher, key[:])] = v // v will be nil if it's deleted
-		}
-		usedStorage = append(usedStorage, common.CopyBytes(key[:])) // Copy needed for closure
-	}
-	if s.db.prefetcher != nil {
-		s.db.prefetcher.used(s.data.Root, usedStorage)
+
 	}
 	if len(s.pendingStorage) > 0 {
 		s.pendingStorage = make(Storage)
@@ -385,11 +338,10 @@ func (s *stateObject) updateRoot(db Database) {
 	if metrics.EnabledExpensive {
 		defer func(start time.Time) { s.db.StorageHashes += time.Since(start) }(time.Now())
 	}
-	s.data.Root = s.trie.Hash()
+	//s.data.Root = s.trie.Hash()
 }
 
-// CommitTrie the storage trie of the object to db.
-// This updates the trie root.
+// CommitTrie the dirty key-value pairs to storage trie of the object to db.
 func (s *stateObject) CommitTrie(db Database) (int, error) {
 	// If nothing changed, don't bother with hashing anything
 	if s.updateTrie(db) == nil {
@@ -398,15 +350,11 @@ func (s *stateObject) CommitTrie(db Database) (int, error) {
 	if s.dbErr != nil {
 		return 0, s.dbErr
 	}
-	// Track the amount of time wasted on committing the storage trie
+	// Track the amount of time wasted on committing the storge trie
 	if metrics.EnabledExpensive {
 		defer func(start time.Time) { s.db.StorageCommits += time.Since(start) }(time.Now())
 	}
-	root, committed, err := s.trie.Commit(nil)
-	if err == nil {
-		s.data.Root = root
-	}
-	return committed, err
+	return 0, nil
 }
 
 // AddBalance adds amount to s's balance.
@@ -442,21 +390,6 @@ func (s *stateObject) SetBalance(amount *big.Int) {
 
 func (s *stateObject) setBalance(amount *big.Int) {
 	s.data.Balance = amount
-}
-
-func (s *stateObject) deepCopy(db *StateDB) *stateObject {
-	stateObject := newObject(db, s.address, s.data)
-	if s.trie != nil {
-		stateObject.trie = db.db.CopyTrie(s.trie)
-	}
-	stateObject.code = s.code
-	stateObject.dirtyStorage = s.dirtyStorage.Copy()
-	stateObject.originStorage = s.originStorage.Copy()
-	stateObject.pendingStorage = s.pendingStorage.Copy()
-	stateObject.suicided = s.suicided
-	stateObject.dirtyCode = s.dirtyCode
-	stateObject.deleted = s.deleted
-	return stateObject
 }
 
 //

@@ -162,10 +162,6 @@ func (cs *chainSyncer) nextSyncOp() *chainSyncOp {
 		return nil
 	}
 	mode, ourTD := cs.modeAndLocalHead()
-	if mode == downloader.FastSync && atomic.LoadUint32(&cs.handler.snapSync) == 1 {
-		// Fast sync via the snap protocol
-		mode = downloader.SnapSync
-	}
 	op := peerToSyncOp(mode, peer)
 	if op.td.Cmp(ourTD) <= 0 {
 		return nil // We're in sync.
@@ -179,24 +175,9 @@ func peerToSyncOp(mode downloader.SyncMode, p *eth.Peer) *chainSyncOp {
 }
 
 func (cs *chainSyncer) modeAndLocalHead() (downloader.SyncMode, *big.Int) {
-	// If we're in fast sync mode, return that directly
-	if atomic.LoadUint32(&cs.handler.fastSync) == 1 {
-		block := cs.handler.chain.CurrentFastBlock()
-		td := cs.handler.chain.GetTd(block.Hash(), block.NumberU64())
-		return downloader.FastSync, td
-	}
-	// We are probably in full sync, but we might have rewound to before the
-	// fast sync pivot, check if we should reenable
-	if pivot := rawdb.ReadLastPivotNumber(cs.handler.database); pivot != nil {
-		if head := cs.handler.chain.CurrentBlock(); head.NumberU64() < *pivot {
-			block := cs.handler.chain.CurrentFastBlock()
-			td := cs.handler.chain.GetTd(block.Hash(), block.NumberU64())
-			return downloader.FastSync, td
-		}
-	}
 	// Nope, we're really full syncing
 	head := cs.handler.chain.CurrentBlock()
-	td := cs.handler.chain.GetTd(head.Hash(), head.NumberU64())
+	td := head.Number()
 	return downloader.FullSync, td
 }
 
@@ -230,14 +211,6 @@ func (h *handler) doSync(op *chainSyncOp) error {
 	err := h.downloader.Synchronise(op.peer.ID(), op.head, op.td, op.mode)
 	if err != nil {
 		return err
-	}
-	if atomic.LoadUint32(&h.fastSync) == 1 {
-		log.Info("Fast sync complete, auto disabling")
-		atomic.StoreUint32(&h.fastSync, 0)
-	}
-	if atomic.LoadUint32(&h.snapSync) == 1 {
-		log.Info("Snap sync complete, auto disabling")
-		atomic.StoreUint32(&h.snapSync, 0)
 	}
 	// If we've successfully finished a sync cycle and passed any required checkpoint,
 	// enable accepting transactions from the network.

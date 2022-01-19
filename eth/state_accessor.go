@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -118,7 +117,7 @@ func (eth *Ethereum) stateAtBlock(block *types.Block, reexec uint64, base *state
 	var (
 		start  = time.Now()
 		logged time.Time
-		parent common.Hash
+		// parent common.Hash
 	)
 	for current.NumberU64() < origin {
 		// Print progress logs if long enough time elapsed
@@ -145,11 +144,11 @@ func (eth *Ethereum) stateAtBlock(block *types.Block, reexec uint64, base *state
 		if err != nil {
 			return nil, fmt.Errorf("state reset after block %d failed: %v", current.NumberU64(), err)
 		}
-		database.TrieDB().Reference(root, common.Hash{})
-		if parent != (common.Hash{}) {
-			database.TrieDB().Dereference(parent)
-		}
-		parent = root
+		// database.TrieDB().Reference(root, common.Hash{})
+		// if parent != (common.Hash{}) {
+		// 	database.TrieDB().Dereference(parent)
+		// }
+		// parent = root
 	}
 	if report {
 		nodes, imgs := database.TrieDB().Size()
