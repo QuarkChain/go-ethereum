@@ -371,6 +371,10 @@ type CliqueConfig struct {
 	Epoch  uint64 `json:"epoch"`  // Epoch length to reset votes and checkpoint
 }
 
+type TendermintConfig struct {
+	Epoch uint64 `json:"epoch"` // Epoch lengh to vote new validator
+}
+
 // String implements the stringer interface, returning the consensus engine details.
 func (c *CliqueConfig) String() string {
 	return "clique"
