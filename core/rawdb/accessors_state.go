@@ -17,6 +17,8 @@
 package rawdb
 
 import (
+	"encoding/binary"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/log"
@@ -59,6 +61,16 @@ func ReadCodeWithPrefix(db ethdb.KeyValueReader, hash common.Hash) []byte {
 	return data
 }
 
+// ReadCodeSize retrieves the contract code size of the provided code hash.
+// Return 0 if not found
+func ReadCodeSize(db ethdb.KeyValueReader, hash common.Hash) int {
+	data, _ := db.Get(codeSizeKey(hash))
+	if len(data) != 4 {
+		return 0
+	}
+	return int(binary.BigEndian.Uint32(data))
+}
+
 // HasCodeWithPrefix checks if the contract code corresponding to the
 // provided code hash is present in the db. This function will only check
 // presence using the prefix-scheme.
@@ -71,6 +83,12 @@ func HasCodeWithPrefix(db ethdb.KeyValueReader, hash common.Hash) bool {
 func WriteCode(db ethdb.KeyValueWriter, hash common.Hash, code []byte) {
 	if err := db.Put(codeKey(hash), code); err != nil {
 		log.Crit("Failed to store contract code", "err", err)
+	}
+
+	var sizeData [4]byte
+	binary.BigEndian.PutUint32(sizeData[:], uint32(len(code)))
+	if err := db.Put(codeSizeKey(hash), sizeData[:]); err != nil {
+		log.Crit("Failed to store contract code size", "err", err)
 	}
 }
 
