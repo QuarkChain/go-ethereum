@@ -325,6 +325,17 @@ func gasExpEIP158(evm *EVM, contract *Contract, stack *Stack, mem *Memory, memor
 	return gas, nil
 }
 
+func addGasExtraCodeSize(evm *EVM, address common.Address, gas uint64) (uint64, bool) {
+	// codeSize := address.
+	codeSize := evm.StateDB.GetCodeSize(address)
+	if codeSize <= params.MaxCodeSizeSoft {
+		return 0, false // already accounted by constant gas
+	}
+
+	extraGas := (uint64(codeSize) - 1) / params.ExtcodeCopyChunkSize * params.CallGasEIP150
+	return math.SafeAdd(gas, extraGas)
+}
+
 func gasCall(evm *EVM, contract *Contract, stack *Stack, mem *Memory, memorySize uint64) (uint64, error) {
 	var (
 		gas            uint64
@@ -357,6 +368,10 @@ func gasCall(evm *EVM, contract *Contract, stack *Stack, mem *Memory, memorySize
 	if gas, overflow = math.SafeAdd(gas, evm.callGasTemp); overflow {
 		return 0, ErrGasUintOverflow
 	}
+
+	if gas, overflow = addGasExtraCodeSize(evm, address, gas); overflow {
+		return 0, ErrGasUintOverflow
+	}
 	return gas, nil
 }
 
@@ -368,6 +383,7 @@ func gasCallCode(evm *EVM, contract *Contract, stack *Stack, mem *Memory, memory
 	var (
 		gas      uint64
 		overflow bool
+		address  = common.Address(stack.Back(1).Bytes20())
 	)
 	if stack.Back(2).Sign() != 0 {
 		gas += params.CallValueTransferGas
@@ -382,10 +398,14 @@ func gasCallCode(evm *EVM, contract *Contract, stack *Stack, mem *Memory, memory
 	if gas, overflow = math.SafeAdd(gas, evm.callGasTemp); overflow {
 		return 0, ErrGasUintOverflow
 	}
+	if gas, overflow = addGasExtraCodeSize(evm, address, gas); overflow {
+		return 0, ErrGasUintOverflow
+	}
 	return gas, nil
 }
 
 func gasDelegateCall(evm *EVM, contract *Contract, stack *Stack, mem *Memory, memorySize uint64) (uint64, error) {
+	address := common.Address(stack.Back(1).Bytes20())
 	gas, err := memoryGasCost(mem, memorySize)
 	if err != nil {
 		return 0, err
@@ -398,10 +418,14 @@ func gasDelegateCall(evm *EVM, contract *Contract, stack *Stack, mem *Memory, me
 	if gas, overflow = math.SafeAdd(gas, evm.callGasTemp); overflow {
 		return 0, ErrGasUintOverflow
 	}
+	if gas, overflow = addGasExtraCodeSize(evm, address, gas); overflow {
+		return 0, ErrGasUintOverflow
+	}
 	return gas, nil
 }
 
 func gasStaticCall(evm *EVM, contract *Contract, stack *Stack, mem *Memory, memorySize uint64) (uint64, error) {
+	address := common.Address(stack.Back(1).Bytes20())
 	gas, err := memoryGasCost(mem, memorySize)
 	if err != nil {
 		return 0, err
@@ -412,6 +436,9 @@ func gasStaticCall(evm *EVM, contract *Contract, stack *Stack, mem *Memory, memo
 	}
 	var overflow bool
 	if gas, overflow = math.SafeAdd(gas, evm.callGasTemp); overflow {
+		return 0, ErrGasUintOverflow
+	}
+	if gas, overflow = addGasExtraCodeSize(evm, address, gas); overflow {
 		return 0, ErrGasUintOverflow
 	}
 	return gas, nil

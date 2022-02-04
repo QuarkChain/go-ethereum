@@ -113,6 +113,10 @@ const (
 	// static portion of the gas. It was changed during EIP 150 (Tangerine)
 	ExtcodeCopyBaseFrontier uint64 = 20
 	ExtcodeCopyBaseEIP150   uint64 = 700
+	ExtcodeCopyBasePerChunk uint64 = 700
+	ExtcodeCopyChunkSize    uint64 = MaxCodeSizeSoft
+
+	CodeStakingPerChunk uint64 = 1000000000000000000 // 1 token per 24k (reclaimable)
 
 	// CreateBySelfdestructGas is used when the refunded account is one that does
 	// not exist. This logic is similar to call.
@@ -123,7 +127,8 @@ const (
 	ElasticityMultiplier     = 2          // Bounds the maximum gas limit an EIP-1559 block may have.
 	InitialBaseFee           = 1000000000 // Initial base fee for EIP-1559 blocks.
 
-	MaxCodeSize = 24576 // Maximum bytecode to permit for a contract
+	MaxCodeSizeSoft = 24576 // Maximum bytecode to permit for a contract
+	MaxCodeSizeHard = 1024 * 1024
 
 	// Precompiled contract gas prices
 
