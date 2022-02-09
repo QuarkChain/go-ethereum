@@ -469,12 +469,16 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	if err == nil {
 		// Be compatible with Ethereum gas metering when code size < 24 * 1024
 		baseDataGas := params.CreateDataGas
-		staking := uint64(0)
-		if baseDataGas > params.MaxCodeSizeSoft {
-			baseDataGas = params.MaxCodeSizeSoft
-			staking = (baseDataGas - 1) / params.CodeStakingPerChunk * params.CodeStakingPerChunk
+		staking := big.NewInt(0)
+		dataLen := uint64(len(ret))
+		createDataGas := dataLen * baseDataGas
+		// cap the data len and require staking for > 24KB data
+		if dataLen > params.MaxCodeSizeSoft {
+			createDataGas = params.MaxCodeSizeSoft * baseDataGas
+			staking = big.NewInt(int64((dataLen - 1) / params.ExtcodeCopyChunkSize))
+			staking.Mul(staking, big.NewInt(int64(params.CodeStakingPerChunk)))
 		}
-		createDataGas := uint64(len(ret)) * baseDataGas
+
 		if contract.UseGas(createDataGas) {
 			evm.StateDB.SetCode(address, ret)
 		} else {
@@ -482,7 +486,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 		}
 
 		// Make sure sufficient stake of the new contract
-		if staking != 0 && evm.Context.CanTransfer(evm.StateDB, address, big.NewInt(int64(staking))) {
+		if staking.Sign() != 0 && !evm.Context.CanTransfer(evm.StateDB, address, staking) {
 			err = ErrCodeStoreOutOfGas
 		}
 	}
