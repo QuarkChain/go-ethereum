@@ -329,7 +329,7 @@ func addGasExtraCodeSize(evm *EVM, address common.Address, gas uint64) (uint64, 
 	// codeSize := address.
 	codeSize := evm.StateDB.GetCodeSize(address)
 	if codeSize <= params.MaxCodeSizeSoft {
-		return 0, false // already accounted by constant gas
+		return gas, false // already accounted by constant gas
 	}
 
 	extraGas := (uint64(codeSize) - 1) / params.ExtcodeCopyChunkSize * params.CallGasEIP150
