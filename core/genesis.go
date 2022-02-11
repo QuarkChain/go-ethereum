@@ -422,7 +422,7 @@ func DefaultWeb3QTestnetGenesisBlock() *Genesis {
 	return &Genesis{
 		Config:     params.Web3QTestnetChainConfig,
 		Nonce:      0,
-		ExtraData:  []byte("Welcome to brave new Web3!"),
+		ExtraData:  hexutil.MustDecode("0x57656c636f6d6520746f20746865206272617665206e65772057656233512121dc0c84b6e563e7a4cc54d2b0aa99cf18a372f76edcfa418856cfb2695734ce7535bf79b2eb4261bd0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
 		GasLimit:   30000000,
 		Difficulty: big.NewInt(0x1),
 		Timestamp:  1644537097,
