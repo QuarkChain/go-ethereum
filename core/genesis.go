@@ -414,7 +414,21 @@ func DefaultSepoliaGenesisBlock() *Genesis {
 		GasLimit:   0x1c9c380,
 		Difficulty: big.NewInt(0x20000),
 		Timestamp:  1633267481,
-		Alloc:      decodePrealloc(sepoliaAllocData),
+	}
+}
+
+// DefaultSepoliaGenesisBlock returns the Sepolia network genesis block.
+func DefaultWeb3QTestnetGenesisBlock() *Genesis {
+	return &Genesis{
+		Config:     params.Web3QTestnetChainConfig,
+		Nonce:      0,
+		ExtraData:  []byte("Welcome to brave new Web3!"),
+		GasLimit:   30000000,
+		Difficulty: big.NewInt(0x1),
+		Timestamp:  1644537097,
+		Alloc: map[common.Address]GenesisAccount{
+			common.HexToAddress("0x0E961a6A6235eFDB9a0F0BC753E395211B77cc28"): {Balance: new(big.Int).Mul(big.NewInt(1000000000000000000), big.NewInt(1000000000))}, // 1e8 Ether
+		},
 	}
 }
 
