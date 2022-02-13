@@ -254,7 +254,7 @@ var (
 
 	// Web3QTestnetChainConfig contains the chain parameters to run a node on the Web3Q test network.
 	Web3QTestnetChainConfig = &ChainConfig{
-		ChainID:             big.NewInt(256), // TODO: apply for new network id
+		ChainID:             big.NewInt(3333),
 		HomesteadBlock:      big.NewInt(0),
 		DAOForkBlock:        nil,
 		DAOForkSupport:      true,
@@ -270,8 +270,8 @@ var (
 		LondonBlock:         big.NewInt(0),
 		ArrowGlacierBlock:   nil,
 		Clique: &CliqueConfig{
-			Period: 15,
-			Epoch:  30000,
+			Period: 6,
+			Epoch:  100800, // one week
 		},
 	}
 
