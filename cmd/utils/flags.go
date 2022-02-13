@@ -1646,8 +1646,7 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 		SetDNSDiscoveryDefaults(cfg, params.GoerliGenesisHash)
 	case ctx.GlobalBool(Web3QTestnetFlag.Name):
 		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
-			// TODO: apply for new id (heco testnet id)
-			cfg.NetworkId = 256
+			cfg.NetworkId = 3333
 		}
 		cfg.Genesis = core.DefaultWeb3QTestnetGenesisBlock()
 		SetDNSDiscoveryDefaults(cfg, cfg.Genesis.ToBlock(nil).Hash())
