@@ -147,6 +147,7 @@ var (
 		utils.RinkebyFlag,
 		utils.GoerliFlag,
 		utils.Web3QTestnetFlag,
+		utils.Web3QMainnetFlag,
 		utils.VMEnableDebugFlag,
 		utils.NetworkIdFlag,
 		utils.EthStatsURLFlag,

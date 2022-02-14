@@ -417,7 +417,7 @@ func DefaultSepoliaGenesisBlock() *Genesis {
 	}
 }
 
-// DefaultSepoliaGenesisBlock returns the Sepolia network genesis block.
+// DefaultWeb3QTestnetGenesisBlock returns the Web3Q test network genesis block.
 func DefaultWeb3QTestnetGenesisBlock() *Genesis {
 	return &Genesis{
 		Config:     params.Web3QTestnetChainConfig,
@@ -427,7 +427,22 @@ func DefaultWeb3QTestnetGenesisBlock() *Genesis {
 		Difficulty: big.NewInt(0x1),
 		Timestamp:  1644537097,
 		Alloc: map[common.Address]GenesisAccount{
-			common.HexToAddress("0x0E961a6A6235eFDB9a0F0BC753E395211B77cc28"): {Balance: new(big.Int).Mul(big.NewInt(1000000000000000000), big.NewInt(1000000000))}, // 1e8 Ether
+			common.HexToAddress("0x0E961a6A6235eFDB9a0F0BC753E395211B77cc28"): {Balance: new(big.Int).Mul(big.NewInt(1000000000000000000), big.NewInt(1000000000))}, // 1e9 Ether
+		},
+	}
+}
+
+// DefaultWeb3QMainnetGenesisBlock returns the Web3Q main network genesis block.
+func DefaultWeb3QMainnetGenesisBlock() *Genesis {
+	return &Genesis{
+		Config:     params.Web3QMainnetChainConfig,
+		Nonce:      0,
+		ExtraData:  hexutil.MustDecode("446563656e7472616c697a652065766572797468696e6721000000000000000000C127513d57A7b4E6d4F9cdbFc084eB281554D70d04Ae093D83A87Cd35Ff62059605cc412512865d3E51671774e9f8c6af4e06D64f874289fD91a9F0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
+		GasLimit:   30000000,
+		Difficulty: big.NewInt(0x1),
+		Timestamp:  1644802221,
+		Alloc: map[common.Address]GenesisAccount{
+			common.HexToAddress("0x83ca8766bac8018a5ff95a7e20f4a21370f147ec"): {Balance: new(big.Int).Mul(big.NewInt(1000000000000000000), big.NewInt(100000000))}, // 1e8 W3Q
 		},
 	}
 }
