@@ -125,7 +125,8 @@ const (
 
 	BaseFeeChangeDenominator = 8          // Bounds the amount the base fee can change between blocks.
 	ElasticityMultiplier     = 2          // Bounds the maximum gas limit an EIP-1559 block may have.
-	InitialBaseFee           = 1000000000 // Initial base fee for EIP-1559 blocks.
+	InitialBaseFee           = 5000000000 // Initial base fee for EIP-1559 blocks (original 1Gwei).
+	MininumBaseFee           = InitialBaseFee
 
 	MaxCodeSizeSoft = 24576      // Maximum bytecode to permit for a contract without staking
 	MaxCodeSizeHard = 512 * 1024 // Maximum bytecode to permit for a contract with staking (hardlimit)

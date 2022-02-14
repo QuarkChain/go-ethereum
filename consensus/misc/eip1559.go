@@ -26,8 +26,6 @@ import (
 	"github.com/ethereum/go-ethereum/params"
 )
 
-var MininumBaseFee = big.NewInt(5000000000)
-
 // VerifyEip1559Header verifies some header attributes which were changed in EIP-1559,
 // - gas limit check
 // - basefee check
@@ -89,7 +87,7 @@ func CalcBaseFee(config *params.ChainConfig, parent *types.Header) *big.Int {
 
 		return math.BigMax(
 			x.Sub(parent.BaseFee, baseFeeDelta),
-			MininumBaseFee,
+			big.NewInt(params.MininumBaseFee),
 		)
 	}
 }
