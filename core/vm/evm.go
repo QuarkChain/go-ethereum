@@ -227,6 +227,10 @@ func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas 
 			contract.SetCallCode(&addrCopy, evm.StateDB.GetCodeHash(addrCopy), code)
 			ret, err = evm.interpreter.Run(contract, input, false)
 			gas = contract.Gas
+
+			if err == nil {
+				err = evm.checkContractStaking(contract, uint64(len(code)))
+			}
 		}
 	}
 	// When an error was returned by the EVM or when setting the creation code
@@ -284,6 +288,10 @@ func (evm *EVM) CallCode(caller ContractRef, addr common.Address, input []byte, 
 		contract.SetCallCode(&addrCopy, evm.StateDB.GetCodeHash(addrCopy), evm.StateDB.GetCode(addrCopy))
 		ret, err = evm.interpreter.Run(contract, input, false)
 		gas = contract.Gas
+
+		if err == nil {
+			err = evm.checkContractStaking(contract, 0)
+		}
 	}
 	if err != nil {
 		evm.StateDB.RevertToSnapshot(snapshot)
@@ -324,6 +332,10 @@ func (evm *EVM) DelegateCall(caller ContractRef, addr common.Address, input []by
 		contract.SetCallCode(&addrCopy, evm.StateDB.GetCodeHash(addrCopy), evm.StateDB.GetCode(addrCopy))
 		ret, err = evm.interpreter.Run(contract, input, false)
 		gas = contract.Gas
+
+		if err == nil {
+			err = evm.checkContractStaking(contract, 0)
+		}
 	}
 	if err != nil {
 		evm.StateDB.RevertToSnapshot(snapshot)
@@ -388,6 +400,22 @@ func (evm *EVM) StaticCall(caller ContractRef, addr common.Address, input []byte
 		}
 	}
 	return ret, gas, err
+}
+
+func (evm *EVM) checkContractStaking(contract *Contract, codeSize uint64) error {
+	if codeSize == 0 {
+		codeSize = uint64(evm.StateDB.GetCodeSize(contract.Address()))
+	}
+	// Check if the remaining balance of the contract can cover the staking requirement
+	if !evm.StateDB.HasSuicided(contract.Address()) && codeSize > params.MaxCodeSizeSoft {
+		staking := big.NewInt(int64((codeSize - 1) / params.ExtcodeCopyChunkSize))
+		staking.Mul(staking, big.NewInt(int64(params.CodeStakingPerChunk)))
+
+		if !evm.Context.CanTransfer(evm.StateDB, contract.Address(), staking) {
+			return ErrCodeInsufficientStake
+		}
+	}
+	return nil
 }
 
 type codeAndHash struct {
@@ -469,14 +497,11 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	if err == nil {
 		// Be compatible with Ethereum gas metering when code size < 24 * 1024
 		baseDataGas := params.CreateDataGas
-		staking := big.NewInt(0)
 		dataLen := uint64(len(ret))
 		createDataGas := dataLen * baseDataGas
 		// cap the data len and require staking for > 24KB data
 		if dataLen > params.MaxCodeSizeSoft {
 			createDataGas = params.MaxCodeSizeSoft * baseDataGas
-			staking = big.NewInt(int64((dataLen - 1) / params.ExtcodeCopyChunkSize))
-			staking.Mul(staking, big.NewInt(int64(params.CodeStakingPerChunk)))
 		}
 
 		if contract.UseGas(createDataGas) {
@@ -485,9 +510,8 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 			err = ErrCodeStoreOutOfGas
 		}
 
-		// Make sure sufficient stake of the new contract
-		if staking.Sign() != 0 && !evm.Context.CanTransfer(evm.StateDB, address, staking) {
-			err = ErrCodeStoreOutOfGas
+		if err == nil {
+			err = evm.checkContractStaking(contract, dataLen)
 		}
 	}
 
