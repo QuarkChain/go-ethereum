@@ -116,7 +116,7 @@ const (
 	ExtcodeCopyBasePerChunk uint64 = 700
 	ExtcodeCopyChunkSize    uint64 = MaxCodeSizeSoft
 
-	CodeStakingPerChunk uint64 = 1000000000000000000 // 1 token per 24k (reclaimable)
+	CodeStakingPerChunk uint64 = 1000000000000000000 // 1 token per 24k (reclaimable upon suicide)
 
 	// CreateBySelfdestructGas is used when the refunded account is one that does
 	// not exist. This logic is similar to call.
