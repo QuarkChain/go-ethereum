@@ -21,6 +21,8 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/holiman/uint256"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/rawdb"
@@ -102,6 +104,86 @@ func TestEIP2200(t *testing.T) {
 		}
 		if refund := vmenv.StateDB.GetRefund(); refund != tt.refund {
 			t.Errorf("test %d: gas refund mismatch: have %v, want %v", i, refund, tt.refund)
+		}
+	}
+}
+
+var extraGasCodeTests = []struct {
+	codeSize uint
+	gaspool  uint64
+	used     uint64
+	call     byte
+	failure  error
+}{
+	// CALL
+	{params.MaxCodeSizeSoft, math.MaxUint64, 2627, byte(CALL), nil},
+	{params.MaxCodeSizeSoft + 1, math.MaxUint64, 2627 + params.CallGasEIP150, byte(CALL), nil},
+	{params.MaxCodeSizeSoft * 2, math.MaxUint64, 2627 + params.CallGasEIP150, byte(CALL), nil},
+	{params.MaxCodeSizeSoft*2 + 1, math.MaxUint64, 2627 + params.CallGasEIP150*2, byte(CALL), nil},
+	// CALLCODE
+	{params.MaxCodeSizeSoft, math.MaxUint64, 2627, byte(CALLCODE), nil},
+	{params.MaxCodeSizeSoft + 1, math.MaxUint64, 2627 + params.CallGasEIP150, byte(CALLCODE), nil},
+	{params.MaxCodeSizeSoft * 2, math.MaxUint64, 2627 + params.CallGasEIP150, byte(CALLCODE), nil},
+	{params.MaxCodeSizeSoft*2 + 1, math.MaxUint64, 2627 + params.CallGasEIP150*2, byte(CALLCODE), nil},
+	// DELEGATECALL
+	{params.MaxCodeSizeSoft, math.MaxUint64, 2627, byte(DELEGATECALL), nil},
+	{params.MaxCodeSizeSoft + 1, math.MaxUint64, 2627 + params.CallGasEIP150, byte(DELEGATECALL), nil},
+	{params.MaxCodeSizeSoft * 2, math.MaxUint64, 2627 + params.CallGasEIP150, byte(DELEGATECALL), nil},
+	{params.MaxCodeSizeSoft*2 + 1, math.MaxUint64, 2627 + params.CallGasEIP150*2, byte(DELEGATECALL), nil},
+	// STATICCALL
+	{params.MaxCodeSizeSoft, math.MaxUint64, 2627, byte(STATICCALL), nil},
+	{params.MaxCodeSizeSoft + 1, math.MaxUint64, 2627 + params.CallGasEIP150, byte(STATICCALL), nil},
+	{params.MaxCodeSizeSoft * 2, math.MaxUint64, 2627 + params.CallGasEIP150, byte(STATICCALL), nil},
+	{params.MaxCodeSizeSoft*2 + 1, math.MaxUint64, 2627 + params.CallGasEIP150*2, byte(STATICCALL), nil},
+}
+
+func codegenWithSize(sz uint) []byte {
+	// PUSH1 00, PUSH1 00, RETURN
+	pushAndReturn := hexutil.MustDecode("0x60006000f3")
+	ret := make([]byte, sz-5) // first 5 bytes are for early return
+	for i := range ret {
+		ret[i] = 42 // meaning of life, bloating the code size
+	}
+	return append(pushAndReturn, ret...)
+}
+
+func TestExtraGasForCallW3IP002(t *testing.T) {
+	caller := common.BytesToAddress([]byte("caller"))
+	calleeAddr := "0x0101010101010101010101010101010101010101"
+	callee := common.HexToAddress(calleeAddr)
+	for i, tt := range extraGasCodeTests {
+		statedb, _ := state.New(common.Hash{}, state.NewDatabase(rawdb.NewMemoryDatabase()), nil)
+		statedb.CreateAccount(caller)
+		// set up stack for CALL family
+		callerCode := []byte{
+			byte(PUSH1), 0, // output size
+			byte(PUSH1), 0, // output mem
+			byte(PUSH1), 0, // input size
+			byte(PUSH1), 0, // input mem
+			byte(PUSH1), 0, // no value
+		}
+		pushAddr := append([]byte{byte(PUSH20)}, hexutil.MustDecode(calleeAddr)...)
+		callerCode = append(callerCode, pushAddr...) // callee addr
+		pushGas := append([]byte{byte(PUSH32)}, common.LeftPadBytes(uint256.NewInt(math.MaxUint64).Bytes(), 32)...)
+		callerCode = append(callerCode, pushGas...) // gas arg
+		callerCode = append(callerCode, tt.call)
+
+		statedb.SetCode(caller, callerCode)
+		statedb.SetCode(callee, codegenWithSize(tt.codeSize))
+
+		vmctx := BlockContext{
+			BlockNumber: big.NewInt(0),
+			CanTransfer: func(StateDB, common.Address, *big.Int) bool { return true },
+			Transfer:    func(StateDB, common.Address, common.Address, *big.Int) {},
+		}
+		vmenv := NewEVM(vmctx, TxContext{}, statedb, params.AllEthashProtocolChanges, Config{})
+
+		_, gas, err := vmenv.Call(AccountRef(common.Address{}), caller, nil, tt.gaspool, new(big.Int))
+		if err != tt.failure {
+			t.Errorf("test %d: failure mismatch: have %v, want %v", i, err, tt.failure)
+		}
+		if used := tt.gaspool - gas; used != tt.used {
+			t.Errorf("test %d: gas used mismatch: have %v, want %v", i, used, tt.used)
 		}
 	}
 }
