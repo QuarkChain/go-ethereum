@@ -137,14 +137,16 @@ var extraGasCodeTests = []struct {
 	{params.MaxCodeSizeSoft*2 + 1, math.MaxUint64, 2627 + params.CallGasEIP150*2, byte(STATICCALL), nil},
 }
 
-func codegenWithSize(sz uint) []byte {
-	// PUSH1 00, PUSH1 00, RETURN
-	pushAndReturn := hexutil.MustDecode("0x60006000f3")
-	ret := make([]byte, sz-5) // first 5 bytes are for early return
+func codegenWithSize(code []byte, sz uint) []byte {
+	if len(code) == 0 {
+		// PUSH1 00, PUSH1 00, RETURN
+		code = hexutil.MustDecode("0x60006000f3")
+	}
+	ret := make([]byte, sz-uint(len(code)))
 	for i := range ret {
 		ret[i] = 42 // meaning of life, bloating the code size
 	}
-	return append(pushAndReturn, ret...)
+	return append(code, ret...)
 }
 
 func TestExtraGasForCallW3IP002(t *testing.T) {
@@ -169,7 +171,7 @@ func TestExtraGasForCallW3IP002(t *testing.T) {
 		callerCode = append(callerCode, tt.call)
 
 		statedb.SetCode(caller, callerCode)
-		statedb.SetCode(callee, codegenWithSize(tt.codeSize))
+		statedb.SetCode(callee, codegenWithSize(nil, tt.codeSize))
 
 		vmctx := BlockContext{
 			BlockNumber: big.NewInt(0),
