@@ -17,6 +17,7 @@
 package vm
 
 import (
+	"fmt"
 	"math/big"
 	"testing"
 
@@ -49,7 +50,7 @@ func TestContractCheckStakingW3IP002(t *testing.T) {
 		for i, tt := range contractCheckStakingTests {
 			statedb, _ := state.New(common.Hash{}, state.NewDatabase(rawdb.NewMemoryDatabase()), nil)
 			statedb.CreateAccount(caddr)
-			statedb.SetCode(caddr, codegenWithSize(tt.codeSize))
+			statedb.SetCode(caddr, codegenWithSize(nil, tt.codeSize))
 
 			vmctx := BlockContext{
 				BlockNumber: big.NewInt(0),
@@ -127,6 +128,64 @@ func TestCreateW3IP002(t *testing.T) {
 		}
 		if used := math.MaxUint64 - leftOverGas; used != tt.usedGas {
 			t.Errorf("test %d: gas used mismatch: have %v, want %v", i, used, tt.usedGas)
+		}
+	}
+}
+
+var withdrawStakingTests = []struct {
+	codeSize   uint
+	staked     int64
+	toWithdraw int64
+	failure    error
+}{
+	{params.MaxCodeSizeSoft, 123, 123, nil},                        // can withdraw all
+	{params.MaxCodeSizeSoft, 123, 124, ErrExecutionReverted},       // withdraw more than balance
+	{params.MaxCodeSizeSoft + 1, 123, 0, ErrCodeInsufficientStake}, // can't withdraw because staking is required
+	{params.MaxCodeSizeSoft + 1, 123, 1, ErrCodeInsufficientStake}, // can't withdraw because staking is required
+	{params.MaxCodeSizeSoft + 1, int64(params.CodeStakingPerChunk), 1, ErrCodeInsufficientStake},
+	{params.MaxCodeSizeSoft + 1, int64(params.CodeStakingPerChunk) + 5, 5, nil}, // can withdraw extra
+}
+
+func TestWithdrawStakingW3IP002(t *testing.T) {
+	addr := common.BytesToAddress([]byte("addr"))
+	for i, tt := range withdrawStakingTests {
+
+		// contract Contract {
+		// 	function withdraw(uint256 amount) external payable {
+		// 			payable(msg.sender).transfer(amount);
+		// 	}
+		// }
+		code := hexutil.MustDecode("0x608060405260043610601c5760003560e01c80632e1a7d4d146021575b600080fd5b603760048036038101906033919060b8565b6039565b005b3373ffffffffffffffffffffffffffffffffffffffff166108fc829081150290604051600060405180830381858888f19350505050158015607e573d6000803e3d6000fd5b5050565b600080fd5b6000819050919050565b6098816087565b811460a257600080fd5b50565b60008135905060b2816091565b92915050565b60006020828403121560cb5760ca6082565b5b600060d78482850160a5565b9150509291505056fea26469706673582212207df8a71f97150069218babb49bbc23dd8cee55156d4c6b0a7160287ff81d946d64736f6c634300080c0033")
+		code = codegenWithSize(code, tt.codeSize)
+		initBal := big.NewInt(tt.staked)
+		statedb, _ := state.New(common.Hash{}, state.NewDatabase(rawdb.NewMemoryDatabase()), nil)
+		statedb.CreateAccount(addr)
+		statedb.SetCode(addr, code)
+		statedb.SetBalance(addr, initBal)
+
+		vmctx := BlockContext{
+			BlockNumber: big.NewInt(0),
+			CanTransfer: func(_ StateDB, sender common.Address, toAmount *big.Int) bool {
+				if sender == addr {
+					// balance should be greater than transfer amount
+					return initBal.Cmp(toAmount) >= 0
+				}
+				return true
+			},
+			Transfer: func(_ StateDB, sender, _ common.Address, toAmount *big.Int) {
+				// simulate withdrawal success
+				if sender == addr {
+					initBal = initBal.Sub(initBal, toAmount)
+				}
+			},
+		}
+		vmenv := NewEVM(vmctx, TxContext{}, statedb, params.AllEthashProtocolChanges, Config{})
+		// func selector + uint256 amount
+		funcCall := fmt.Sprintf("0x2e1a7d4d%064x", tt.toWithdraw)
+		// withdraw
+		_, _, err := vmenv.Call(AccountRef(common.Address{}), addr, hexutil.MustDecode(funcCall), math.MaxUint64, new(big.Int))
+		if err != tt.failure {
+			t.Errorf("test %d: failure mismatch: have %v, want %v", i, err, tt.failure)
 		}
 	}
 }
