@@ -132,6 +132,15 @@ func TestCreateW3IP002(t *testing.T) {
 	}
 }
 
+func canTransfer(db StateDB, addr common.Address, amount *big.Int) bool {
+	return db.GetBalance(addr).Cmp(amount) >= 0
+}
+
+func transfer(db StateDB, sender, recipient common.Address, amount *big.Int) {
+	db.SubBalance(sender, amount)
+	db.AddBalance(recipient, amount)
+}
+
 var withdrawStakingTests = []struct {
 	codeSize   uint
 	staked     int64
@@ -148,44 +157,109 @@ var withdrawStakingTests = []struct {
 
 func TestWithdrawStakingW3IP002(t *testing.T) {
 	addr := common.BytesToAddress([]byte("addr"))
-	for i, tt := range withdrawStakingTests {
+	calls := []string{"call", "callCode", "delegateCall"}
+	// contract Contract {
+	//   function withdraw(uint256 amount, address payable to) external payable {
+	//     to.transfer(amount);
+	//   }
+	// }
+	initCode := hexutil.MustDecode("0x60806040526004361061001d5760003560e01c8062f714ce14610022575b600080fd5b61003c60048036038101906100379190610122565b61003e565b005b8073ffffffffffffffffffffffffffffffffffffffff166108fc839081150290604051600060405180830381858888f19350505050158015610084573d6000803e3d6000fd5b505050565b600080fd5b6000819050919050565b6100a18161008e565b81146100ac57600080fd5b50565b6000813590506100be81610098565b92915050565b600073ffffffffffffffffffffffffffffffffffffffff82169050919050565b60006100ef826100c4565b9050919050565b6100ff816100e4565b811461010a57600080fd5b50565b60008135905061011c816100f6565b92915050565b6000806040838503121561013957610138610089565b5b6000610147858286016100af565b92505060206101588582860161010d565b915050925092905056fea264697066735822122087ac4dd4a397d6abb35fd02d3945c392429ab58f1bcf76e724e6e8534373e84d64736f6c634300080c0033")
+	for _, callMethod := range calls {
+		for i, tt := range withdrawStakingTests {
+			code := codegenWithSize(initCode, tt.codeSize)
+			statedb, _ := state.New(common.Hash{}, state.NewDatabase(rawdb.NewMemoryDatabase()), nil)
+			statedb.CreateAccount(addr)
+			statedb.SetCode(addr, code)
+			statedb.SetBalance(addr, big.NewInt(tt.staked))
 
-		// contract Contract {
-		// 	function withdraw(uint256 amount) external payable {
-		// 			payable(msg.sender).transfer(amount);
-		// 	}
-		// }
-		code := hexutil.MustDecode("0x608060405260043610601c5760003560e01c80632e1a7d4d146021575b600080fd5b603760048036038101906033919060b8565b6039565b005b3373ffffffffffffffffffffffffffffffffffffffff166108fc829081150290604051600060405180830381858888f19350505050158015607e573d6000803e3d6000fd5b5050565b600080fd5b6000819050919050565b6098816087565b811460a257600080fd5b50565b60008135905060b2816091565b92915050565b60006020828403121560cb5760ca6082565b5b600060d78482850160a5565b9150509291505056fea26469706673582212207df8a71f97150069218babb49bbc23dd8cee55156d4c6b0a7160287ff81d946d64736f6c634300080c0033")
-		code = codegenWithSize(code, tt.codeSize)
-		initBal := big.NewInt(tt.staked)
-		statedb, _ := state.New(common.Hash{}, state.NewDatabase(rawdb.NewMemoryDatabase()), nil)
-		statedb.CreateAccount(addr)
-		statedb.SetCode(addr, code)
-		statedb.SetBalance(addr, initBal)
+			// simple in-memory balance context
+			vmctx := BlockContext{
+				BlockNumber: big.NewInt(0),
+				CanTransfer: canTransfer,
+				Transfer:    transfer,
+			}
+			vmenv := NewEVM(vmctx, TxContext{}, statedb, params.AllEthashProtocolChanges, Config{})
+			// func selector + uint256 amount + to address 0xffff
+			funcCall := hexutil.MustDecode(fmt.Sprintf("0x00f714ce%064x%064x", tt.toWithdraw, 0xffff))
 
-		vmctx := BlockContext{
-			BlockNumber: big.NewInt(0),
-			CanTransfer: func(_ StateDB, sender common.Address, toAmount *big.Int) bool {
-				if sender == addr {
-					// balance should be greater than transfer amount
-					return initBal.Cmp(toAmount) >= 0
-				}
-				return true
-			},
-			Transfer: func(_ StateDB, sender, _ common.Address, toAmount *big.Int) {
-				// simulate withdrawal success
-				if sender == addr {
-					initBal = initBal.Sub(initBal, toAmount)
-				}
-			},
+			var err error
+			// withdraw
+			if callMethod == "call" {
+				_, _, err = vmenv.Call(AccountRef(common.Address{}), addr, funcCall, math.MaxUint64, new(big.Int))
+			} else if callMethod == "callCode" { // can't withdraw stakes under `addr`
+				_, _, err = vmenv.CallCode(AccountRef(addr), addr, funcCall, math.MaxUint64, new(big.Int))
+			} else if callMethod == "delegateCall" { // can't withdraw stakes under `addr`
+				caller := NewContract(AccountRef(addr), AccountRef(addr), big.NewInt(0), 0)
+				_, _, err = vmenv.DelegateCall(caller, addr, funcCall, math.MaxUint64)
+			} else {
+				panic("unrecognized call method")
+			}
+			if err != tt.failure {
+				t.Errorf("test %d: failure mismatch: have %v, want %v", i, err, tt.failure)
+			}
 		}
-		vmenv := NewEVM(vmctx, TxContext{}, statedb, params.AllEthashProtocolChanges, Config{})
-		// func selector + uint256 amount
-		funcCall := fmt.Sprintf("0x2e1a7d4d%064x", tt.toWithdraw)
-		// withdraw
-		_, _, err := vmenv.Call(AccountRef(common.Address{}), addr, hexutil.MustDecode(funcCall), math.MaxUint64, new(big.Int))
-		if err != tt.failure {
-			t.Errorf("test %d: failure mismatch: have %v, want %v", i, err, tt.failure)
+	}
+}
+
+var selfDestructTests = []struct {
+	codeSize uint
+	staked   int64
+	failure  error
+}{
+	{params.MaxCodeSizeSoft, 123, nil},                                   // happy path
+	{params.MaxCodeSizeSoft + 1, 123, nil},                               // can transfer staked funds out
+	{params.MaxCodeSizeSoft + 1, int64(params.CodeStakingPerChunk), nil}, // can transfer staked funds out
+}
+
+func TestSelfDestructW3IP002(t *testing.T) {
+	addr := common.BytesToAddress([]byte("addr"))
+	calls := []string{"call", "callCode", "delegateCall"}
+	// contract Contract {
+	// 	function die(address payable to) external {
+	// 			selfdestruct(to);
+	// 	}
+	// }
+	initCode := hexutil.MustDecode("0x6080604052348015600f57600080fd5b506004361060285760003560e01c8063c9353cb514602d575b600080fd5b60436004803603810190603f919060ba565b6045565b005b8073ffffffffffffffffffffffffffffffffffffffff16ff5b600080fd5b600073ffffffffffffffffffffffffffffffffffffffff82169050919050565b6000608c826063565b9050919050565b609a816083565b811460a457600080fd5b50565b60008135905060b4816093565b92915050565b60006020828403121560cd5760cc605e565b5b600060d98482850160a7565b9150509291505056fea2646970667358221220880ff39475cde4d997f052a7d0fb15be29d0a473fb55594f46e1a63c847f87f964736f6c634300080c0033")
+	for _, callMethod := range calls {
+		for i, tt := range selfDestructTests {
+			code := codegenWithSize(initCode, tt.codeSize)
+			statedb, _ := state.New(common.Hash{}, state.NewDatabase(rawdb.NewMemoryDatabase()), nil)
+			statedb.CreateAccount(addr)
+			statedb.SetCode(addr, code)
+			statedb.SetBalance(addr, big.NewInt(tt.staked))
+
+			vmctx := BlockContext{
+				BlockNumber: big.NewInt(0),
+				CanTransfer: canTransfer,
+				Transfer:    transfer,
+			}
+			vmenv := NewEVM(vmctx, TxContext{}, statedb, params.AllEthashProtocolChanges, Config{})
+			// func selector + to address 0xffff
+			funcCall := hexutil.MustDecode(fmt.Sprintf("0xc9353cb5%064x", 0xffff))
+
+			var err error
+			// self destruct
+			if callMethod == "call" {
+				_, _, err = vmenv.Call(AccountRef(common.Address{}), addr, funcCall, math.MaxUint64, new(big.Int))
+			} else if callMethod == "callCode" {
+				_, _, err = vmenv.CallCode(AccountRef(addr), addr, funcCall, math.MaxUint64, new(big.Int))
+			} else if callMethod == "delegateCall" {
+				caller := NewContract(AccountRef(addr), AccountRef(addr), big.NewInt(0), 0)
+				_, _, err = vmenv.DelegateCall(caller, addr, funcCall, math.MaxUint64)
+			} else {
+				panic("unrecognized call method")
+			}
+			if err != tt.failure {
+				t.Errorf("test %d: failure mismatch: have %v, want %v", i, err, tt.failure)
+			}
+			if err == nil { // post check
+				if bal := statedb.GetBalance(common.HexToAddress(fmt.Sprintf("0x%064x", 0xffff))); bal.Cmp(big.NewInt(tt.staked)) != 0 {
+					t.Errorf("test %d: staked balance mismatch: have %v, want %v", i, bal.Int64(), tt.staked)
+				}
+				if bal := statedb.GetBalance(addr); bal.Cmp(big.NewInt(0)) != 0 {
+					t.Errorf("test %d: staked balance mismatch: have %v, want %v", i, bal.Int64(), 0)
+				}
+			}
 		}
 	}
 }
