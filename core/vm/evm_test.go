@@ -172,12 +172,7 @@ func TestWithdrawStakingW3IP002(t *testing.T) {
 			statedb.SetCode(addr, code)
 			statedb.SetBalance(addr, big.NewInt(tt.staked))
 
-			// simple in-memory balance context
-			vmctx := BlockContext{
-				BlockNumber: big.NewInt(0),
-				CanTransfer: canTransfer,
-				Transfer:    transfer,
-			}
+			vmctx := BlockContext{BlockNumber: big.NewInt(0), CanTransfer: canTransfer, Transfer: transfer}
 			vmenv := NewEVM(vmctx, TxContext{}, statedb, params.AllEthashProtocolChanges, Config{})
 			// func selector + uint256 amount + to address 0xffff
 			funcCall := hexutil.MustDecode(fmt.Sprintf("0x00f714ce%064x%064x", tt.toWithdraw, 0xffff))
@@ -228,11 +223,7 @@ func TestSelfDestructW3IP002(t *testing.T) {
 			statedb.SetCode(addr, code)
 			statedb.SetBalance(addr, big.NewInt(tt.staked))
 
-			vmctx := BlockContext{
-				BlockNumber: big.NewInt(0),
-				CanTransfer: canTransfer,
-				Transfer:    transfer,
-			}
+			vmctx := BlockContext{BlockNumber: big.NewInt(0), CanTransfer: canTransfer, Transfer: transfer}
 			vmenv := NewEVM(vmctx, TxContext{}, statedb, params.AllEthashProtocolChanges, Config{})
 			// func selector + to address 0xffff
 			funcCall := hexutil.MustDecode(fmt.Sprintf("0xc9353cb5%064x", 0xffff))
@@ -252,12 +243,12 @@ func TestSelfDestructW3IP002(t *testing.T) {
 			if err != tt.failure {
 				t.Errorf("test %d: failure mismatch: have %v, want %v", i, err, tt.failure)
 			}
-			if err == nil { // post check
+			if err == nil { // post check for selfdestruct
 				if bal := statedb.GetBalance(common.HexToAddress(fmt.Sprintf("0x%064x", 0xffff))); bal.Cmp(big.NewInt(tt.staked)) != 0 {
-					t.Errorf("test %d: staked balance mismatch: have %v, want %v", i, bal.Int64(), tt.staked)
+					t.Errorf("test %d: destructed balance mismatch: have %v, want %v", i, bal.Int64(), tt.staked)
 				}
 				if bal := statedb.GetBalance(addr); bal.Cmp(big.NewInt(0)) != 0 {
-					t.Errorf("test %d: staked balance mismatch: have %v, want %v", i, bal.Int64(), 0)
+					t.Errorf("test %d: contract balance mismatch: have %v, want %v", i, bal.Int64(), 0)
 				}
 			}
 		}
