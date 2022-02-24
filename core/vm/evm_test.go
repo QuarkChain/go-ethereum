@@ -158,6 +158,7 @@ var withdrawStakingTests = []struct {
 func TestWithdrawStakingW3IP002(t *testing.T) {
 	addr := common.BytesToAddress([]byte("addr"))
 	calls := []string{"call", "callCode", "delegateCall"}
+	// compiler: 0.8.7, no optimization
 	// contract Contract {
 	//   function withdraw(uint256 amount, address payable to) external payable {
 	//     to.transfer(amount);
@@ -209,6 +210,7 @@ var selfDestructTests = []struct {
 func TestSelfDestructW3IP002(t *testing.T) {
 	addr := common.BytesToAddress([]byte("addr"))
 	calls := []string{"call", "callCode", "delegateCall"}
+	// compiler: 0.8.7, no optimization
 	// contract Contract {
 	// 	function die(address payable to) external {
 	// 			selfdestruct(to);
