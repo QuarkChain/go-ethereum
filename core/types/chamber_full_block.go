@@ -42,6 +42,9 @@ func (b *FullBlock) EncodeToRLPBytes() ([]byte, error) {
 }
 
 func (b *FullBlock) DecodeRLP(s *rlp.Stream) error {
+	if b.Block == nil {
+		b.Block = &Block{}
+	}
 	err := b.Block.DecodeRLP(s)
 	if err != nil {
 		return err
