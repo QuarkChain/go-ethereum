@@ -71,12 +71,13 @@ type VoteSet struct {
 	signedMsgType SignedMsgType
 	valSet        *ValidatorSet
 
-	mtx          sync.Mutex
-	votes        []*Vote                     // Primary votes to share
-	sum          int64                       // Sum of voting power for seen votes, discounting conflicts
-	maj23        *common.Hash                // First 2/3 majority seen
-	votesByBlock map[common.Hash]*blockVotes // string(blockHash|blockParts) -> blockVotes
-	peerMaj23s   map[string]common.Hash      // Maj23 for each peer
+	mtx           sync.Mutex
+	votesBitArray *BitArray
+	votes         []*Vote                     // Primary votes to share
+	sum           int64                       // Sum of voting power for seen votes, discounting conflicts
+	maj23         *common.Hash                // First 2/3 majority seen
+	votesByBlock  map[common.Hash]*blockVotes // string(blockHash|blockParts) -> blockVotes
+	peerMaj23s    map[string]common.Hash      // Maj23 for each peer
 }
 
 // Constructs a new VoteSet struct used to accumulate votes for given height/round.
@@ -91,6 +92,7 @@ func NewVoteSet(chainID string, height uint64, round int32,
 		round:         round,
 		signedMsgType: signedMsgType,
 		valSet:        valSet,
+		votesBitArray: NewBitArray(valSet.Size()),
 		votes:         make([]*Vote, valSet.Size()),
 		sum:           0,
 		maj23:         nil,
@@ -212,11 +214,13 @@ func (voteSet *VoteSet) addVerifiedVote(
 		// Replace vote if blockKey matches voteSet.maj23.
 		if voteSet.maj23 != nil && *voteSet.maj23 == blockKey {
 			voteSet.votes[valIndex] = vote
+			voteSet.votesBitArray.SetIndex(int(valIndex), true)
 		}
 		// Otherwise don't add it to voteSet.votes
 	} else {
 		// Add to voteSet.votes and incr .sum
 		voteSet.votes[valIndex] = vote
+		voteSet.votesBitArray.SetIndex(int(valIndex), true)
 		voteSet.sum += 1
 	}
 
@@ -313,6 +317,16 @@ func (voteSet *VoteSet) MakeCommit() *Commit {
 	}
 
 	return NewCommit(voteSet.GetHeight(), voteSet.GetRound(), *voteSet.maj23, commitSigs)
+}
+
+// Implements VoteSetReader.
+func (voteSet *VoteSet) BitArray() *BitArray {
+	if voteSet == nil {
+		return nil
+	}
+	voteSet.mtx.Lock()
+	defer voteSet.mtx.Unlock()
+	return voteSet.votesBitArray.Copy()
 }
 
 // Implements VoteSetReader.
