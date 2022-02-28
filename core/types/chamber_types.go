@@ -122,6 +122,13 @@ func (commit *Commit) VoteSignBytes(chainID string, idx int32) []byte {
 	return commit.GetVote(idx).VoteSignBytes(chainID)
 }
 
+// GetByIndex returns the vote corresponding to a given validator index.
+// Panics if `index >= commit.Size()`.
+// Implements VoteSetReader.
+func (commit *Commit) GetByIndex(valIdx int32) *Vote {
+	return commit.GetVote(valIdx)
+}
+
 // NewCommit returns a new Commit.
 func NewCommit(height uint64, round int32, blockID common.Hash, commitSigs []CommitSig) *Commit {
 	return &Commit{

@@ -520,3 +520,17 @@ func (hvs *HeightVoteSet) getVoteSet(round int32, voteType SignedMsgType) *VoteS
 		panic(fmt.Sprintf("Unexpected vote type %X", voteType))
 	}
 }
+
+// NOTE: if validator has conflicting votes, returns "canonical" vote
+// Implements VoteSetReader.
+func (voteSet *VoteSet) GetByIndex(valIndex int32) *Vote {
+	if voteSet == nil {
+		return nil
+	}
+	voteSet.mtx.Lock()
+	defer voteSet.mtx.Unlock()
+	if int(valIndex) >= len(voteSet.votes) {
+		return nil
+	}
+	return voteSet.votes[valIndex]
+}
