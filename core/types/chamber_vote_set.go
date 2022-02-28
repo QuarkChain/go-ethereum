@@ -340,6 +340,35 @@ func (voteSet *VoteSet) HasTwoThirdsAny() bool {
 	return voteSet.sum > voteSet.valSet.TotalVotingPower()*2/3
 }
 
+// Implements VoteSetReader.
+func (voteSet *VoteSet) Type() byte {
+	if voteSet == nil {
+		return 0x00
+	}
+	return byte(voteSet.signedMsgType)
+}
+
+// Implements VoteSetReader.
+func (voteSet *VoteSet) IsCommit() bool {
+	if voteSet == nil {
+		return false
+	}
+	if voteSet.signedMsgType != PrecommitType {
+		return false
+	}
+	voteSet.mtx.Lock()
+	defer voteSet.mtx.Unlock()
+	return voteSet.maj23 != nil
+}
+
+// Implements VoteSetReader.
+func (voteSet *VoteSet) Size() int {
+	if voteSet == nil {
+		return 0
+	}
+	return voteSet.valSet.Size()
+}
+
 // StringShort returns a short representation of VoteSet.
 //
 // 1. height

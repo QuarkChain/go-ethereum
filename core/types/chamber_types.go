@@ -129,6 +129,39 @@ func (commit *Commit) GetByIndex(valIdx int32) *Vote {
 	return commit.GetVote(valIdx)
 }
 
+// GetHeight returns height of the commit.
+// Implements VoteSetReader.
+func (commit *Commit) GetHeight() uint64 {
+	return commit.Height
+}
+
+// IsCommit returns true if there is at least one signature.
+// Implements VoteSetReader.
+func (commit *Commit) IsCommit() bool {
+	return len(commit.Signatures) != 0
+}
+
+// Size returns the number of signatures in the commit.
+// Implements VoteSetReader.
+func (commit *Commit) Size() int {
+	if commit == nil {
+		return 0
+	}
+	return len(commit.Signatures)
+}
+
+// GetRound returns height of the commit.
+// Implements VoteSetReader.
+func (commit *Commit) GetRound() int32 {
+	return int32(commit.Round)
+}
+
+// Type returns the vote type of the commit, which is always VoteTypePrecommit
+// Implements VoteSetReader.
+func (commit *Commit) Type() byte {
+	return byte(PrecommitType)
+}
+
 // NewCommit returns a new Commit.
 func NewCommit(height uint64, round int32, blockID common.Hash, commitSigs []CommitSig) *Commit {
 	return &Commit{
