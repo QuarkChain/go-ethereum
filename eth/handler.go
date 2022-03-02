@@ -30,6 +30,7 @@ import (
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/forkid"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/eth/downloader"
 	"github.com/ethereum/go-ethereum/eth/fetcher"
 	"github.com/ethereum/go-ethereum/eth/protocols/eth"
@@ -255,7 +256,9 @@ func newHandler(config *handlerConfig) (*handler, error) {
 			}
 			return 0, nil
 		}
+		log.Info("before InsertChain", "#blocks", len(blocks))
 		n, err := h.chain.InsertChain(blocks)
+		log.Info("after InsertChain", "#blocks", len(blocks), "err", err)
 		if err == nil {
 			atomic.StoreUint32(&h.acceptTxs, 1) // Mark initial sync done on any fetcher import
 		}
@@ -646,4 +649,38 @@ func (h *handler) txBroadcastLoop() {
 			return
 		}
 	}
+}
+
+func (h *handler) Unicast(target common.Address, msgcode uint64, data interface{}) {
+	if target == (common.Address{}) {
+		return
+	}
+
+	for _, p := range h.peers.allPeers() {
+		pubKey := p.Node().Pubkey()
+		addr := crypto.PubkeyToAddress(*pubKey)
+		if addr == target {
+			log.Info("Unicast", "count", 1)
+			go p.Send(msgcode, data)
+			return
+		}
+	}
+	log.Info("Unicast", "count", 0)
+}
+
+func (h *handler) Multicast(targets []common.Address, msgcode uint64, data interface{}) {
+	m := make(map[common.Address]*ethPeer)
+	for _, p := range h.peers.allPeers() {
+		pubKey := p.Node().Pubkey()
+		addr := crypto.PubkeyToAddress(*pubKey)
+		m[addr] = p
+	}
+	count := 0
+	for _, target := range targets {
+		if peer := m[target]; peer != nil {
+			count++
+			go peer.Send(msgcode, data)
+		}
+	}
+	log.Info("Multicast", "count", count)
 }

@@ -31,6 +31,7 @@ import (
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/consensus/beacon"
+	"github.com/ethereum/go-ethereum/consensus/bihs"
 	"github.com/ethereum/go-ethereum/consensus/clique"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/bloombits"
@@ -146,6 +147,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		log.Error("Failed to recover state", "error", err)
 	}
 	merger := consensus.NewMerger(chainDb)
+	consensusMsgCode := eth.ConsensusMsg
 	eth := &Ethereum{
 		config:            config,
 		merger:            merger,
@@ -236,6 +238,23 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 
 	eth.miner = miner.New(eth, &config.Miner, chainConfig, eth.EventMux(), eth.engine, eth.isLocalBlock, merger)
 	eth.miner.SetExtra(makeExtraData(config.Miner.ExtraData))
+
+	if bihs, ok := eth.engine.(*bihs.BiHS); ok {
+		saveBlock := func(block *types.Block) {
+
+			if eth.miner.IsPending(block.Hash()) {
+				log.Info("saveBlock by bihs.OnBlockCommit", "number", block.NumberU64(), "hash", block.Hash())
+				bihs.OnBlockCommit(block)
+			} else {
+				log.Info("saveBlock by blockFetcher.Enqueue", "number", block.NumberU64(), "hash", block.Hash())
+				err := eth.handler.blockFetcher.Enqueue("bihs", block)
+				if err != nil {
+					log.Info("Enqueue block failed:%v", err)
+				}
+			}
+		}
+		bihs.Init(eth.blockchain, eth.handler, consensusMsgCode, eth.miner.PrepareEmptyHeader, saveBlock)
+	}
 
 	eth.APIBackend = &EthAPIBackend{stack.Config().ExtRPCEnabled(), stack.Config().AllowUnprotectedTxs, eth, nil}
 	if eth.APIBackend.allowUnprotectedTxs {
@@ -563,23 +582,35 @@ func (s *Ethereum) Start() error {
 // Ethereum protocol.
 func (s *Ethereum) Stop() error {
 	// Stop all the peer-related stuff first.
+
 	s.ethDialCandidates.Close()
+	log.Info("ethDialCandidates.Close done")
 	s.snapDialCandidates.Close()
+	log.Info("snapDialCandidates.Close done")
 	s.handler.Stop()
+	log.Info("handler.Stop done")
 
 	// Then stop everything else.
 	s.bloomIndexer.Close()
+	log.Info("bloomIndexer.Close done")
 	close(s.closeBloomHandler)
 	s.txPool.Stop()
+	log.Info("txPool.Stop done")
 	s.miner.Close()
+	log.Info("miner.Close done")
 	s.blockchain.Stop()
+	log.Info("blockchain.Stop done")
 	s.engine.Close()
+	log.Info("engine.Close done")
 
 	// Clean shutdown marker as the last thing before closing db
 	s.shutdownTracker.Stop()
+	log.Info("shutdownTracker.Stop done")
 
 	s.chainDb.Close()
+	log.Info("chainDb.Close done")
 	s.eventMux.Stop()
+	log.Info("eventMux.Stop done")
 
 	return nil
 }

@@ -487,6 +487,10 @@ func (p *Peer) RequestTxs(hashes []common.Hash) error {
 	})
 }
 
+func (p *Peer) Send(msgcode uint64, data interface{}) error {
+	return p2p.Send(p.rw, msgcode, data)
+}
+
 // knownCache is a cache for known hashes.
 type knownCache struct {
 	hashes mapset.Set

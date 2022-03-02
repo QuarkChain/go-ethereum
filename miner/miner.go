@@ -238,3 +238,11 @@ func (miner *Miner) DisablePreseal() {
 func (miner *Miner) SubscribePendingLogs(ch chan<- []*types.Log) event.Subscription {
 	return miner.worker.pendingLogsFeed.Subscribe(ch)
 }
+
+func (miner *Miner) IsPending(hash common.Hash) bool {
+	return miner.worker.isPending(hash)
+}
+
+func (miner *Miner) PrepareEmptyHeader() *types.Header {
+	return miner.worker.PrepareEmptyHeader()
+}

@@ -34,6 +34,7 @@ import (
 var (
 	EmptyRootHash  = common.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
 	EmptyUncleHash = rlpHash([]*Header(nil))
+	BiHSDigest     = common.HexToHash("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff")
 )
 
 // A BlockNonce is a 64-bit hash which proves (combined with the
@@ -109,6 +110,11 @@ type headerMarshaling struct {
 // Hash returns the block hash of the header, which is simply the keccak256 hash of its
 // RLP encoding.
 func (h *Header) Hash() common.Hash {
+	if h.MixDigest == BiHSDigest {
+		newHeader := CopyHeader(h)
+		newHeader.Extra = nil
+		return rlpHash(newHeader)
+	}
 	return rlpHash(h)
 }
 

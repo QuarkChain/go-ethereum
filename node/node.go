@@ -289,6 +289,7 @@ func containsLifecycle(lfs []Lifecycle, l Lifecycle) bool {
 func (n *Node) stopServices(running []Lifecycle) error {
 	n.stopRPC()
 
+	log.Info("stopServices", "#running", len(running))
 	// Stop running lifecycles in reverse order.
 	failure := &StopError{Services: make(map[reflect.Type]error)}
 	for i := len(running) - 1; i >= 0; i-- {

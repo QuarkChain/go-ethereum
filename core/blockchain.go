@@ -1357,11 +1357,17 @@ func (bc *BlockChain) InsertChain(chain types.Blocks) (int, error) {
 				prev.Hash().Bytes()[:4], i, block.NumberU64(), block.Hash().Bytes()[:4], block.ParentHash().Bytes()[:4])
 		}
 	}
+	log.Info("before chainmu.TryLock")
 	// Pre-checks passed, start the full block imports
 	if !bc.chainmu.TryLock() {
 		return 0, errChainStopped
 	}
-	defer bc.chainmu.Unlock()
+	log.Info("after chainmu.TryLock")
+	defer func() {
+		log.Info("before chainmu.Unlock")
+		bc.chainmu.Unlock()
+		log.Info("after chainmu.Unlock")
+	}()
 	return bc.insertChain(chain, true, true)
 }
 
@@ -1374,6 +1380,10 @@ func (bc *BlockChain) InsertChain(chain types.Blocks) (int, error) {
 // is imported, but then new canon-head is added before the actual sidechain
 // completes, then the historic state could be pruned again
 func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals, setHead bool) (int, error) {
+	log.Info("insertChain called")
+	defer func() {
+		log.Info("insertChain done2")
+	}()
 	// If the chain is terminating, don't even bother starting up.
 	if bc.insertStopped() {
 		return 0, nil
@@ -1382,6 +1392,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals, setHead bool)
 	// Start a parallel signature recovery (signer will fluke on fork transition, minimal perf loss)
 	senderCacher.recoverFromBlocks(types.MakeSigner(bc.chainConfig, chain[0].Number()), chain)
 
+	log.Info("insertChain recoverFromBlocks done")
 	var (
 		stats     = insertStats{startTime: mclock.Now()}
 		lastCanon *types.Block
@@ -1389,7 +1400,9 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals, setHead bool)
 	// Fire a single chain head event if we've progressed the chain
 	defer func() {
 		if lastCanon != nil && bc.CurrentBlock().Hash() == lastCanon.Hash() {
+			log.Info("insertChain before fire ChainHeadEvent", "number", lastCanon.NumberU64(), "hash", lastCanon.Hash())
 			bc.chainHeadFeed.Send(ChainHeadEvent{lastCanon})
+			log.Info("insertChain after fire ChainHeadEvent", "number", lastCanon.NumberU64(), "hash", lastCanon.Hash())
 		}
 	}()
 	// Start the parallel header verifier
@@ -1457,6 +1470,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals, setHead bool)
 		}
 		// Falls through to the block import
 	}
+	log.Info("insertChain err switch")
 	switch {
 	// First block is pruned
 	case errors.Is(err, consensus.ErrPrunedAncestor):
@@ -1505,6 +1519,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals, setHead bool)
 		}
 	}()
 
+	log.Info("insertChain for loop", "err", err)
 	for ; block != nil && err == nil || errors.Is(err, ErrKnownBlock); block, err = it.next() {
 		// If the chain is terminating, stop processing blocks
 		if bc.insertStopped() {
@@ -1657,6 +1672,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals, setHead bool)
 			log.Debug("Inserted new block", "number", block.Number(), "hash", block.Hash(),
 				"uncles", len(block.Uncles()), "txs", len(block.Transactions()), "gas", block.GasUsed(),
 				"elapsed", common.PrettyDuration(time.Since(start)),
+				"time", block.Time(),
 				"root", block.Root())
 
 			lastCanon = block
@@ -1685,6 +1701,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals, setHead bool)
 		stats.report(chain, it.index, dirty)
 	}
 
+	log.Info("insertChain addFutureBlock", "err", err)
 	// Any blocks remaining here? The only ones we care about are the future ones
 	if block != nil && errors.Is(err, consensus.ErrFutureBlock) {
 		if err := bc.addFutureBlock(block); err != nil {
@@ -1701,6 +1718,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals, setHead bool)
 	}
 	stats.ignored += it.remaining()
 
+	log.Info("insertChain done1")
 	return it.index, err
 }
 
@@ -2297,4 +2315,25 @@ func (bc *BlockChain) InsertHeaderChain(chain []*types.Header, checkFreq int) (i
 	defer bc.chainmu.Unlock()
 	_, err := bc.hc.InsertHeaderChain(chain, start, bc.forker)
 	return 0, err
+}
+
+func (bc *BlockChain) PreExecuteBlock(block *types.Block) error {
+	parent := bc.GetBlockByHash(block.ParentHash())
+	statedb, err := bc.StateAt(parent.Root())
+	if err != nil {
+		return err
+	}
+
+	txHash := types.DeriveSha(block.Transactions(), trie.NewStackTrie(nil))
+	if block.TxHash() != txHash {
+		return fmt.Errorf("invalid txHash")
+	}
+	receipts, _, usedGas, err := bc.processor.Process(block, statedb, bc.vmConfig)
+	if err != nil {
+		return err
+	}
+	if err := bc.validator.ValidateState(block, statedb, receipts, usedGas); err != nil {
+		return err
+	}
+	return nil
 }

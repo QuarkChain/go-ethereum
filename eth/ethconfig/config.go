@@ -28,6 +28,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/consensus/beacon"
+	"github.com/ethereum/go-ethereum/consensus/bihs"
 	"github.com/ethereum/go-ethereum/consensus/clique"
 	"github.com/ethereum/go-ethereum/consensus/ethash"
 	"github.com/ethereum/go-ethereum/core"
@@ -213,9 +214,15 @@ type Config struct {
 // CreateConsensusEngine creates a consensus engine for the given chain configuration.
 func CreateConsensusEngine(stack *node.Node, chainConfig *params.ChainConfig, config *ethash.Config, notify []string, noverify bool, db ethdb.Database) consensus.Engine {
 	// If proof-of-authority is requested, set it up
+	log.Info("consensus", "chainConfig.Clique", chainConfig.Clique, "chainConfig.BiHS", chainConfig.BiHS)
 	var engine consensus.Engine
 	if chainConfig.Clique != nil {
+		log.Info("clique")
 		engine = clique.New(chainConfig.Clique, db)
+	} else if chainConfig.BiHS != nil {
+		log.Info("bihs")
+		engine = bihs.New(chainConfig.BiHS, stack.Config(), db)
+		return engine
 	} else {
 		switch config.PowMode {
 		case ethash.ModeFake:

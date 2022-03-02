@@ -22,8 +22,10 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/consensus/bihs"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/p2p"
 	"github.com/ethereum/go-ethereum/p2p/enode"
@@ -198,6 +200,17 @@ func handleMessage(backend Backend, peer *Peer) error {
 	//if peer.Version() >= ETH67 { // Left in as a sample when new protocol is added
 	//	handlers = eth67
 	//}
+	if msg.Code == ConsensusMsg {
+		if engine, ok := backend.Chain().Engine().(*bihs.BiHS); ok {
+			err := engine.HandleP2pMsg(msg)
+			if err != nil {
+				log.Warn("HandleP2pMsg", "err", err)
+			}
+			return err
+		} else {
+			return fmt.Errorf("unknown msg for current engine")
+		}
+	}
 
 	// Track the amount of time it takes to serve the request and run the handler
 	if metrics.Enabled {

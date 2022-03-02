@@ -325,7 +325,9 @@ func (w *worker) isRunning() bool {
 func (w *worker) close() {
 	atomic.StoreInt32(&w.running, 0)
 	close(w.exitCh)
+	log.Info("w.exitCh closed, waiting")
 	w.wg.Wait()
+	log.Info("w.close done")
 }
 
 // recalcRecommit recalculates the resubmitting interval upon feedback.
@@ -352,6 +354,9 @@ func recalcRecommit(minRecommit, prev time.Duration, target float64, inc bool) t
 
 // newWorkLoop is a standalone goroutine to submit new mining work upon received events.
 func (w *worker) newWorkLoop(recommit time.Duration) {
+	defer func() {
+		log.Info("newWorkLoop done")
+	}()
 	defer w.wg.Done()
 	var (
 		interrupt   *int32
@@ -403,7 +408,7 @@ func (w *worker) newWorkLoop(recommit time.Duration) {
 		case <-timer.C:
 			// If mining is running resubmit a new work cycle periodically to pull in
 			// higher priced transactions. Disable this overhead for pending blocks.
-			if w.isRunning() && (w.chainConfig.Clique == nil || w.chainConfig.Clique.Period > 0) {
+			if w.isRunning() && w.chainConfig.BiHS == nil && (w.chainConfig.Clique == nil || w.chainConfig.Clique.Period > 0) {
 				// Short circuit if no new transaction arrives.
 				if atomic.LoadInt32(&w.newTxs) == 0 {
 					timer.Reset(recommit)
@@ -450,6 +455,9 @@ func (w *worker) newWorkLoop(recommit time.Duration) {
 
 // mainLoop is a standalone goroutine to regenerate the sealing task based on the received event.
 func (w *worker) mainLoop() {
+	defer func() {
+		log.Info("mainLoop done")
+	}()
 	defer w.wg.Done()
 	defer w.txsSub.Unsubscribe()
 	defer w.chainHeadSub.Unsubscribe()
@@ -558,6 +566,9 @@ func (w *worker) mainLoop() {
 // taskLoop is a standalone goroutine to fetch sealing task from the generator and
 // push them to consensus engine.
 func (w *worker) taskLoop() {
+	defer func() {
+		log.Info("taskLoop done")
+	}()
 	defer w.wg.Done()
 	var (
 		stopCh chan struct{}
@@ -606,9 +617,20 @@ func (w *worker) taskLoop() {
 	}
 }
 
+func (w *worker) isPending(hash common.Hash) bool {
+	w.mu.RLock()
+	w.mu.RUnlock()
+
+	_, exists := w.pendingTasks[hash]
+	return exists
+}
+
 // resultLoop is a standalone goroutine to handle sealing result submitting
 // and flush relative data to the database.
 func (w *worker) resultLoop() {
+	defer func() {
+		log.Info("resultLoop done")
+	}()
 	defer w.wg.Done()
 	for {
 		select {
@@ -619,6 +641,7 @@ func (w *worker) resultLoop() {
 			}
 			// Short circuit when receiving duplicate result caused by resubmitting.
 			if w.chain.HasBlock(block.Hash(), block.NumberU64()) {
+				log.Warn("resultLoop HasBlock", "hash", block.Hash(), "number", block.NumberU64())
 				continue
 			}
 			var (
@@ -658,13 +681,15 @@ func (w *worker) resultLoop() {
 				}
 				logs = append(logs, receipt.Logs...)
 			}
+			log.Info("resultLoop before WriteBlockAndSetHead", "number", block.NumberU64(), "hash", block.Hash())
 			// Commit block and state to database.
 			_, err := w.chain.WriteBlockAndSetHead(block, receipts, logs, task.state, true)
+			log.Info("resultLoop after WriteBlockAndSetHead", "err", err)
 			if err != nil {
 				log.Error("Failed writing block to chain", "err", err)
 				continue
 			}
-			log.Info("Successfully sealed new block", "number", block.Number(), "sealhash", sealhash, "hash", hash,
+			log.Info("resultLoop Successfully sealed new block", "number", block.Number(), "sealhash", sealhash, "time", block.Time(), "hash", hash,
 				"elapsed", common.PrettyDuration(time.Since(task.createdAt)))
 
 			// Broadcast the block and announce chain insertion event
@@ -903,13 +928,26 @@ func (w *worker) commitTransactions(txs *types.TransactionsByPriceAndNonce, coin
 	return false
 }
 
-// commitNewWork generates several new sealing tasks based on the parent block.
-func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) {
+func (w *worker) PrepareEmptyHeader() *types.Header {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 
-	tstart := time.Now()
 	parent := w.chain.CurrentBlock()
+	header := w.prepareHeaderLocked(parent, 0)
+	if header != nil {
+		// make empty header deterministic
+		header.Coinbase = common.Address{}
+		header.Time = parent.Time() + 1
+		header.GasLimit = parent.GasLimit()
+		header.Root = parent.Root()
+		header.ReceiptHash = types.EmptyRootHash
+		header.TxHash = types.EmptyRootHash
+		header.UncleHash = types.EmptyUncleHash
+	}
+	return header
+}
+
+func (w *worker) prepareHeaderLocked(parent *types.Block, timestamp int64) *types.Header {
 
 	if parent.Time() >= uint64(timestamp) {
 		timestamp = int64(parent.Time() + 1)
@@ -934,13 +972,17 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 	if w.isRunning() {
 		if w.coinbase == (common.Address{}) {
 			log.Error("Refusing to mine without etherbase")
-			return
+			return nil
 		}
 		header.Coinbase = w.coinbase
 	}
+
 	if err := w.engine.Prepare(w.chain, header); err != nil {
 		log.Error("Failed to prepare header for mining", "err", err)
-		return
+		return nil
+	}
+	if header.Extra == nil {
+		return header
 	}
 	// If we are care about TheDAO hard-fork check whether to override the extra-data or not
 	if daoBlock := w.chainConfig.DAOForkBlock; daoBlock != nil {
@@ -954,6 +996,21 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 				header.Extra = []byte{} // If miner opposes, don't let it use the reserved extra-data
 			}
 		}
+	}
+
+	return header
+}
+
+// commitNewWork generates several new sealing tasks based on the parent block.
+func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+
+	tstart := time.Now()
+	parent := w.chain.CurrentBlock()
+	header := w.prepareHeaderLocked(parent, timestamp)
+	if header == nil {
+		return
 	}
 	// Could potentially happen if starting to mine in an odd state.
 	err := w.makeCurrent(parent, header)
@@ -1054,6 +1111,8 @@ func (w *worker) commit(uncles []*types.Header, interval func(), update bool, st
 			log.Info("Commit new mining work", "number", block.Number(), "sealhash", w.engine.SealHash(block.Header()),
 				"uncles", len(uncles), "txs", w.current.tcount,
 				"gas", block.GasUsed(), "fees", totalFees(block, receipts),
+				"now", time.Now().Unix(),
+				"time", block.Time(),
 				"elapsed", common.PrettyDuration(time.Since(start)))
 
 		case <-w.exitCh:
