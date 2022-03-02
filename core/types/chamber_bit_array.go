@@ -39,6 +39,15 @@ func NewBitArray(bits int) *BitArray {
 	return bA
 }
 
+func NewBitArrayFromUint64(bits int, elems []uint64) (*BitArray, error) {
+	ba := NewBitArray(bits)
+	if len(ba.Elems) != len(elems) {
+		return nil, fmt.Errorf("incorrect element size")
+	}
+	copy(ba.Elems, elems)
+	return ba, nil
+}
+
 // reset changes size of BitArray to `bits` and re-allocates (zeroed) data buffer
 func (bA *BitArray) reset(bits int) {
 	bA.mtx.Lock()
