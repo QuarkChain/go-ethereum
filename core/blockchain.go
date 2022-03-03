@@ -2298,3 +2298,25 @@ func (bc *BlockChain) InsertHeaderChain(chain []*types.Header, checkFreq int) (i
 	_, err := bc.hc.InsertHeaderChain(chain, start, bc.forker)
 	return 0, err
 }
+
+func (bc *BlockChain) PreExecuteBlock(block *types.Block) (err error) {
+	parent := bc.GetBlockByHash(block.ParentHash())
+	statedb, err := bc.StateAt(parent.Root())
+	if err != nil {
+		return
+	}
+
+	txHash := types.DeriveSha(block.Transactions(), trie.NewStackTrie(nil))
+	if block.TxHash() != txHash {
+		err = fmt.Errorf("txHash mismatch, got %s, expect %s", block.TxHash(), txHash)
+		return
+	}
+	receipts, _, usedGas, err := bc.processor.Process(block, statedb, bc.vmConfig)
+	if err != nil {
+		return
+	}
+	if err = bc.validator.ValidateState(block, statedb, receipts, usedGas); err != nil {
+		return
+	}
+	return
+}
