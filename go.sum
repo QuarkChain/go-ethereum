@@ -85,6 +85,10 @@ github.com/Kubuxu/go-os-helper v0.0.1/go.mod h1:N8B+I7vPCT80IcP58r50u4+gEEcsZETF
 github.com/OneOfOne/xxhash v1.2.2/go.mod h1:HSdplMjZKSmBqAxg5vPj2TmRDmfkzw+cTzAElWljhcU=
 github.com/QuarkChain/go-minimal-pbft v0.0.0-20220226091420-c4cc6259ff36 h1:az2yTuzEVPYCfMGLtAVbFBzPFaSJ2E48V1RRoZfheWk=
 github.com/QuarkChain/go-minimal-pbft v0.0.0-20220226091420-c4cc6259ff36/go.mod h1:nC/gDMz8G2h+K5KGDiEwEGJ//D70G8mwOBgHraRUab8=
+github.com/QuarkChain/go-minimal-pbft v0.0.0-20220301093147-7a16d2df4122 h1:wBrfFM2fgzGI0Gpz9Jw/UsUWfY/5yHnvanHPR5YhbWw=
+github.com/QuarkChain/go-minimal-pbft v0.0.0-20220301093147-7a16d2df4122/go.mod h1:nC/gDMz8G2h+K5KGDiEwEGJ//D70G8mwOBgHraRUab8=
+github.com/QuarkChain/go-minimal-pbft v0.0.0-20220303075012-6084b729db36 h1:2SJS7tfMZdmXSWpB1DsLIImaq/BKxfaYv9OvOJqY0hw=
+github.com/QuarkChain/go-minimal-pbft v0.0.0-20220303075012-6084b729db36/go.mod h1:nC/gDMz8G2h+K5KGDiEwEGJ//D70G8mwOBgHraRUab8=
 github.com/Shopify/sarama v1.19.0/go.mod h1:FVkBWblsNy7DGZRfXLU0O9RCGt5g3g3yEuWXgklEdEo=
 github.com/Shopify/toxiproxy v2.1.4+incompatible/go.mod h1:OXgGpZ6Cli1/URJOF1DMxUHB2q5Ap20/P/eIdh4G0pI=
 github.com/StackExchange/wmi v0.0.0-20180116203802-5d049714c4a6/go.mod h1:3eOhrUMpNV+6aFIbp5/iudMxNCF27Vw2OZgy4xEx0Fg=

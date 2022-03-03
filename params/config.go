@@ -373,13 +373,14 @@ type CliqueConfig struct {
 }
 
 type TendermintConfig struct {
-	Epoch        uint64 `json:"epoch"` // Epoch lengh to vote new validator
-	ValKeyPath   string
-	NodeKeyPath  string
-	P2pPort      uint
-	NetworkID    string
-	P2pBootstrap string
-	NodeName     string
+	Epoch              uint64 `json:"epoch"` // Epoch lengh to vote new validator
+	ValKeyPath         string
+	NodeKeyPath        string
+	P2pPort            uint
+	NetworkID          string
+	P2pBootstrap       string
+	NodeName           string
+	ProposerRepetition uint64
 }
 
 // String implements the stringer interface, returning the consensus engine details.

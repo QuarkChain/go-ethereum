@@ -173,7 +173,14 @@ func (c *Tendermint) Init(makeBlock func(chan *types.Block)) (err error) {
 	}()
 
 	genesis := chain.GetHeaderByNumber(0)
-	gcs := pbftconsensus.MakeGenesisChainState(c.config.NetworkID, genesis.Time, genesis.NextValidators, c.config.Epoch)
+	gcs := pbftconsensus.MakeGenesisChainState(
+		c.config.NetworkID,
+		genesis.Time,
+		genesis.NextValidators,
+		types.U64ToI64Array(genesis.NextValidatorPowers),
+		c.config.Epoch,
+		int64(c.config.ProposerRepetition),
+	)
 
 	// consensus
 	consensusState := pbftconsensus.NewConsensusState(
@@ -316,7 +323,7 @@ func (c *Tendermint) verifyHeader(chain consensus.ChainHeaderReader, header *typ
 		return fmt.Errorf("epochHeader not found, height:%d", number)
 	}
 
-	vs := types.NewValidatorSet(epochHeader.NextValidators)
+	vs := types.NewValidatorSet(epochHeader.NextValidators, types.U64ToI64Array(epochHeader.NextValidatorPowers), int64(c.config.ProposerRepetition))
 	return vs.VerifyCommit(c.config.NetworkID, header.Hash(), number, header.Commit)
 }
 
@@ -360,7 +367,10 @@ func (c *Tendermint) Prepare(chain consensus.ChainHeaderReader, header *types.He
 	if number == 1 {
 		timestamp = parentHeader.TimeMs // genesis time
 	} else {
-		timestamp = pbftconsensus.MedianTime(parentHeader.Commit, types.NewValidatorSet(epochHeader.NextValidators))
+		timestamp = pbftconsensus.MedianTime(
+			parentHeader.Commit,
+			types.NewValidatorSet(epochHeader.NextValidators, types.U64ToI64Array(epochHeader.NextValidatorPowers), int64(c.config.ProposerRepetition)),
+		)
 	}
 
 	header.TimeMs = timestamp
