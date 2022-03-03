@@ -7,21 +7,20 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 )
 
-var proposerReptition = int64(8)
-
 type ValidatorSet struct {
 	// NOTE: persisted via reflect, must be exported.
-	Validators []*Validator `json:"validators"`
-	Proposer   *Validator   `json:"proposer"`
+	Validators        []*Validator `json:"validators"`
+	Proposer          *Validator   `json:"proposer"`
+	proposerReptition int64
 }
 
-func NewValidatorSet(addrs []common.Address) *ValidatorSet {
+func NewValidatorSet(addrs []common.Address, proposerReptition int64) *ValidatorSet {
 	validators := make([]*Validator, len(addrs))
 	for i, addr := range addrs {
 		pubkey := NewEcdsaPubKey(addr)
 		validators[i] = &Validator{Address: addr, PubKey: pubkey}
 	}
-	return &ValidatorSet{Validators: validators}
+	return &ValidatorSet{Validators: validators, proposerReptition: proposerReptition}
 }
 
 // HasAddress returns true if address given is in the validator set, false -
@@ -89,7 +88,7 @@ func (vals *ValidatorSet) incrementProposerPriority() *Validator {
 	for i, val := range vals.Validators {
 		if val.ProposerPriority != 0 {
 			val.ProposerPriority += 1
-			if val.ProposerPriority > proposerReptition {
+			if val.ProposerPriority > vals.proposerReptition {
 				val.ProposerPriority = 0
 				i = i + 1
 				if i >= len(vals.Validators) {
@@ -98,12 +97,12 @@ func (vals *ValidatorSet) incrementProposerPriority() *Validator {
 				vals.Validators[i].ProposerPriority = 1
 				return vals.Validators[i]
 			}
+			return val
 		}
 	}
 
-	// all zeros, start with the first one with priority 2, i.e.,
-	// the previous block is proposed by validator 1
-	vals.Validators[0].ProposerPriority = 2
+	// all zeros, start with the first one with priority 1
+	vals.Validators[0].ProposerPriority = 1
 	return vals.Validators[0]
 }
 
@@ -149,8 +148,9 @@ func (vals *ValidatorSet) IncrementProposerPriority(times int32) {
 // Copy each validator into a new ValidatorSet.
 func (vals *ValidatorSet) Copy() *ValidatorSet {
 	return &ValidatorSet{
-		Validators: validatorListCopy(vals.Validators),
-		Proposer:   vals.Proposer,
+		Validators:        validatorListCopy(vals.Validators),
+		Proposer:          vals.Proposer,
+		proposerReptition: vals.proposerReptition,
 	}
 }
 
