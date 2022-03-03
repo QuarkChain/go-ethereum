@@ -11,7 +11,7 @@ type ValidatorSet struct {
 	// NOTE: persisted via reflect, must be exported.
 	Validators        []*Validator `json:"validators"`
 	Proposer          *Validator   `json:"proposer"`
-	proposerReptition int64
+	ProposerReptition int64
 }
 
 func NewValidatorSet(addrs []common.Address, proposerReptition int64) *ValidatorSet {
@@ -20,7 +20,7 @@ func NewValidatorSet(addrs []common.Address, proposerReptition int64) *Validator
 		pubkey := NewEcdsaPubKey(addr)
 		validators[i] = &Validator{Address: addr, PubKey: pubkey}
 	}
-	return &ValidatorSet{Validators: validators, proposerReptition: proposerReptition}
+	return &ValidatorSet{Validators: validators, ProposerReptition: proposerReptition}
 }
 
 // HasAddress returns true if address given is in the validator set, false -
@@ -88,7 +88,7 @@ func (vals *ValidatorSet) incrementProposerPriority() *Validator {
 	for i, val := range vals.Validators {
 		if val.ProposerPriority != 0 {
 			val.ProposerPriority += 1
-			if val.ProposerPriority > vals.proposerReptition {
+			if val.ProposerPriority > vals.ProposerReptition {
 				val.ProposerPriority = 0
 				i = i + 1
 				if i >= len(vals.Validators) {
@@ -150,7 +150,7 @@ func (vals *ValidatorSet) Copy() *ValidatorSet {
 	return &ValidatorSet{
 		Validators:        validatorListCopy(vals.Validators),
 		Proposer:          vals.Proposer,
-		proposerReptition: vals.proposerReptition,
+		ProposerReptition: vals.ProposerReptition,
 	}
 }
 
