@@ -61,7 +61,7 @@ type Commit struct {
 	// NOTE: can't memoize in constructor because constructor isn't used for
 	// unmarshaling.
 	// hash common.Hash
-	// bitArray *bits.BitArray
+	bitArray *BitArray
 }
 
 // ValidateBasic performs basic validation that doesn't involve state data.
@@ -148,6 +148,20 @@ func (commit *Commit) Size() int {
 		return 0
 	}
 	return len(commit.Signatures)
+}
+
+// BitArray returns a BitArray of which validators voted for BlockID or nil in this commit.
+// Implements VoteSetReader.
+func (commit *Commit) BitArray() *BitArray {
+	if commit.bitArray == nil {
+		commit.bitArray = NewBitArray(len(commit.Signatures))
+		for i, commitSig := range commit.Signatures {
+			// TODO: need to check the BlockID otherwise we could be counting conflicts,
+			// not just the one with +2/3 !
+			commit.bitArray.SetIndex(i, !commitSig.Absent())
+		}
+	}
+	return commit.bitArray
 }
 
 // GetRound returns height of the commit.

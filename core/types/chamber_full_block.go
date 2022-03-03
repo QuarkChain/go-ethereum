@@ -25,6 +25,13 @@ func (b *FullBlock) HashTo(hash common.Hash) bool {
 	return b.Hash() == hash
 }
 
+func (b *FullBlock) NilableHash() common.Hash {
+	if b == nil {
+		return common.Hash{}
+	}
+	return b.Hash()
+}
+
 func (b *FullBlock) EncodeRLP(w io.Writer) error {
 	err := b.Block.EncodeRLP(w)
 	if err != nil {

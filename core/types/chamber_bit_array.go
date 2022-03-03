@@ -39,6 +39,15 @@ func NewBitArray(bits int) *BitArray {
 	return bA
 }
 
+func NewBitArrayFromUint64(bits int, elems []uint64) (*BitArray, error) {
+	ba := NewBitArray(bits)
+	if len(ba.Elems) != len(elems) {
+		return nil, fmt.Errorf("incorrect element size")
+	}
+	copy(ba.Elems, elems)
+	return ba, nil
+}
+
 // reset changes size of BitArray to `bits` and re-allocates (zeroed) data buffer
 func (bA *BitArray) reset(bits int) {
 	bA.mtx.Lock()
@@ -120,14 +129,14 @@ func (bA *BitArray) copy() *BitArray {
 	}
 }
 
-// func (bA *BitArray) copyBits(bits int) *BitArray {
-// 	c := make([]uint64, numElems(bits))
-// 	copy(c, bA.Elems)
-// 	return &BitArray{
-// 		Bits:  bits,
-// 		Elems: c,
-// 	}
-// }
+func (bA *BitArray) copyBits(bits int) *BitArray {
+	c := make([]uint64, numElems(bits))
+	copy(c, bA.Elems)
+	return &BitArray{
+		Bits:  bits,
+		Elems: c,
+	}
+}
 
 // // Or returns a bit array resulting from a bitwise OR of the two bit arrays.
 // // If the two bit-arrys have different lengths, Or right-pads the smaller of the two bit-arrays with zeroes.
@@ -196,32 +205,32 @@ func (bA *BitArray) copy() *BitArray {
 // 	return c
 // }
 
-// // Sub subtracts the two bit-arrays bitwise, without carrying the bits.
-// // Note that carryless subtraction of a - b is (a and not b).
-// // The output is the same as bA, regardless of o's size.
-// // If bA is longer than o, o is right padded with zeroes
-// func (bA *BitArray) Sub(o *BitArray) *BitArray {
-// 	if bA == nil || o == nil {
-// 		// TODO: Decide if we should do 1's complement here?
-// 		return nil
-// 	}
-// 	bA.mtx.Lock()
-// 	o.mtx.Lock()
-// 	// output is the same size as bA
-// 	c := bA.copyBits(bA.Bits)
-// 	// Only iterate to the minimum size between the two.
-// 	// If o is longer, those bits are ignored.
-// 	// If bA is longer, then skipping those iterations is equivalent
-// 	// to right padding with 0's
-// 	smaller := tmmath.MinInt(len(bA.Elems), len(o.Elems))
-// 	for i := 0; i < smaller; i++ {
-// 		// &^ is and not in golang
-// 		c.Elems[i] &^= o.Elems[i]
-// 	}
-// 	bA.mtx.Unlock()
-// 	o.mtx.Unlock()
-// 	return c
-// }
+// Sub subtracts the two bit-arrays bitwise, without carrying the bits.
+// Note that carryless subtraction of a - b is (a and not b).
+// The output is the same as bA, regardless of o's size.
+// If bA is longer than o, o is right padded with zeroes
+func (bA *BitArray) Sub(o *BitArray) *BitArray {
+	if bA == nil || o == nil {
+		// TODO: Decide if we should do 1's complement here?
+		return nil
+	}
+	bA.mtx.Lock()
+	o.mtx.Lock()
+	// output is the same size as bA
+	c := bA.copyBits(bA.Bits)
+	// Only iterate to the minimum size between the two.
+	// If o is longer, those bits are ignored.
+	// If bA is longer, then skipping those iterations is equivalent
+	// to right padding with 0's
+	smaller := MinInt(len(bA.Elems), len(o.Elems))
+	for i := 0; i < smaller; i++ {
+		// &^ is and not in golang
+		c.Elems[i] &^= o.Elems[i]
+	}
+	bA.mtx.Unlock()
+	o.mtx.Unlock()
+	return c
+}
 
 // IsEmpty returns true iff all bits in the bit array are 0
 func (bA *BitArray) IsEmpty() bool {
