@@ -8,10 +8,12 @@ import (
 // NOTE: The ProposerPriority is not included in Validator.Hash();
 // make sure to update that method if changes are made here
 type Validator struct {
-	Address common.Address `json:"address"`
-	PubKey  PubKey         `json:"pub_key"`
+	Address     common.Address `json:"address"`
+	PubKey      PubKey         `json:"pub_key"`
+	VotingPower int64          `json:"voting_power"`
 
-	ProposerPriority int64 `json:"proposer_priority"`
+	ProposerPriority       int64 `json:"proposer_priority"`
+	ProposerReptitionTimes int64 `json:"proposer_reptition_times"`
 }
 
 // Creates a new copy of the validator so we can mutate ProposerPriority.
@@ -19,8 +21,4 @@ type Validator struct {
 func (v *Validator) Copy() *Validator {
 	vCopy := *v
 	return &vCopy
-}
-
-func (v *Validator) VotingPower() int64 {
-	return 1
 }

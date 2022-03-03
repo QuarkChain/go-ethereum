@@ -1,10 +1,29 @@
 package types
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"math"
+	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
+)
+
+const (
+	// MaxTotalVotingPower - the maximum allowed total voting power.
+	// It needs to be sufficiently small to, in all cases:
+	// 1. prevent clipping in incrementProposerPriority()
+	// 2. let (diff+diffMax-1) not overflow in IncrementProposerPriority()
+	// (Proof of 1 is tricky, left to the reader).
+	// It could be higher, but this is sufficiently large for our purposes,
+	// and leaves room for defensive purposes.
+	MaxTotalVotingPower = int64(math.MaxInt64) / 8
+
+	// PriorityWindowSizeFactor - is a constant that when multiplied with the
+	// total voting power gives the maximum allowed distance between validator
+	// priorities.
+	PriorityWindowSizeFactor = 2
 )
 
 type ValidatorSet struct {
@@ -12,15 +31,29 @@ type ValidatorSet struct {
 	Validators        []*Validator `json:"validators"`
 	Proposer          *Validator   `json:"proposer"`
 	ProposerReptition int64
+
+	// cached (unexported)
+	totalVotingPower int64
 }
 
-func NewValidatorSet(addrs []common.Address, proposerReptition int64) *ValidatorSet {
+func NewValidatorSet(addrs []common.Address, votingPowers []int64, proposerReptition int64) *ValidatorSet {
+	if len(addrs) != len(votingPowers) {
+		panic("len(addrs) != len(votingPowers")
+	}
+
 	validators := make([]*Validator, len(addrs))
 	for i, addr := range addrs {
 		pubkey := NewEcdsaPubKey(addr)
-		validators[i] = &Validator{Address: addr, PubKey: pubkey}
+		if votingPowers[i] <= 0 || votingPowers[i] > MaxTotalVotingPower {
+			panic("invalid voting power")
+		}
+		validators[i] = &Validator{Address: addr, VotingPower: votingPowers[i], PubKey: pubkey}
 	}
-	return &ValidatorSet{Validators: validators, ProposerReptition: proposerReptition}
+	vals := &ValidatorSet{Validators: validators, ProposerReptition: proposerReptition}
+	if len(addrs) > 0 {
+		vals.IncrementProposerPriority(1)
+	}
+	return vals
 }
 
 // HasAddress returns true if address given is in the validator set, false -
@@ -62,8 +95,51 @@ func (vals *ValidatorSet) Size() int {
 	return len(vals.Validators)
 }
 
+// Forces recalculation of the set's total voting power.
+// Panics if total voting power is bigger than MaxTotalVotingPower.
+func (vals *ValidatorSet) updateTotalVotingPower() {
+	sum := int64(0)
+	for _, val := range vals.Validators {
+		// mind overflow
+		sum = safeAddClip(sum, val.VotingPower)
+		if sum > MaxTotalVotingPower {
+			panic(fmt.Sprintf(
+				"Total voting power should be guarded to not exceed %v; got: %v",
+				MaxTotalVotingPower,
+				sum))
+		}
+	}
+
+	vals.totalVotingPower = sum
+}
+
 func (vals *ValidatorSet) TotalVotingPower() int64 {
-	return int64(len(vals.Validators))
+	if vals.totalVotingPower == 0 {
+		vals.updateTotalVotingPower()
+	}
+	return vals.totalVotingPower
+}
+
+// GetProposer returns the current proposer. If the validator set is empty, nil
+// is returned.
+func (vals *ValidatorSet) GetProposer() (proposer *Validator) {
+	if len(vals.Validators) == 0 {
+		return nil
+	}
+	if vals.Proposer == nil {
+		vals.Proposer = vals.findProposer()
+	}
+	return vals.Proposer.Copy()
+}
+
+func (vals *ValidatorSet) findProposer() *Validator {
+	var proposer *Validator
+	for _, val := range vals.Validators {
+		if proposer == nil || !bytes.Equal(val.Address[:], proposer.Address[:]) {
+			proposer = proposer.CompareProposerPriority(val)
+		}
+	}
+	return proposer
 }
 
 // Makes a copy of the validator list.
@@ -83,46 +159,30 @@ func (vals *ValidatorSet) IsNilOrEmpty() bool {
 	return vals == nil || len(vals.Validators) == 0
 }
 
-func (vals *ValidatorSet) incrementProposerPriority() *Validator {
-	// simple RR with 8 repetitions
-	for i, val := range vals.Validators {
-		if val.ProposerPriority != 0 {
-			val.ProposerPriority += 1
-			if val.ProposerPriority > vals.ProposerReptition {
-				val.ProposerPriority = 0
-				i = i + 1
-				if i >= len(vals.Validators) {
-					i = 0
-				}
-				vals.Validators[i].ProposerPriority = 1
-				return vals.Validators[i]
+func (vals *ValidatorSet) incrementProposerRepetitionTimes() *Validator {
+	// simple RR with repetitions
+	for _, val := range vals.Validators {
+		if val.ProposerReptitionTimes != 0 {
+			val.ProposerReptitionTimes += 1
+			if val.ProposerReptitionTimes > vals.ProposerReptition {
+				val.ProposerReptitionTimes = 0
+				break
 			}
 			return val
 		}
 	}
 
-	// all zeros, start with the first one with priority 1
-	vals.Validators[0].ProposerPriority = 1
-	return vals.Validators[0]
-}
+	// Cap the difference between priorities to be proportional to 2*totalPower by
+	// re-normalizing priorities, i.e., rescale all priorities by multiplying with:
+	//  2*totalVotingPower/(maxPriority - minPriority)
+	diffMax := PriorityWindowSizeFactor * vals.TotalVotingPower()
+	vals.RescalePriorities(diffMax)
+	vals.shiftByAvgProposerPriority()
 
-func (vals *ValidatorSet) findProposer() *Validator {
-	for _, val := range vals.Validators {
-		if val.ProposerPriority != 0 {
-			return val
-		}
-	}
-	return vals.Validators[0]
-}
+	proposer := vals.incrementProposerPriority()
+	proposer.ProposerReptitionTimes = 1
 
-func (vals *ValidatorSet) GetProposer() *Validator {
-	if len(vals.Validators) == 0 {
-		return nil
-	}
-	if vals.Proposer == nil {
-		vals.Proposer = vals.findProposer()
-	}
-	return vals.Proposer.Copy()
+	return proposer
 }
 
 // IncrementProposerPriority increments ProposerPriority of each validator and
@@ -137,12 +197,147 @@ func (vals *ValidatorSet) IncrementProposerPriority(times int32) {
 	}
 
 	var proposer *Validator
-	// Call IncrementProposerPriority(1) times times.
 	for i := int32(0); i < times; i++ {
-		proposer = vals.incrementProposerPriority()
+		proposer = vals.incrementProposerRepetitionTimes()
 	}
 
 	vals.Proposer = proposer
+}
+
+// RescalePriorities rescales the priorities such that the distance between the
+// maximum and minimum is smaller than `diffMax`. Panics if validator set is
+// empty.
+func (vals *ValidatorSet) RescalePriorities(diffMax int64) {
+	if vals.IsNilOrEmpty() {
+		panic("empty validator set")
+	}
+	// NOTE: This check is merely a sanity check which could be
+	// removed if all tests would init. voting power appropriately;
+	// i.e. diffMax should always be > 0
+	if diffMax <= 0 {
+		return
+	}
+
+	// Calculating ceil(diff/diffMax):
+	// Re-normalization is performed by dividing by an integer for simplicity.
+	// NOTE: This may make debugging priority issues easier as well.
+	diff := computeMaxMinPriorityDiff(vals)
+	ratio := (diff + diffMax - 1) / diffMax
+	if diff > diffMax {
+		for _, val := range vals.Validators {
+			val.ProposerPriority /= ratio
+		}
+	}
+}
+
+func (vals *ValidatorSet) incrementProposerPriority() *Validator {
+	for _, val := range vals.Validators {
+		// Check for overflow for sum.
+		newPrio := safeAddClip(val.ProposerPriority, val.VotingPower)
+		val.ProposerPriority = newPrio
+	}
+	// Decrement the validator with most ProposerPriority.
+	mostest := vals.getValWithMostPriority()
+	// Mind the underflow.
+	mostest.ProposerPriority = safeSubClip(mostest.ProposerPriority, vals.TotalVotingPower())
+
+	return mostest
+}
+
+// Compute the difference between the max and min ProposerPriority of that set.
+func computeMaxMinPriorityDiff(vals *ValidatorSet) int64 {
+	if vals.IsNilOrEmpty() {
+		panic("empty validator set")
+	}
+	max := int64(math.MinInt64)
+	min := int64(math.MaxInt64)
+	for _, v := range vals.Validators {
+		if v.ProposerPriority < min {
+			min = v.ProposerPriority
+		}
+		if v.ProposerPriority > max {
+			max = v.ProposerPriority
+		}
+	}
+	diff := max - min
+	if diff < 0 {
+		return -1 * diff
+	}
+	return diff
+}
+
+func (vals *ValidatorSet) getValWithMostPriority() *Validator {
+	var res *Validator
+	for _, val := range vals.Validators {
+		res = res.CompareProposerPriority(val)
+	}
+	return res
+}
+
+func (vals *ValidatorSet) shiftByAvgProposerPriority() {
+	if vals.IsNilOrEmpty() {
+		panic("empty validator set")
+	}
+	avgProposerPriority := vals.computeAvgProposerPriority()
+	for _, val := range vals.Validators {
+		val.ProposerPriority = safeSubClip(val.ProposerPriority, avgProposerPriority)
+	}
+}
+
+// Should not be called on an empty validator set.
+func (vals *ValidatorSet) computeAvgProposerPriority() int64 {
+	n := int64(len(vals.Validators))
+	sum := big.NewInt(0)
+	for _, val := range vals.Validators {
+		sum.Add(sum, big.NewInt(val.ProposerPriority))
+	}
+	avg := sum.Div(sum, big.NewInt(n))
+	if avg.IsInt64() {
+		return avg.Int64()
+	}
+
+	// This should never happen: each val.ProposerPriority is in bounds of int64.
+	panic(fmt.Sprintf("Cannot represent avg ProposerPriority as an int64 %v", avg))
+}
+
+func safeAdd(a, b int64) (int64, bool) {
+	if b > 0 && a > math.MaxInt64-b {
+		return -1, true
+	} else if b < 0 && a < math.MinInt64-b {
+		return -1, true
+	}
+	return a + b, false
+}
+
+func safeSub(a, b int64) (int64, bool) {
+	if b > 0 && a < math.MinInt64+b {
+		return -1, true
+	} else if b < 0 && a > math.MaxInt64+b {
+		return -1, true
+	}
+	return a - b, false
+}
+
+func safeAddClip(a, b int64) int64 {
+	c, overflow := safeAdd(a, b)
+	if overflow {
+		if b < 0 {
+			return math.MinInt64
+		}
+		return math.MaxInt64
+	}
+	return c
+}
+
+func safeSubClip(a, b int64) int64 {
+	c, overflow := safeSub(a, b)
+	if overflow {
+		if b > 0 {
+			return math.MinInt64
+		}
+		return math.MaxInt64
+	}
+	return c
 }
 
 // Copy each validator into a new ValidatorSet.
@@ -151,6 +346,29 @@ func (vals *ValidatorSet) Copy() *ValidatorSet {
 		Validators:        validatorListCopy(vals.Validators),
 		Proposer:          vals.Proposer,
 		ProposerReptition: vals.ProposerReptition,
+	}
+}
+
+// Returns the one with higher ProposerPriority.
+func (v *Validator) CompareProposerPriority(other *Validator) *Validator {
+	if v == nil {
+		return other
+	}
+	switch {
+	case v.ProposerPriority > other.ProposerPriority:
+		return v
+	case v.ProposerPriority < other.ProposerPriority:
+		return other
+	default:
+		result := bytes.Compare(v.Address[:], other.Address[:])
+		switch {
+		case result < 0:
+			return v
+		case result > 0:
+			return other
+		default:
+			panic("Cannot compare identical validators")
+		}
 	}
 }
 
@@ -258,7 +476,7 @@ func verifyCommitSingle(
 		// If this signature counts then add the voting power of the validator
 		// to the tally
 		if countSig(commitSig) {
-			talliedVotingPower += val.VotingPower()
+			talliedVotingPower += val.VotingPower
 		}
 
 		// check if we have enough signatures and can thus exit early

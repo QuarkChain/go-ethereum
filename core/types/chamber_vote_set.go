@@ -175,7 +175,7 @@ func (voteSet *VoteSet) addVote(vote *Vote) (added bool, err error) {
 	}
 
 	// Add vote and get conflicting vote if any.
-	added, conflicting := voteSet.addVerifiedVote(vote, blockKey)
+	added, conflicting := voteSet.addVerifiedVote(vote, blockKey, val.VotingPower)
 	if conflicting != nil {
 		return added, NewConflictingVoteError(conflicting, vote)
 	}
@@ -201,6 +201,7 @@ func (voteSet *VoteSet) getVote(valIndex int32, blockKey common.Hash) (vote *Vot
 func (voteSet *VoteSet) addVerifiedVote(
 	vote *Vote,
 	blockKey common.Hash,
+	votingPower int64,
 ) (added bool, conflicting *Vote) {
 	valIndex := vote.ValidatorIndex
 
@@ -221,7 +222,7 @@ func (voteSet *VoteSet) addVerifiedVote(
 		// Add to voteSet.votes and incr .sum
 		voteSet.votes[valIndex] = vote
 		voteSet.votesBitArray.SetIndex(int(valIndex), true)
-		voteSet.sum += 1
+		voteSet.sum += votingPower
 	}
 
 	votesByBlock, ok := voteSet.votesByBlock[blockKey]
@@ -250,7 +251,7 @@ func (voteSet *VoteSet) addVerifiedVote(
 	quorum := voteSet.valSet.TotalVotingPower()*2/3 + 1
 
 	// Add vote to votesByBlock
-	votesByBlock.addVerifiedVote(vote, 1)
+	votesByBlock.addVerifiedVote(vote, votingPower)
 
 	// If we just crossed the quorum threshold and have 2/3 majority...
 	if origSum < quorum && quorum <= votesByBlock.sum {
