@@ -200,6 +200,8 @@ func (c *Tendermint) Init(makeBlock func(chan *types.Block)) (err error) {
 		log.Warn("consensusState.Start", "err", err)
 	}
 
+	log.Info("Chamber consensus engine started", "networkd_id", c.config.NetworkID)
+
 	return
 }
 
