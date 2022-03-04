@@ -231,7 +231,6 @@ func (t *StateTest) RunNoVerify(subtest StateSubtest, vmconfig vm.Config, snapsh
 	gaspool := new(core.GasPool)
 	gaspool.AddGas(block.GasLimit())
 	if _, err := core.ApplyMessage(evm, msg, gaspool); err != nil {
-		panic(err)
 		statedb.RevertToSnapshot(snapshot)
 	}
 
@@ -374,8 +373,4 @@ func rlpHash(x interface{}) (h common.Hash) {
 
 func vmTestBlockHash(n uint64) common.Hash {
 	return common.BytesToHash(crypto.Keccak256([]byte(big.NewInt(int64(n)).String())))
-}
-
-func getCreateContractAddr(caller common.Address, nonce uint64) common.Address {
-	return crypto.CreateAddress(caller, nonce)
 }

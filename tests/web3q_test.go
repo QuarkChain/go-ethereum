@@ -7,6 +7,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/vm"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/eth/tracers/logger"
 	"math/big"
 	"path/filepath"
@@ -172,4 +173,8 @@ func withTrace1(t *testing.T, gasLimit uint64, test func(vm.Config) error) {
 	}
 	// t.Logf("EVM output: 0x%x", tracer.Output())
 	// t.Logf("EVM error: %v", tracer.Error())
+}
+
+func getCreateContractAddr(caller common.Address, nonce uint64) common.Address {
+	return crypto.CreateAddress(caller, nonce)
 }
