@@ -30,6 +30,7 @@ import (
 	"github.com/ethereum/go-ethereum/consensus/beacon"
 	"github.com/ethereum/go-ethereum/consensus/clique"
 	"github.com/ethereum/go-ethereum/consensus/ethash"
+	"github.com/ethereum/go-ethereum/consensus/tendermint"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/eth/downloader"
 	"github.com/ethereum/go-ethereum/eth/gasprice"
@@ -216,6 +217,13 @@ func CreateConsensusEngine(stack *node.Node, chainConfig *params.ChainConfig, co
 	var engine consensus.Engine
 	if chainConfig.Clique != nil {
 		engine = clique.New(chainConfig.Clique, db)
+	} else if chainConfig.Tendermint != nil {
+		// Setup default network id if it is empty.
+		if chainConfig.Tendermint.NetworkID == "" {
+			chainConfig.Tendermint.NetworkID = "evm_" + chainConfig.ChainID.String()
+		}
+		engine = tendermint.New(chainConfig.Tendermint)
+		return engine
 	} else {
 		switch config.PowMode {
 		case ethash.ModeFake:

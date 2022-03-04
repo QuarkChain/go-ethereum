@@ -19,25 +19,32 @@ package tendermint
 
 import (
 	"bytes"
+	"context"
+	"crypto/ecdsa"
 	"errors"
 	"fmt"
-	"io"
+	"io/ioutil"
 	"math/big"
+	"reflect"
 	"time"
 
+	pbftconsensus "github.com/QuarkChain/go-minimal-pbft/consensus"
+	libp2p "github.com/QuarkChain/go-minimal-pbft/p2p"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/consensus/misc"
+	"github.com/ethereum/go-ethereum/consensus/tendermint/adapter"
+	"github.com/ethereum/go-ethereum/consensus/tendermint/gov"
+	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/ethdb"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
-	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/ethereum/go-ethereum/trie"
-	"golang.org/x/crypto/sha3"
+	p2pcrypto "github.com/libp2p/go-libp2p-core/crypto"
 )
 
 // Clique proof-of-authority protocol constants.
@@ -76,13 +83,16 @@ var (
 // Clique is the proof-of-authority consensus engine proposed to support the
 // Ethereum testnet following the Ropsten attacks.
 type Tendermint struct {
-	config *params.TendermintConfig // Consensus engine configuration parameters
-	db     ethdb.Database           // Database to store and retrieve snapshot checkpoints
+	config        *params.TendermintConfig // Consensus engine configuration parameters
+	rootCtxCancel context.CancelFunc
+	rootCtx       context.Context
+	governance    *gov.Governance
+	chain         *core.BlockChain
 }
 
 // New creates a Clique proof-of-authority consensus engine with the initial
 // signers set to the ones provided by the user.
-func New(config *params.TendermintConfig, db ethdb.Database) *Tendermint {
+func New(config *params.TendermintConfig) *Tendermint {
 	// Set any missing consensus parameters to their defaults
 	conf := *config
 	if conf.Epoch == 0 {
@@ -91,8 +101,137 @@ func New(config *params.TendermintConfig, db ethdb.Database) *Tendermint {
 
 	return &Tendermint{
 		config: &conf,
-		db:     db,
 	}
+}
+
+func (c *Tendermint) SetBlockChain(chain *core.BlockChain) {
+	// governance
+	governance := gov.New(c.config.Epoch, chain)
+	c.governance = governance
+	c.chain = chain
+}
+
+func (c *Tendermint) Init(makeBlock func(chan *types.Block)) (err error) {
+	chain := c.chain
+	// Outbound gossip message queue
+	sendC := make(chan pbftconsensus.Message, 1000)
+
+	// Inbound observations
+	obsvC := make(chan pbftconsensus.MsgInfo, 1000)
+
+	// Node's main lifecycle context.
+	rootCtx, rootCtxCancel := context.WithCancel(context.Background())
+	c.rootCtxCancel = rootCtxCancel
+	c.rootCtx = rootCtx
+
+	makeFullBlock := func() *types.FullBlock {
+		resultCh := make(chan *types.Block, 1)
+		makeBlock(resultCh)
+		select {
+		case block := <-resultCh:
+			if block == nil {
+				return nil
+			}
+			parent := chain.GetHeaderByHash(block.ParentHash())
+			if parent == nil {
+				return nil
+			}
+			return &types.FullBlock{Block: block, LastCommit: parent.Commit}
+		case <-rootCtx.Done():
+			return nil
+		}
+	}
+	// datastore
+	store := adapter.NewStore(chain, c.governance, c.VerifyHeader, makeFullBlock)
+
+	// validator key
+	valKey, err := loadValidatorKey(c.config.ValKeyPath)
+	if err != nil {
+		return
+	}
+
+	var privVal pbftconsensus.PrivValidator
+	privVal = pbftconsensus.NewPrivValidatorLocal(valKey)
+
+	// p2p key
+	p2pPriv, err := loadP2pKey(c.config.NodeKeyPath)
+	if err != nil {
+		return
+	}
+
+	// p2p server
+	p2pserver, err := libp2p.NewP2PServer(rootCtx, store, obsvC, sendC, p2pPriv, c.config.P2pPort, c.config.NetworkID, c.config.P2pBootstrap, c.config.NodeName, rootCtxCancel)
+	if err != nil {
+		return
+	}
+
+	go func() {
+		err := p2pserver.Run(rootCtx)
+		if err != nil {
+			log.Warn("p2pserver.Run", "err", err)
+		}
+	}()
+
+	genesis := chain.GetHeaderByNumber(0)
+	gcs := pbftconsensus.MakeGenesisChainState(
+		c.config.NetworkID,
+		genesis.Time,
+		genesis.NextValidators,
+		types.U64ToI64Array(genesis.NextValidatorPowers),
+		c.config.Epoch,
+		int64(c.config.ProposerRepetition),
+	)
+
+	// consensus
+	consensusState := pbftconsensus.NewConsensusState(
+		rootCtx,
+		pbftconsensus.NewDefaultConsesusConfig(),
+		*gcs,
+		store,
+		store,
+		obsvC,
+		sendC,
+	)
+
+	consensusState.SetPrivValidator(privVal)
+
+	err = consensusState.Start(rootCtx)
+	if err != nil {
+		log.Warn("consensusState.Start", "err", err)
+	}
+
+	log.Info("Chamber consensus engine started", "networkd_id", c.config.NetworkID)
+
+	return
+}
+
+func loadP2pKey(filename string) (key p2pcrypto.PrivKey, err error) {
+	b, err := ioutil.ReadFile(filename)
+	if err != nil {
+		err = fmt.Errorf("failed to read node key: %w", err)
+		return
+	}
+	key, err = p2pcrypto.UnmarshalPrivateKey(b)
+	if err != nil {
+		err = fmt.Errorf("failed to unmarshal node key: %w", err)
+		return
+	}
+	return
+}
+
+// loadValidatorKey loads a serialized guardian key from disk.
+func loadValidatorKey(filename string) (*ecdsa.PrivateKey, error) {
+	b, err := ioutil.ReadFile(filename)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open file: %w", err)
+	}
+
+	gk, err := crypto.ToECDSA(b)
+	if err != nil {
+		return nil, fmt.Errorf("failed to deserialize raw key data: %w", err)
+	}
+
+	return gk, nil
 }
 
 // Author implements consensus.Engine, returning the Ethereum address recovered
@@ -103,7 +242,7 @@ func (c *Tendermint) Author(header *types.Header) (common.Address, error) {
 
 // VerifyHeader checks whether a header conforms to the consensus rules.
 func (c *Tendermint) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Header, seal bool) error {
-	return c.verifyHeader(chain, header, nil)
+	return c.verifyHeader(chain, header, nil, seal)
 }
 
 // VerifyHeaders is similar to VerifyHeader, but verifies a batch of headers. The
@@ -115,7 +254,7 @@ func (c *Tendermint) VerifyHeaders(chain consensus.ChainHeaderReader, headers []
 
 	go func() {
 		for i, header := range headers {
-			err := c.verifyHeader(chain, header, headers[:i])
+			err := c.verifyHeader(chain, header, headers[:i], seals[i])
 
 			select {
 			case <-abort:
@@ -131,7 +270,7 @@ func (c *Tendermint) VerifyHeaders(chain consensus.ChainHeaderReader, headers []
 // caller may optionally pass in a batch of parents (ascending order) to avoid
 // looking those up from the database. This is useful for concurrently verifying
 // a batch of new headers.
-func (c *Tendermint) verifyHeader(chain consensus.ChainHeaderReader, header *types.Header, parents []*types.Header) error {
+func (c *Tendermint) verifyHeader(chain consensus.ChainHeaderReader, header *types.Header, parents []*types.Header, seal bool) error {
 	if header.Number == nil {
 		return errUnknownBlock
 	}
@@ -145,6 +284,11 @@ func (c *Tendermint) verifyHeader(chain consensus.ChainHeaderReader, header *typ
 	checkpoint := (number % c.config.Epoch) == 0
 	if checkpoint && header.Coinbase != (common.Address{}) {
 		return errInvalidCheckpointBeneficiary
+	}
+
+	nextValidators := c.governance.NextValidators(number)
+	if !reflect.DeepEqual(nextValidators, header.NextValidators) {
+		return errors.New("invalid NextValidators")
 	}
 	if !bytes.Equal(header.Nonce[:], nonceDefault) {
 		return errors.New("invalid nonce")
@@ -172,7 +316,30 @@ func (c *Tendermint) verifyHeader(chain consensus.ChainHeaderReader, header *typ
 		return err
 	}
 	// All basic checks passed, verify signatures fields
-	return nil
+	if !seal {
+		return nil
+	}
+
+	epochHeader := c.getEpochHeader(chain, header)
+	if epochHeader == nil {
+		return fmt.Errorf("epochHeader not found, height:%d", number)
+	}
+
+	vs := types.NewValidatorSet(epochHeader.NextValidators, types.U64ToI64Array(epochHeader.NextValidatorPowers), int64(c.config.ProposerRepetition))
+	return vs.VerifyCommit(c.config.NetworkID, header.Hash(), number, header.Commit)
+}
+
+func (c *Tendermint) getEpochHeader(chain consensus.ChainHeaderReader, header *types.Header) *types.Header {
+	number := header.Number.Uint64()
+	checkpoint := (number % c.config.Epoch) == 0
+	var epochHeight uint64
+	if checkpoint {
+		epochHeight -= c.config.Epoch
+	} else {
+		epochHeight = number - (number % c.config.Epoch)
+	}
+	return chain.GetHeaderByNumber(epochHeight)
+
 }
 
 // VerifyUncles implements consensus.Engine, always returning an error for any
@@ -187,7 +354,32 @@ func (c *Tendermint) VerifyUncles(chain consensus.ChainReader, block *types.Bloc
 // Prepare implements consensus.Engine, preparing all the consensus fields of the
 // header for running the transactions on top.
 func (c *Tendermint) Prepare(chain consensus.ChainHeaderReader, header *types.Header) error {
-	return errors.New("prepare not supported")
+	number := header.Number.Uint64()
+	epochHeader := c.getEpochHeader(chain, header)
+	if epochHeader == nil {
+		return fmt.Errorf("epochHeader not found, height:%d", number)
+	}
+	parentHeader := chain.GetHeaderByHash(header.ParentHash)
+	if epochHeader == nil {
+		return fmt.Errorf("parentHeader not found, height:%d", number)
+	}
+
+	header.LastCommitHash = parentHeader.Commit.Hash()
+	var timestamp uint64
+	if number == 1 {
+		timestamp = parentHeader.TimeMs // genesis time
+	} else {
+		timestamp = pbftconsensus.MedianTime(
+			parentHeader.Commit,
+			types.NewValidatorSet(epochHeader.NextValidators, types.U64ToI64Array(epochHeader.NextValidatorPowers), int64(c.config.ProposerRepetition)),
+		)
+	}
+
+	header.TimeMs = timestamp
+	header.Time = timestamp / 1000
+
+	header.NextValidators = c.governance.NextValidators(number)
+	return nil
 }
 
 // Finalize implements consensus.Engine, ensuring no uncles are set, nor block
@@ -210,8 +402,13 @@ func (c *Tendermint) FinalizeAndAssemble(chain consensus.ChainHeaderReader, head
 
 // Seal implements consensus.Engine, attempting to create a sealed block using
 // the local signing credentials.
-func (c *Tendermint) Seal(chain consensus.ChainHeaderReader, block *types.Block, results chan<- *types.Block, stop <-chan struct{}) error {
-	return errors.New("Seal not supported")
+func (c *Tendermint) Seal(chain consensus.ChainHeaderReader, block *types.Block, resultCh chan<- *types.Block, stop <-chan struct{}) error {
+	// resultCh is generated by makeFullBlock
+	select {
+	case resultCh <- block:
+	case <-c.rootCtx.Done():
+	}
+	return nil
 }
 
 // CalcDifficulty is the difficulty adjustment algorithm. It returns the difficulty
@@ -225,11 +422,15 @@ func (c *Tendermint) CalcDifficulty(chain consensus.ChainHeaderReader, time uint
 
 // SealHash returns the hash of a block prior to it being sealed.
 func (c *Tendermint) SealHash(header *types.Header) common.Hash {
-	return SealHash(header)
+	return header.Hash()
 }
 
 // Close implements consensus.Engine. It's a noop for clique as there are no background threads.
 func (c *Tendermint) Close() error {
+	if c.rootCtxCancel != nil {
+		c.rootCtxCancel()
+	}
+
 	return nil
 }
 
@@ -237,51 +438,4 @@ func (c *Tendermint) Close() error {
 // controlling the signer voting.
 func (c *Tendermint) APIs(chain consensus.ChainHeaderReader) []rpc.API {
 	return []rpc.API{{}}
-}
-
-// SealHash returns the hash of a block prior to it being sealed.
-func SealHash(header *types.Header) (hash common.Hash) {
-	hasher := sha3.NewLegacyKeccak256()
-	encodeSigHeader(hasher, header)
-	hasher.(crypto.KeccakState).Read(hash[:])
-	return hash
-}
-
-// CliqueRLP returns the rlp bytes which needs to be signed for the proof-of-authority
-// sealing. The RLP to sign consists of the entire header apart from the 65 byte signature
-// contained at the end of the extra data.
-//
-// Note, the method requires the extra data to be at least 65 bytes, otherwise it
-// panics. This is done to avoid accidentally using both forms (signature present
-// or not), which could be abused to produce different hashes for the same header.
-func TendermintRLP(header *types.Header) []byte {
-	b := new(bytes.Buffer)
-	encodeSigHeader(b, header)
-	return b.Bytes()
-}
-
-func encodeSigHeader(w io.Writer, header *types.Header) {
-	enc := []interface{}{
-		header.ParentHash,
-		header.UncleHash,
-		header.Coinbase,
-		header.Root,
-		header.TxHash,
-		header.ReceiptHash,
-		header.Bloom,
-		header.Difficulty,
-		header.Number,
-		header.GasLimit,
-		header.GasUsed,
-		header.Time,
-		header.Extra, // Yes, this will panic if extra is too short
-		header.MixDigest,
-		header.Nonce,
-	}
-	if header.BaseFee != nil {
-		enc = append(enc, header.BaseFee)
-	}
-	if err := rlp.Encode(w, enc); err != nil {
-		panic("can't encode: " + err.Error())
-	}
 }

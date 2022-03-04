@@ -87,16 +87,26 @@ type Header struct {
 	BaseFee *big.Int `json:"baseFeePerGas" rlp:"optional"`
 
 	// Chamber-related data structure
-	TimeMs         uint64           `json:"TimeMs" rlp:"optional"`
-	NextValidators []common.Address `json:"NextValidators" rlp:"optional"`
-	LastCommitHash common.Hash      `json:"LastCommitHash" rlp:"optional"`
-	Commit         *Commit          `json:"Commit" rlp:"optional"`
+	TimeMs              uint64           `json:"TimeMs" rlp:"optional"`
+	NextValidators      []common.Address `json:"NextValidators" rlp:"optional"`
+	NextValidatorPowers []uint64         `json:"NextValidatorPowers" rlp:"optional"`
+	LastCommitHash      common.Hash      `json:"LastCommitHash" rlp:"optional"`
+	Commit              *Commit          `json:"Commit" rlp:"optional"`
 
 	/*
 		TODO (MariusVanDerWijden) Add this field once needed
 		// Random was added during the merge and contains the BeaconState randomness
 		Random common.Hash `json:"random" rlp:"optional"`
 	*/
+}
+
+// assume no overflow
+func U64ToI64Array(a []uint64) []int64 {
+	b := make([]int64, len(a))
+	for i := 0; i < len(a); i++ {
+		b[i] = int64(a[i])
+	}
+	return b
 }
 
 // field type overrides for gencodec
