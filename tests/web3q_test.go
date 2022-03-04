@@ -66,7 +66,6 @@ func TestWeb3QStakeForCode(t *testing.T) {
 	}
 }
 
-const size1k = 1024
 const CHUNK_SIZE = 1024 * 24
 const CODE_STATKING_PER_CHUNK = 1000000000000000000
 const CodeOffset = 570
