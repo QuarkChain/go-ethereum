@@ -119,7 +119,7 @@ func checkState(t *testing.T, subtest StateSubtest, caller common.Address, test 
 			}
 			// evm execute fail,so the code of contract is empty
 			if len(code) != 0 {
-				return fmt.Errorf("evm should execute fail")
+				return fmt.Errorf("evm should execute fail，test fail!")
 			}
 			t.Log("evm execute failed to execute, test succeed!")
 			// evm execute failed to execute, test succeed!
