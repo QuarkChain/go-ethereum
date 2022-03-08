@@ -3,15 +3,56 @@ package gov
 import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus"
+	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/params"
 )
 
 type Governance struct {
-	epoch uint64
-	chain consensus.ChainHeaderReader
+	config *params.TendermintConfig
+	chain  consensus.ChainHeaderReader
 }
 
-func New(epoch uint64, chain consensus.ChainHeaderReader) *Governance {
-	return &Governance{epoch: epoch, chain: chain}
+func New(config *params.TendermintConfig, chain consensus.ChainHeaderReader) *Governance {
+	return &Governance{config: config, chain: chain}
+}
+
+// Returns the validator sets for last, current, next blocks
+func (g *Governance) GetValidatorSets(height uint64) (*types.ValidatorSet, *types.ValidatorSet, *types.ValidatorSet) {
+	if height == 0 {
+		panic("cannot get genesis validator set")
+	}
+
+	last := g.GetValidatorSet(height - 1)
+	current := g.GetNextValidatorSet(height-1, last)
+	next := g.GetNextValidatorSet(height, current)
+	return last, current, next
+}
+
+// GetValidatorSet returns the validator set of a height
+func (g *Governance) GetValidatorSet(height uint64) *types.ValidatorSet {
+	if height == 0 {
+		return &types.ValidatorSet{}
+	}
+
+	idxInEpoch := (height - 1) % g.config.Epoch
+	epochNumber := height - 1 - idxInEpoch
+	epochHeader := g.chain.GetHeaderByNumber(epochNumber)
+	epochVals := types.NewValidatorSet(epochHeader.NextValidators, types.U64ToI64Array(epochHeader.NextValidatorPowers), int64(g.config.Epoch))
+	if idxInEpoch != 0 {
+		epochVals.IncrementProposerPriority(int32(idxInEpoch))
+	}
+
+	return epochVals
+}
+
+func (g *Governance) GetNextValidatorSet(height uint64, vals *types.ValidatorSet) *types.ValidatorSet {
+	if height%g.config.Epoch == 0 {
+		return g.GetValidatorSet(height + 1)
+	}
+
+	cvals := vals.Copy()
+	cvals.IncrementProposerPriority(1)
+	return cvals
 }
 
 // EpochValidators returns the current epoch validators that height belongs to
@@ -29,7 +70,7 @@ func (g *Governance) EpochValidatorPowers(height uint64) []uint64 {
 }
 
 func (g *Governance) NextValidators(height uint64) []common.Address {
-	if height%g.epoch != 0 {
+	if height%g.config.Epoch != 0 {
 		return []common.Address{}
 	}
 
@@ -73,7 +114,7 @@ func CompareValidatorPowers(lhs, rhs []uint64) bool {
 }
 
 func (g *Governance) NextValidatorPowers(height uint64) []uint64 {
-	if height%g.epoch != 0 {
+	if height%g.config.Epoch != 0 {
 		return []uint64{}
 	}
 

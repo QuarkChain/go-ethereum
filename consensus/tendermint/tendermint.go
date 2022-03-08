@@ -147,6 +147,10 @@ func (c *Tendermint) Init(chain *core.BlockChain, makeBlock func(parent common.H
 	store := adapter.NewStore(chain, c.VerifyHeader, makeBlock)
 
 	// p2p key
+	if TestMode {
+		// Use "" to indicate a temp key
+		c.config.NodeKeyPath = ""
+	}
 	p2pPriv, err := getOrCreateNodeKey(c.config.NodeKeyPath)
 	if err != nil {
 		return
@@ -167,26 +171,20 @@ func (c *Tendermint) Init(chain *core.BlockChain, makeBlock func(parent common.H
 		}
 	}()
 
-	gov := gov.New(c.config.Epoch, chain)
+	gov := gov.New(c.config, chain)
+
 	block := chain.CurrentHeader()
 	number := block.Number.Uint64()
-	var lastValidators []common.Address
-	var lastValidatorPowers []uint64
-	if number != 0 {
-		lastValidators = gov.EpochValidators(number - 1)
-		lastValidatorPowers = gov.EpochValidatorPowers(number - 1)
-	}
+	last, current, next := gov.GetValidatorSets(number + 1)
+
 	gcs := pbftconsensus.MakeChainState(
 		c.config.NetworkID,
 		number,
 		block.Hash(),
 		block.TimeMs,
-		gov.EpochValidators(number),
-		types.U64ToI64Array(gov.EpochValidatorPowers(number)),
-		gov.NextValidators(number),
-		types.U64ToI64Array(gov.NextValidatorPowers(number)),
-		lastValidators,
-		types.U64ToI64Array(lastValidatorPowers),
+		last,
+		current,
+		next,
 		c.config.Epoch,
 		int64(c.config.ProposerRepetition),
 	)
@@ -232,17 +230,17 @@ func EnableTestMode() {
 }
 
 func getOrCreateNodeKey(path string) (p2pcrypto.PrivKey, error) {
-	if TestMode {
-		path = ""
-	}
 	if path == "" {
+		// Create a temp key
+		log.Info("Create a temp node key")
+
 		priv, _, err := p2pcrypto.GenerateKeyPair(p2pcrypto.Ed25519, -1)
 		if err != nil {
 			panic(err)
 		}
-		// don't save priv in test mode
 		return priv, nil
 	}
+
 	b, err := ioutil.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -333,7 +331,7 @@ func (c *Tendermint) verifyHeader(chain consensus.ChainHeaderReader, header *typ
 		return consensus.ErrFutureBlock
 	}
 
-	governance := gov.New(c.config.Epoch, chain)
+	governance := gov.New(c.config, chain)
 	if !gov.CompareValidators(header.NextValidators, governance.NextValidators(number)) {
 		return errors.New("NextValidators is incorrect")
 	}
@@ -432,7 +430,7 @@ func (c *Tendermint) Prepare(chain consensus.ChainHeaderReader, header *types.He
 	header.Time = timestamp / 1000
 	header.Difficulty = big.NewInt(1)
 
-	governance := gov.New(c.config.Epoch, chain)
+	governance := gov.New(c.config, chain)
 	header.NextValidators = governance.NextValidators(number)
 	header.NextValidatorPowers = governance.NextValidatorPowers(number)
 
