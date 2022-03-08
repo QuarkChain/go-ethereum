@@ -150,15 +150,15 @@ func TestWeb3QState(t *testing.T) {
 			for _, subtest := range test.Subtests() {
 				subtest := subtest
 				key := fmt.Sprintf("%s%d", subtest.Fork, subtest.Index)
-
 				t.Run(key+"/trie", func(t *testing.T) {
-					withTrace1(t, test.gasLimit(subtest), func(vmconfig vm.Config) error {
-						_, db, err := test.Run(subtest, vmconfig, false)
-						if err != nil {
-							StateTrie(db, test, t)
-						}
-						return st.checkFailure(t, err)
-					})
+					config := vm.Config{}
+					_, db, err := test.Run(subtest, config, false)
+					st.checkFailure(t, err)
+					if err != nil {
+						StateTrie(db, test, t)
+						t.Error(err)
+					}
+
 				})
 			}
 		})
@@ -187,40 +187,6 @@ func StateTrie(db *state.StateDB, test *StateTest, t *testing.T) {
 		fmt.Println("nonce:", db.GetNonce(contract))
 		fmt.Println("--------------------------------------------")
 	}
-}
-
-const traceErrorLimit1 = 400000000
-
-func withTrace1(t *testing.T, gasLimit uint64, test func(vm.Config) error) {
-	// Use config from command line arguments.
-	config := vm.Config{}
-	err := test(config)
-	if err == nil {
-		return
-	}
-
-	// Test failed, re-run with tracing enabled.
-	t.Error(err)
-	if gasLimit > traceErrorLimit1 {
-		t.Log("gas limit too high for EVM trace")
-		return
-	}
-	buf := new(bytes.Buffer)
-	w := bufio.NewWriter(buf)
-	tracer := logger.NewJSONLogger(&logger.Config{}, w)
-	config.Debug, config.Tracer = true, tracer
-	err2 := test(config)
-	if !reflect.DeepEqual(err, err2) {
-		t.Errorf("different error for second run: %v", err2)
-	}
-	w.Flush()
-	if buf.Len() == 0 {
-		t.Log("no EVM operation logs generated")
-	} else {
-		t.Log("EVM operation log:\n" + buf.String())
-	}
-	// t.Logf("EVM output: 0x%x", tracer.Output())
-	// t.Logf("EVM error: %v", tracer.Error())
 }
 
 func getCreateContractAddr(caller common.Address, nonce uint64) common.Address {
