@@ -23,7 +23,6 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/crypto"
-	"math/big"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -177,7 +176,7 @@ func TestWeb3QStakeForCode(t *testing.T) {
 	st := new(testMatcher)
 
 	for _, dir := range []string{
-		StakeTestDir,
+		web3QTestDir,
 	} {
 		st.walk(t, dir, func(t *testing.T, name string, test *StateTest) {
 			for _, subtest := range test.Subtests() {
@@ -186,13 +185,7 @@ func TestWeb3QStakeForCode(t *testing.T) {
 
 				t.Run(key+"/trie", func(t *testing.T) {
 					withTrace1(t, test.gasLimit(subtest), func(vmconfig vm.Config) error {
-
 						_, db, err := test.Run(subtest, vmconfig, false)
-						if err == nil {
-							caller := common.HexToAddress("0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b")
-							err = checkState(t, subtest, caller, test, db)
-						}
-
 						if err != nil {
 							StateTrie(db, test, t)
 						}
@@ -230,58 +223,6 @@ func StateTrie(db *state.StateDB, test *StateTest, t *testing.T) {
 		fmt.Println("nonce:", db.GetNonce(contract))
 		fmt.Println("--------------------------------------------")
 	}
-}
-func checkState(t *testing.T, subtest StateSubtest, caller common.Address, test *StateTest, db *state.StateDB) error {
-	post := test.json.Post[subtest.Fork][subtest.Index]
-	nonce := test.json.Tx.Nonce
-	contract := getCreateContractAddr(caller, nonce)
-
-	datastr := test.json.Tx.Data[post.Indexes.Data]
-	dataBytes := common.Hex2Bytes(datastr[2:])
-	inputCode := dataBytes[CodeOffset:]
-	code := db.GetCode(contract)
-
-	// notify: need cut "0x"
-	valuestr := test.json.Tx.Value[post.Indexes.Value]
-	valueBytes := common.Hex2Bytes(valuestr[2:])
-	value := new(big.Int).SetBytes(valueBytes)
-	contractBalance := db.GetBalance(contract)
-
-	t.Log("inputcode len:", len(inputCode))
-	if len(inputCode) > CHUNK_SIZE {
-		t.Log("case: pay web3q for staking")
-		// check if  transaction have enough value to pay for staking
-		needValue := (len(inputCode) - 1) / CHUNK_SIZE
-		needValue = needValue * CODE_STATKING_PER_CHUNK
-		t.Log("need value:", needValue, "  value:", value.Int64())
-		if value.Cmp(big.NewInt(int64(needValue))) < 0 {
-			t.Log("case: no enough value for staking")
-			// evm execute fail,so the balance of contract is zero
-			if contractBalance.Cmp(big.NewInt(0)) != 0 {
-				return fmt.Errorf("evm should execute fail, need value:%d , tx value:%d", needValue, value.Int64())
-			}
-			// evm execute fail,so the code of contract is empty
-			if len(code) != 0 {
-				return fmt.Errorf("evm should execute fail，test fail!")
-			}
-			t.Log("evm execute failed to execute, test succeed!")
-			// evm execute failed to execute, test succeed!
-			return nil
-		}
-	}
-
-	//check value
-	if value.Cmp(contractBalance) != 0 {
-		return fmt.Errorf("value in contract err: contract value in statedb:%d , transfer value: %d", contractBalance.Int64(), value.Int64())
-	}
-
-	// check runtime code
-	if len(inputCode) != len(code) {
-		return fmt.Errorf("code err")
-	}
-
-	return nil
-
 }
 
 const traceErrorLimit1 = 400000000
