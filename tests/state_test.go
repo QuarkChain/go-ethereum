@@ -193,10 +193,8 @@ func TestWeb3QStakeForCode(t *testing.T) {
 							err = checkState(t, subtest, caller, test, db)
 						}
 
-						if err != nil && len(test.json.Post[subtest.Fork][subtest.Index].ExpectException) > 0 {
-							// Ignore expected errors (TODO MariusVanDerWijden check error string)
-
-							return nil
+						if err != nil {
+							StateTrie(db, test, t)
 						}
 						return st.checkFailure(t, err)
 					})
@@ -210,6 +208,29 @@ const CHUNK_SIZE = 1024 * 24
 const CODE_STATKING_PER_CHUNK = 1000000000000000000
 const CodeOffset = 570
 
+func StateTrie(db *state.StateDB, test *StateTest, t *testing.T) {
+	noContractCreation := test.json.Tx.To != ""
+
+	fmt.Println("--------------------state info-------------------")
+	for addr, _ := range test.json.Pre {
+		//object := db.GetOrNewStateObject(addr)
+		fmt.Println("address:", addr)
+		fmt.Println("balance:", db.GetBalance(addr))
+		fmt.Println("code:", db.GetCode(addr))
+		fmt.Println("nonce:", db.GetNonce(addr))
+		fmt.Println("--------------------------------------------")
+	}
+
+	if !noContractCreation {
+		caller := common.HexToAddress("0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b")
+		contract := getCreateContractAddr(caller, test.json.Tx.Nonce)
+		fmt.Println("address:", contract)
+		fmt.Println("balance:", db.GetBalance(contract))
+		fmt.Println("code:", db.GetCode(contract))
+		fmt.Println("nonce:", db.GetNonce(contract))
+		fmt.Println("--------------------------------------------")
+	}
+}
 func checkState(t *testing.T, subtest StateSubtest, caller common.Address, test *StateTest, db *state.StateDB) error {
 	post := test.json.Post[subtest.Fork][subtest.Index]
 	nonce := test.json.Tx.Nonce
