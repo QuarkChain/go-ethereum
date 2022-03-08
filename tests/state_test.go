@@ -137,40 +137,8 @@ func withTrace(t *testing.T, gasLimit uint64, test func(vm.Config) error) {
 }
 
 var web3QTestDir = filepath.Join(baseDir, "Web3QTest")
-var StakeTestDir = filepath.Join(web3QTestDir, "Stake")
-var CallTestDir = filepath.Join(web3QTestDir, "Call")
 
-func TestWeb3QExtraGasForCall(t *testing.T) {
-	t.Parallel()
-	st := new(testMatcher)
-	for _, dir := range []string{
-		CallTestDir,
-	} {
-		// st.walk会进入到每个json文件中 然后执行func
-		st.walk(t, dir, func(t *testing.T, name string, test *StateTest) {
-			for _, subtest := range test.Subtests() {
-				subtest := subtest
-				key := fmt.Sprintf("%s%d", subtest.Fork, subtest.Index)
-
-				t.Run(key+"/trie", func(t *testing.T) {
-					withTrace1(t, test.gasLimit(subtest), func(vmconfig vm.Config) error {
-
-						_, _, err := test.Run(subtest, vmconfig, false)
-
-						if err != nil && len(test.json.Post[subtest.Fork][subtest.Index].ExpectException) > 0 {
-							// Ignore expected errors (TODO MariusVanDerWijden check error string)
-
-							return nil
-						}
-						return st.checkFailure(t, err)
-					})
-				})
-			}
-		})
-	}
-}
-
-func TestWeb3QStakeForCode(t *testing.T) {
+func TestWeb3QState(t *testing.T) {
 
 	t.Parallel()
 	st := new(testMatcher)
@@ -196,10 +164,6 @@ func TestWeb3QStakeForCode(t *testing.T) {
 		})
 	}
 }
-
-const CHUNK_SIZE = 1024 * 24
-const CODE_STATKING_PER_CHUNK = 1000000000000000000
-const CodeOffset = 570
 
 func StateTrie(db *state.StateDB, test *StateTest, t *testing.T) {
 	noContractCreation := test.json.Tx.To != ""
