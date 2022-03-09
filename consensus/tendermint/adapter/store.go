@@ -2,6 +2,7 @@ package adapter
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	pbft "github.com/QuarkChain/go-minimal-pbft/consensus"
@@ -78,10 +79,75 @@ func (s *Store) SaveBlock(block *types.FullBlock, commit *types.Commit) {
 	s.mux.Post(core.NewMinedBlockEvent{Block: block.WithCommit(commit).Block})
 }
 
+// Validate a block without Commit and with LastCommit.
 func (s *Store) ValidateBlock(state pbft.ChainState, block *types.FullBlock) (err error) {
 	err = s.verifyHeaderFunc(s.chain, block.Header(), false)
 	if err != nil {
 		return
+	}
+
+	// Validate if the block matches current state.
+	if state.LastBlockHeight == 0 && block.NumberU64() != state.InitialHeight {
+		return fmt.Errorf("wrong Block.Header.Height. Expected %v for initial block, got %v",
+			block.NumberU64(), state.InitialHeight)
+	}
+	if state.LastBlockHeight > 0 && block.NumberU64() != state.LastBlockHeight+1 {
+		return fmt.Errorf("wrong Block.Header.Height. Expected %v, got %v",
+			state.LastBlockHeight+1,
+			block.NumberU64(),
+		)
+	}
+	// Validate prev block info.
+	if block.ParentHash() != state.LastBlockID {
+		return fmt.Errorf("wrong Block.Header.LastBlockID.  Expected %v, got %v",
+			state.LastBlockID,
+			block.ParentHash(),
+		)
+	}
+
+	// Validate basic info without Commit.
+	// Validate block LastCommit.
+	if block.NumberU64() == state.InitialHeight {
+		if len(block.LastCommit.Signatures) != 0 {
+			return errors.New("initial block can't have LastCommit signatures")
+		}
+	} else {
+		// LastCommit.Signatures length is checked in VerifyCommit.
+		if err := state.LastValidators.VerifyCommit(
+			state.ChainID, state.LastBlockID, block.NumberU64()-1, block.LastCommit); err != nil {
+			return err
+		}
+	}
+
+	// Validate block Time with LastCommit
+	switch {
+	case block.NumberU64() > state.InitialHeight:
+		if block.TimeMs() <= state.LastBlockTime {
+			return fmt.Errorf("block time %v not greater than last block time %v",
+				block.TimeMs(),
+				state.LastBlockTime,
+			)
+		}
+		medianTime := pbft.MedianTime(block.LastCommit, state.LastValidators)
+		if block.TimeMs() != medianTime {
+			return fmt.Errorf("invalid block time. Expected %v, got %v",
+				medianTime,
+				block.TimeMs(),
+			)
+		}
+
+	case block.NumberU64() == state.InitialHeight:
+		genesisTime := state.LastBlockTime + 1000
+		if block.TimeMs() != genesisTime {
+			return fmt.Errorf("block time %v is not equal to genesis time %v",
+				block.TimeMs(),
+				genesisTime,
+			)
+		}
+
+	default:
+		return fmt.Errorf("block height %v lower than initial height %v",
+			block.NumberU64(), state.InitialHeight)
 	}
 
 	err = s.chain.PreExecuteBlock(block.Block)
@@ -163,22 +229,36 @@ func updateState(
 	}, nil
 }
 
-func (s *Store) MakeBlock(state *pbft.ChainState, height uint64,
+func (s *Store) MakeBlock(
+	state *pbft.ChainState,
+	height uint64,
 	commit *pbft.Commit,
-	proposerAddress common.Address) *types.FullBlock {
+	proposerAddress common.Address,
+) *types.FullBlock {
 
 	// Set time.
-	var timestamp uint64
+	var timestampMs uint64
 	if height == state.InitialHeight {
-		timestamp = state.LastBlockTime + 1 // genesis time + 1
+		timestampMs = state.LastBlockTime + 1000 // genesis time + 1sec
 	} else {
-		timestamp = pbft.MedianTime(commit, state.LastValidators)
+		timestampMs = pbft.MedianTime(commit, state.LastValidators)
 	}
+	var timestamp = timestampMs / 1000
 
 	block, err := s.makeBlock(state.LastBlockID, proposerAddress, timestamp)
 	if err != nil {
-		panic("failed to make a block")
+		log.Crit("failed to make a block", "err", err)
 	}
+
+	// Make a copy of header, and setup TM-related fields
+	header := block.Header()
+	if header.Time != timestamp {
+		log.Crit("make block does not setup header.Time correctly")
+	}
+	header.TimeMs = timestampMs
+	header.LastCommitHash = commit.Hash()
+
+	block = block.WithSeal(header)
 
 	return &types.FullBlock{Block: block, LastCommit: commit}
 }

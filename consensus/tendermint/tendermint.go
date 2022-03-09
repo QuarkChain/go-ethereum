@@ -32,7 +32,6 @@ import (
 	libp2p "github.com/QuarkChain/go-minimal-pbft/p2p"
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/consensus/misc"
 	"github.com/ethereum/go-ethereum/consensus/tendermint/adapter"
@@ -49,11 +48,11 @@ import (
 	"github.com/libp2p/go-libp2p-core/peer"
 )
 
-// Clique proof-of-authority protocol constants.
+// Tendermint proof-of-authority/stake BFT protocol constants.
 var (
 	epochLength = uint64(30000) // Default number of blocks after which to checkpoint and reset the pending votes
 
-	nonceDefault = hexutil.MustDecode("0x0000000000000000") // Magic nonce number to vote on removing a signer.
+	nonceDefault = types.BlockNonce{} // Default nonce number.
 
 	uncleHash = types.CalcUncleHash(nil) // Always Keccak256(RLP([])) as uncles are meaningless outside of PoW.
 
@@ -342,7 +341,7 @@ func (c *Tendermint) verifyHeader(chain consensus.ChainHeaderReader, header *typ
 	if len(header.NextValidatorPowers) != len(header.NextValidators) {
 		return errors.New("NextValidators must have the same len as powers")
 	}
-	if !bytes.Equal(header.Nonce[:], nonceDefault) {
+	if !bytes.Equal(header.Nonce[:], nonceDefault[:]) {
 		return errors.New("invalid nonce")
 	}
 	// Ensure that the mix digest is zero as we don't have fork protection currently
@@ -363,6 +362,30 @@ func (c *Tendermint) verifyHeader(chain consensus.ChainHeaderReader, header *typ
 	if header.GasLimit > params.MaxGasLimit {
 		return fmt.Errorf("invalid gasLimit: have %v, max %v", header.GasLimit, params.MaxGasLimit)
 	}
+
+	// Check if TimeMs matches Time.
+	// Note that we will not check acutal Time since we don't have LastCommit.
+	if header.TimeMs/1000 != header.Time {
+		return fmt.Errorf("inccorect timestamp")
+	}
+
+	epochHeader := c.getEpochHeader(chain, header)
+	if epochHeader == nil {
+		return fmt.Errorf("epochHeader not found, height:%d", number)
+	}
+
+	vs := types.NewValidatorSet(epochHeader.NextValidators, types.U64ToI64Array(epochHeader.NextValidatorPowers), int64(c.config.ProposerRepetition))
+
+	// NOTE: We can't actually verify it's the right proposer because we don't
+	// know what round the block was first proposed. So just check that it's
+	// a legit address and a known validator.
+	// The length is checked in ValidateBasic above.
+	if !vs.HasAddress(header.Coinbase) {
+		return fmt.Errorf("block.Header.ProposerAddress %X is not a validator",
+			header.Coinbase,
+		)
+	}
+
 	// If all checks passed, validate any special fields for hard forks
 	if err := misc.VerifyForkHashes(chain.Config(), header, false); err != nil {
 		return err
@@ -372,12 +395,6 @@ func (c *Tendermint) verifyHeader(chain consensus.ChainHeaderReader, header *typ
 		return nil
 	}
 
-	epochHeader := c.getEpochHeader(chain, header)
-	if epochHeader == nil {
-		return fmt.Errorf("epochHeader not found, height:%d", number)
-	}
-
-	vs := types.NewValidatorSet(epochHeader.NextValidators, types.U64ToI64Array(epochHeader.NextValidatorPowers), int64(c.config.ProposerRepetition))
 	return vs.VerifyCommit(c.config.NetworkID, header.Hash(), number, header.Commit)
 }
 
@@ -405,31 +422,17 @@ func (c *Tendermint) VerifyUncles(chain consensus.ChainReader, block *types.Bloc
 
 // Prepare implements consensus.Engine, preparing all the consensus fields of the
 // header for running the transactions on top.
+// This method should be called by store.MakeBlock() -> worker.getSealingBlock() -> engine.Prepare().
 func (c *Tendermint) Prepare(chain consensus.ChainHeaderReader, header *types.Header) error {
 	number := header.Number.Uint64()
-	epochHeader := c.getEpochHeader(chain, header)
-	if epochHeader == nil {
-		return fmt.Errorf("epochHeader not found, height:%d", number)
-	}
-	parentHeader := chain.GetHeaderByHash(header.ParentHash)
-	if epochHeader == nil {
-		return fmt.Errorf("parentHeader not found, height:%d", number)
-	}
 
-	header.LastCommitHash = parentHeader.Commit.Hash()
-	var timestamp uint64
-	if number == 1 {
-		timestamp = parentHeader.TimeMs // genesis time
-	} else {
-		timestamp = pbftconsensus.MedianTime(
-			parentHeader.Commit,
-			types.NewValidatorSet(epochHeader.NextValidators, types.U64ToI64Array(epochHeader.NextValidatorPowers), int64(c.config.ProposerRepetition)),
-		)
-	}
-
-	header.TimeMs = timestamp
-	header.Time = timestamp / 1000
 	header.Difficulty = big.NewInt(1)
+	// Use constant nonce at the monent
+	header.Nonce = nonceDefault
+	// Mix digest is reserved for now, set to empty
+	header.MixDigest = common.Hash{}
+
+	// Timestamp should be already set in store.MakeBlock()
 
 	governance := gov.New(c.config, chain)
 	header.NextValidators = governance.NextValidators(number)

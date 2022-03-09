@@ -54,20 +54,6 @@ func (g *Governance) GetValidatorSet(height uint64, lastVals *types.ValidatorSet
 	return epochVals
 }
 
-// EpochValidators returns the current epoch validators that height belongs to
-func (g *Governance) EpochValidators(height uint64) []common.Address {
-	// TODO: get real validators by calling contract
-	header := g.chain.GetHeaderByNumber(0)
-	return header.NextValidators
-}
-
-// EpochValidatorPowers returns the current epoch validator powers that height belongs to
-func (g *Governance) EpochValidatorPowers(height uint64) []uint64 {
-	// TODO: get real validators by calling contract
-	header := g.chain.GetHeaderByNumber(0)
-	return header.NextValidatorPowers
-}
-
 func (g *Governance) NextValidators(height uint64) []common.Address {
 	if height%g.config.Epoch != 0 {
 		return []common.Address{}
