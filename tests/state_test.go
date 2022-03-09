@@ -126,6 +126,7 @@ func withTrace(t *testing.T, gasLimit uint64, test func(vm.Config) error) {
 	if !reflect.DeepEqual(err, err2) {
 		t.Errorf("different error for second run: %v", err2)
 	}
+
 	w.Flush()
 	if buf.Len() == 0 {
 		t.Log("no EVM operation logs generated")
@@ -136,15 +137,18 @@ func withTrace(t *testing.T, gasLimit uint64, test func(vm.Config) error) {
 	// t.Logf("EVM error: %v", tracer.Error())
 }
 
-var web3QTestDir = filepath.Join(baseDir, "Web3QTest")
+var web3QStateTestDir = filepath.Join(baseDir, "Web3QTest")
 
 func TestWeb3QState(t *testing.T) {
+	// return evm err
+	ReturnVmErr = true
 
 	t.Parallel()
 	st := new(testMatcher)
 
+	st.fails("TestWeb3QState/Stake/StakeFor25kCode.json/London0/trie", "insufficient staking for code")
 	for _, dir := range []string{
-		web3QTestDir,
+		web3QStateTestDir,
 	} {
 		st.walk(t, dir, func(t *testing.T, name string, test *StateTest) {
 			for _, subtest := range test.Subtests() {
@@ -153,12 +157,11 @@ func TestWeb3QState(t *testing.T) {
 				t.Run(key+"/trie", func(t *testing.T) {
 					config := vm.Config{}
 					_, db, err := test.Run(subtest, config, false)
-					st.checkFailure(t, err)
+					err = st.checkFailure(t, err)
 					if err != nil {
 						StateTrie(db, test, t)
 						t.Error(err)
 					}
-
 				})
 			}
 		})
@@ -168,25 +171,20 @@ func TestWeb3QState(t *testing.T) {
 func StateTrie(db *state.StateDB, test *StateTest, t *testing.T) {
 	noContractCreation := test.json.Tx.To != ""
 
-	fmt.Println("--------------------state info-------------------")
-	for addr, _ := range test.json.Pre {
-		//object := db.GetOrNewStateObject(addr)
-		fmt.Println("address:", addr)
-		fmt.Println("balance:", db.GetBalance(addr))
-		fmt.Println("code:", db.GetCode(addr))
-		fmt.Println("nonce:", db.GetNonce(addr))
-		fmt.Println("--------------------------------------------")
+	fmt.Println("--------------------StateInfo---------------------")
+
+	coinbase := test.json.Env.Coinbase
+	t.Logf("--------------------CoinBase---------------------- \naddress: %s \nbalance: %d \nnonce: %d \n", coinbase.Hex(), db.GetBalance(coinbase).Int64(), db.GetNonce(coinbase))
+	for addr, acc := range test.json.Pre {
+		t.Logf("--------------------Account---------------------- \naddress: %s \npre balance: %d \n    balance: %d \nnonce: %d \ncode len: %d \n", addr.Hex(), acc.Balance.Int64(), db.GetBalance(addr).Int64(), db.GetNonce(addr), len(db.GetCode(addr)))
 	}
 
 	if !noContractCreation {
 		caller := common.HexToAddress("0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b")
 		contract := getCreateContractAddr(caller, test.json.Tx.Nonce)
-		fmt.Println("address:", contract)
-		fmt.Println("balance:", db.GetBalance(contract))
-		fmt.Println("code:", db.GetCode(contract))
-		fmt.Println("nonce:", db.GetNonce(contract))
-		fmt.Println("--------------------------------------------")
+		t.Logf("--------------------Account---------------------- \naddress: %s \nbalance: %d \nnonce: %d \ncode len: %d \n", contract.Hex(), db.GetBalance(contract).Int64(), db.GetNonce(contract), len(db.GetCode(contract)))
 	}
+	t.Log("-------------------END-------------------------")
 }
 
 func getCreateContractAddr(caller common.Address, nonce uint64) common.Address {
