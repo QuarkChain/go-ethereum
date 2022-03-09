@@ -9,6 +9,7 @@ import (
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/log"
 )
 
@@ -16,13 +17,15 @@ type Store struct {
 	chain            *core.BlockChain
 	verifyHeaderFunc func(chain consensus.ChainHeaderReader, header *types.Header, seal bool) error
 	makeBlock        func(parentHash common.Hash, coinbase common.Address, timestamp uint64) (block *types.Block, err error)
+	mux              *event.TypeMux
 }
 
 func NewStore(
 	chain *core.BlockChain,
 	verifyHeaderFunc func(chain consensus.ChainHeaderReader, header *types.Header, seal bool) error,
-	makeBlock func(parentHash common.Hash, coinbase common.Address, timestamp uint64) (block *types.Block, err error)) *Store {
-	return &Store{chain: chain, verifyHeaderFunc: verifyHeaderFunc, makeBlock: makeBlock}
+	makeBlock func(parentHash common.Hash, coinbase common.Address, timestamp uint64) (block *types.Block, err error),
+	mux *event.TypeMux) *Store {
+	return &Store{chain: chain, verifyHeaderFunc: verifyHeaderFunc, makeBlock: makeBlock, mux: mux}
 }
 
 func (s *Store) Base() uint64 {
@@ -71,6 +74,8 @@ func (s *Store) SaveBlock(block *types.FullBlock, commit *types.Commit) {
 	if n == 0 || err != nil {
 		log.Warn("SaveBlock", "n", n, "err", err)
 	}
+
+	s.mux.Post(core.NewMinedBlockEvent{Block: block.WithCommit(commit).Block})
 }
 
 func (s *Store) ValidateBlock(state pbft.ChainState, block *types.FullBlock) (err error) {

@@ -370,7 +370,7 @@ func (w *worker) start() {
 	if isTm {
 		err := tm.Init(w.chain, func(parent common.Hash, coinbase common.Address, timestamp uint64) (*types.Block, error) {
 			return w.getSealingBlock(parent, timestamp, coinbase, common.Hash{})
-		})
+		}, w.mux)
 		if err != nil {
 			log.Crit("tm.Init", "err", err)
 		}

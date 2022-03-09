@@ -40,6 +40,7 @@ import (
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rpc"
@@ -131,7 +132,7 @@ func (c *Tendermint) P2pServer() *libp2p.Server {
 	return c.p2pserver
 }
 
-func (c *Tendermint) Init(chain *core.BlockChain, makeBlock func(parent common.Hash, coinbase common.Address, timestamp uint64) (*types.Block, error)) (err error) {
+func (c *Tendermint) Init(chain *core.BlockChain, makeBlock func(parent common.Hash, coinbase common.Address, timestamp uint64) (*types.Block, error), mux *event.TypeMux) (err error) {
 	// Outbound gossip message queue
 	sendC := make(chan pbftconsensus.Message, 1000)
 
@@ -144,7 +145,7 @@ func (c *Tendermint) Init(chain *core.BlockChain, makeBlock func(parent common.H
 	c.rootCtx = rootCtx
 
 	// datastore
-	store := adapter.NewStore(chain, c.VerifyHeader, makeBlock)
+	store := adapter.NewStore(chain, c.VerifyHeader, makeBlock, mux)
 
 	// p2p key
 	if TestMode {
