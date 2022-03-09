@@ -623,7 +623,7 @@ func authTwitter(url string, tokenV1, tokenV2 string) (string, string, string, c
 	// Twiter API token isn't provided so we just load the public posts
 	// and scrape it for the Ethereum address and profile URL. We need to load
 	// the mobile page though since the main page loads tweet contents via JS.
-	// url = strings.Replace(url, "https://twitter.com/", "https://mobile.twitter.com/", 1)
+	url = strings.Replace(url, "https://twitter.com/", "https://mobile.twitter.com/", 1)
 
 	res, err := http.Get(url)
 	if err != nil {
