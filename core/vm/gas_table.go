@@ -26,7 +26,7 @@ import (
 
 // memoryGasCost calculates the quadratic gas for memory expansion. It does so
 // only for the memory region that is expanded, not the total memory.
-func memoryGasCost(mem *Memory, newMemSize uint64) (uint64, error) {
+func memoryGasCost(mem *Memory, newMemSize uint64, noQuadMemoryGas bool) (uint64, error) {
 	if newMemSize == 0 {
 		return 0, nil
 	}
@@ -45,6 +45,9 @@ func memoryGasCost(mem *Memory, newMemSize uint64) (uint64, error) {
 		square := newMemSizeWords * newMemSizeWords
 		linCoef := newMemSizeWords * params.MemoryGas
 		quadCoef := square / params.QuadCoeffDiv
+		if noQuadMemoryGas {
+			quadCoef = 0
+		}
 		newTotalFee := linCoef + quadCoef
 
 		fee := newTotalFee - mem.lastGasCost
@@ -65,7 +68,7 @@ func memoryGasCost(mem *Memory, newMemSize uint64) (uint64, error) {
 func memoryCopierGas(stackpos int) gasFunc {
 	return func(evm *EVM, contract *Contract, stack *Stack, mem *Memory, memorySize uint64) (uint64, error) {
 		// Gas for expanding the memory
-		gas, err := memoryGasCost(mem, memorySize)
+		gas, err := memoryGasCost(mem, memorySize, evm.Config.NoQuadMemoryGas)
 		if err != nil {
 			return 0, err
 		}
@@ -224,7 +227,7 @@ func makeGasLog(n uint64) gasFunc {
 			return 0, ErrGasUintOverflow
 		}
 
-		gas, err := memoryGasCost(mem, memorySize)
+		gas, err := memoryGasCost(mem, memorySize, evm.Config.NoQuadMemoryGas)
 		if err != nil {
 			return 0, err
 		}
@@ -248,7 +251,7 @@ func makeGasLog(n uint64) gasFunc {
 }
 
 func gasKeccak256(evm *EVM, contract *Contract, stack *Stack, mem *Memory, memorySize uint64) (uint64, error) {
-	gas, err := memoryGasCost(mem, memorySize)
+	gas, err := memoryGasCost(mem, memorySize, evm.Config.NoQuadMemoryGas)
 	if err != nil {
 		return 0, err
 	}
@@ -269,7 +272,7 @@ func gasKeccak256(evm *EVM, contract *Contract, stack *Stack, mem *Memory, memor
 // static cost have a dynamic cost which is solely based on the memory
 // expansion
 func pureMemoryGascost(evm *EVM, contract *Contract, stack *Stack, mem *Memory, memorySize uint64) (uint64, error) {
-	return memoryGasCost(mem, memorySize)
+	return memoryGasCost(mem, memorySize, evm.Config.NoQuadMemoryGas)
 }
 
 var (
@@ -282,7 +285,7 @@ var (
 )
 
 func gasCreate2(evm *EVM, contract *Contract, stack *Stack, mem *Memory, memorySize uint64) (uint64, error) {
-	gas, err := memoryGasCost(mem, memorySize)
+	gas, err := memoryGasCost(mem, memorySize, evm.Config.NoQuadMemoryGas)
 	if err != nil {
 		return 0, err
 	}
@@ -351,7 +354,7 @@ func gasCall(evm *EVM, contract *Contract, stack *Stack, mem *Memory, memorySize
 	if transfersValue {
 		gas += params.CallValueTransferGas
 	}
-	memoryGas, err := memoryGasCost(mem, memorySize)
+	memoryGas, err := memoryGasCost(mem, memorySize, evm.Config.NoQuadMemoryGas)
 	if err != nil {
 		return 0, err
 	}
@@ -375,7 +378,7 @@ func gasCall(evm *EVM, contract *Contract, stack *Stack, mem *Memory, memorySize
 }
 
 func gasCallCode(evm *EVM, contract *Contract, stack *Stack, mem *Memory, memorySize uint64) (uint64, error) {
-	memoryGas, err := memoryGasCost(mem, memorySize)
+	memoryGas, err := memoryGasCost(mem, memorySize, evm.Config.NoQuadMemoryGas)
 	if err != nil {
 		return 0, err
 	}
@@ -405,7 +408,7 @@ func gasCallCode(evm *EVM, contract *Contract, stack *Stack, mem *Memory, memory
 
 func gasDelegateCall(evm *EVM, contract *Contract, stack *Stack, mem *Memory, memorySize uint64) (uint64, error) {
 	address := common.Address(stack.Back(1).Bytes20())
-	gas, err := memoryGasCost(mem, memorySize)
+	gas, err := memoryGasCost(mem, memorySize, evm.Config.NoQuadMemoryGas)
 	if err != nil {
 		return 0, err
 	}
@@ -425,7 +428,7 @@ func gasDelegateCall(evm *EVM, contract *Contract, stack *Stack, mem *Memory, me
 
 func gasStaticCall(evm *EVM, contract *Contract, stack *Stack, mem *Memory, memorySize uint64) (uint64, error) {
 	address := common.Address(stack.Back(1).Bytes20())
-	gas, err := memoryGasCost(mem, memorySize)
+	gas, err := memoryGasCost(mem, memorySize, evm.Config.NoQuadMemoryGas)
 	if err != nil {
 		return 0, err
 	}
