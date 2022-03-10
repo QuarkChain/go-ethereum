@@ -313,6 +313,7 @@ func (b *Block) Transaction(hash common.Hash) *Transaction {
 }
 
 func (b *Block) NextValidators() []common.Address { return b.header.NextValidators }
+func (b *Block) NextValidatorPowers() []uint64    { return b.header.NextValidatorPowers }
 func (b *Block) Commit() *Commit                  { return b.header.Commit }
 
 func (b *Block) Number() *big.Int     { return new(big.Int).Set(b.header.Number) }
