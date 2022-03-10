@@ -140,13 +140,10 @@ func withTrace(t *testing.T, gasLimit uint64, test func(vm.Config) error) {
 var web3QStateTestDir = filepath.Join(baseDir, "Web3QTest")
 
 func TestWeb3QState(t *testing.T) {
-	// return evm err
-	ReturnVmErr = true
-
 	t.Parallel()
 	st := new(testMatcher)
 
-	st.fails("TestWeb3QState/Stake/StakeFor25kCode.json/London0/trie", "insufficient staking for code")
+	//st.fails("TestWeb3QState/Stake/StakeFor25kCode.json/London0/trie", "insufficient staking for code")
 	for _, dir := range []string{
 		web3QStateTestDir,
 	} {
@@ -159,7 +156,7 @@ func TestWeb3QState(t *testing.T) {
 					_, db, err := test.Run(subtest, config, false)
 					err = st.checkFailure(t, err)
 					if err != nil {
-						StateTrie(db, test, t)
+						printStateTrie(db, test, t)
 						t.Error(err)
 					}
 				})
@@ -168,10 +165,10 @@ func TestWeb3QState(t *testing.T) {
 	}
 }
 
-func StateTrie(db *state.StateDB, test *StateTest, t *testing.T) {
+func printStateTrie(db *state.StateDB, test *StateTest, t *testing.T) {
 	noContractCreation := test.json.Tx.To != ""
 
-	fmt.Println("--------------------StateInfo---------------------")
+	t.Log("--------------------StateInfo---------------------")
 
 	coinbase := test.json.Env.Coinbase
 	t.Logf("--------------------CoinBase---------------------- \naddress: %s \nbalance: %d \nnonce: %d \n", coinbase.Hex(), db.GetBalance(coinbase).Int64(), db.GetNonce(coinbase))
