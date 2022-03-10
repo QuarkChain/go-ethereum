@@ -22,19 +22,28 @@ func (g *Governance) GetValidatorSets(height uint64) (*types.ValidatorSet, *type
 		panic("cannot get genesis validator set")
 	}
 
-	last := g.GetValidatorSet(height - 1)
-	current := g.GetNextValidatorSet(height-1, last)
-	next := g.GetNextValidatorSet(height, current)
+	last := g.GetValidatorSet(height-1, nil)
+	current := g.GetValidatorSet(height, last)
+	next := g.GetValidatorSet(height+1, current)
 	return last, current, next
 }
 
 // GetValidatorSet returns the validator set of a height
-func (g *Governance) GetValidatorSet(height uint64) *types.ValidatorSet {
+
+func (g *Governance) GetValidatorSet(height uint64, lastVals *types.ValidatorSet) *types.ValidatorSet {
 	if height == 0 {
 		return &types.ValidatorSet{}
 	}
 
 	idxInEpoch := (height - 1) % g.config.Epoch
+
+	if idxInEpoch != 0 && lastVals != nil {
+		// use cached version if we do not have a validator change
+		cvals := lastVals.Copy()
+		cvals.IncrementProposerPriority(1)
+		return cvals
+	}
+
 	epochNumber := height - 1 - idxInEpoch
 	epochHeader := g.chain.GetHeaderByNumber(epochNumber)
 	epochVals := types.NewValidatorSet(epochHeader.NextValidators, types.U64ToI64Array(epochHeader.NextValidatorPowers), int64(g.config.Epoch))
@@ -43,16 +52,6 @@ func (g *Governance) GetValidatorSet(height uint64) *types.ValidatorSet {
 	}
 
 	return epochVals
-}
-
-func (g *Governance) GetNextValidatorSet(height uint64, vals *types.ValidatorSet) *types.ValidatorSet {
-	if height%g.config.Epoch == 0 {
-		return g.GetValidatorSet(height + 1)
-	}
-
-	cvals := vals.Copy()
-	cvals.IncrementProposerPriority(1)
-	return cvals
 }
 
 // EpochValidators returns the current epoch validators that height belongs to
