@@ -18,7 +18,6 @@
 package tendermint
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -341,7 +340,7 @@ func (c *Tendermint) verifyHeader(chain consensus.ChainHeaderReader, header *typ
 	if len(header.NextValidatorPowers) != len(header.NextValidators) {
 		return errors.New("NextValidators must have the same len as powers")
 	}
-	if !bytes.Equal(header.Nonce[:], nonceDefault[:]) {
+	if header.Nonce != nonceDefault {
 		return errors.New("invalid nonce")
 	}
 	// Ensure that the mix digest is zero as we don't have fork protection currently
