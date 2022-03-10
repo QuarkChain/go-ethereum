@@ -177,8 +177,6 @@ func (t *StateTest) Run(subtest StateSubtest, vmconfig vm.Config, snapshotter bo
 	return snaps, statedb, nil
 }
 
-var ReturnVmErr = false
-
 // RunNoVerify runs a specific subtest and returns the statedb and post-state root
 func (t *StateTest) RunNoVerify(subtest StateSubtest, vmconfig vm.Config, snapshotter bool) (*snapshot.Tree, *state.StateDB, common.Hash, error) {
 	config, eips, err := GetChainConfig(subtest.Fork)
@@ -232,18 +230,9 @@ func (t *StateTest) RunNoVerify(subtest StateSubtest, vmconfig vm.Config, snapsh
 	snapshot := statedb.Snapshot()
 	gaspool := new(core.GasPool)
 	gaspool.AddGas(block.GasLimit())
-	if !ReturnVmErr {
+	if res, err := core.ApplyMessage(evm, msg, gaspool); err != nil {
 		statedb.RevertToSnapshot(snapshot)
-	} else {
-		if res, err := core.ApplyMessage(evm, msg, gaspool); err != nil || res.Err != nil {
-			if err != nil {
-				return snaps, statedb, common.Hash{}, err
-			}
-
-			if res.Err != nil {
-				return snaps, statedb, common.Hash{}, res.Err
-			}
-		}
+		fmt.Println("evm result:", res)
 	}
 
 	// Commit block
