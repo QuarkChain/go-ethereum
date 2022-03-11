@@ -299,6 +299,7 @@ func (g *Genesis) ToBlock(db ethdb.Database) *types.Block {
 		TimeMs:              g.Timestamp * 1000,
 		NextValidators:      g.NextValidators,
 		NextValidatorPowers: g.NextValidatorPowers,
+		Commit:              types.EmptyCommit,
 	}
 	if g.GasLimit == 0 {
 		head.GasLimit = params.GenesisGasLimit
