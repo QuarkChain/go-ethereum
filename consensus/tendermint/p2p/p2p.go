@@ -57,9 +57,9 @@ const (
 	MsgVerifiedBlock   = 0x03
 	MsgHelloRequest    = 0x04
 	MsgHelloResponse   = 0x05
-	TopicHello         = "/tendermint/dev/hello/1.0.0"
-	TopicFullBlock     = "/tendermint/dev/fullblock/1.0.0"
-	TopicConsensusSync = "/tendermint/dev/consensus_sync/1.0.0"
+	TopicHello         = "/mpbft/dev/hello/1.0.0"
+	TopicFullBlock     = "/mpbft/dev/fullblock/1.0.0"
+	TopicConsensusSync = "/mpbft/dev/consensus_sync/1.0.0"
 )
 
 func init() {
