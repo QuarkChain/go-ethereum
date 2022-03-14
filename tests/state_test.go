@@ -20,6 +20,9 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/state"
+	"github.com/ethereum/go-ethereum/crypto"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -251,4 +254,55 @@ func runBenchmark(b *testing.B, t *StateTest) {
 
 		})
 	}
+}
+
+var web3QStateTestDir = filepath.Join(baseDir, "Web3QTest")
+
+func TestWeb3QState(t *testing.T) {
+	t.Parallel()
+	st := new(testMatcher)
+
+	//st.fails("TestWeb3QState/Stake/StakeFor25kCode.json/London0/trie", "insufficient staking for code")
+	for _, dir := range []string{
+		web3QStateTestDir,
+	} {
+		st.walk(t, dir, func(t *testing.T, name string, test *StateTest) {
+			for _, subtest := range test.Subtests() {
+				subtest := subtest
+				key := fmt.Sprintf("%s%d", subtest.Fork, subtest.Index)
+				t.Run(key+"/trie", func(t *testing.T) {
+					config := vm.Config{}
+					_, db, err := test.Run(subtest, config, false)
+					err = st.checkFailure(t, err)
+					if err != nil {
+						printStateTrie(db, test, t)
+						t.Error(err)
+					}
+				})
+			}
+		})
+	}
+}
+
+func printStateTrie(db *state.StateDB, test *StateTest, t *testing.T) {
+	noContractCreation := test.json.Tx.To != ""
+
+	t.Log("--------------------StateInfo---------------------")
+
+	coinbase := test.json.Env.Coinbase
+	t.Logf("--------------------CoinBase---------------------- \naddress: %s \nbalance: %d \nnonce: %d \n", coinbase.Hex(), db.GetBalance(coinbase).Int64(), db.GetNonce(coinbase))
+	for addr, acc := range test.json.Pre {
+		t.Logf("--------------------Account---------------------- \naddress: %s \npre balance: %d \n    balance: %d \nnonce: %d \ncode len: %d \n", addr.Hex(), acc.Balance.Int64(), db.GetBalance(addr).Int64(), db.GetNonce(addr), len(db.GetCode(addr)))
+	}
+
+	if !noContractCreation {
+		caller := common.HexToAddress("0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b")
+		contract := getCreateContractAddr(caller, test.json.Tx.Nonce)
+		t.Logf("--------------------Account---------------------- \naddress: %s \nbalance: %d \nnonce: %d \ncode len: %d \n", contract.Hex(), db.GetBalance(contract).Int64(), db.GetNonce(contract), len(db.GetCode(contract)))
+	}
+	t.Log("-------------------END-------------------------")
+}
+
+func getCreateContractAddr(caller common.Address, nonce uint64) common.Address {
+	return crypto.CreateAddress(caller, nonce)
 }
