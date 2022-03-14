@@ -3,9 +3,9 @@ package tendermint
 import (
 	"context"
 
-	pbft "github.com/QuarkChain/go-minimal-pbft/consensus"
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/common"
+	pbft "github.com/ethereum/go-ethereum/consensus/tendermint/consensus"
 	"github.com/ethereum/go-ethereum/crypto"
 )
 

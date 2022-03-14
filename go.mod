@@ -3,8 +3,10 @@ module github.com/ethereum/go-ethereum
 go 1.15
 
 require (
+	github.com/Azure/azure-pipeline-go v0.2.2 // indirect
 	github.com/Azure/azure-storage-blob-go v0.7.0
-	github.com/QuarkChain/go-minimal-pbft v0.0.0-20220310232643-dcc46ad089a1
+	github.com/Azure/go-autorest/autorest/adal v0.8.0 // indirect
+	github.com/StackExchange/wmi v1.2.1 // indirect
 	github.com/VictoriaMetrics/fastcache v1.6.0
 	github.com/aws/aws-sdk-go-v2 v1.2.0
 	github.com/aws/aws-sdk-go-v2/config v1.1.1
@@ -12,19 +14,25 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/route53 v1.1.1
 	github.com/btcsuite/btcd v0.22.0-beta
 	github.com/cespare/cp v0.1.0
+	github.com/cespare/xxhash/v2 v2.1.2 // indirect
 	github.com/cloudflare/cloudflare-go v0.14.0
 	github.com/consensys/gnark-crypto v0.4.1-0.20210426202927-39ac3d4b3f1f
 	github.com/davecgh/go-spew v1.1.1
 	github.com/deckarep/golang-set v1.8.0
+	github.com/deepmap/oapi-codegen v1.8.2 // indirect
 	github.com/docker/docker v1.4.2-0.20180625184442-8e610b2b55bf
 	github.com/dop251/goja v0.0.0-20211011172007-d99e4b8cbf48
 	github.com/edsrzf/mmap-go v1.0.0
 	github.com/fatih/color v1.9.0
 	github.com/fjl/memsize v0.0.0-20190710130421-bcb5799ab5e5
+	github.com/fsnotify/fsnotify v1.5.1 // indirect
 	github.com/gballet/go-libpcsclite v0.0.0-20190607065134-2772fd86a8ff
+	github.com/go-ole/go-ole v1.2.6 // indirect
 	github.com/go-stack/stack v1.8.0
+	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
 	github.com/golang/protobuf v1.5.2
 	github.com/golang/snappy v0.0.4
+	github.com/google/go-cmp v0.5.6 // indirect
 	github.com/google/gofuzz v1.1.1-0.20200604201612-c04b05f3adfa
 	github.com/google/uuid v1.3.0
 	github.com/gorilla/websocket v1.4.2
@@ -36,32 +44,60 @@ require (
 	github.com/huin/goupnp v1.0.2
 	github.com/influxdata/influxdb v1.8.3
 	github.com/influxdata/influxdb-client-go/v2 v2.4.0
+	github.com/influxdata/line-protocol v0.0.0-20210311194329-9aa0e372d097 // indirect
 	github.com/jackpal/go-nat-pmp v1.0.2
 	github.com/jedisct1/go-minisign v0.0.0-20190909160543-45766022959e
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/karalabe/usb v0.0.2
+	github.com/klauspost/compress v1.13.6 // indirect
+	github.com/kylelemons/godebug v1.1.0 // indirect
+	github.com/libp2p/go-libp2p v0.14.4
+	github.com/libp2p/go-libp2p-connmgr v0.2.4
 	github.com/libp2p/go-libp2p-core v0.8.6
+	github.com/libp2p/go-libp2p-kad-dht v0.12.2
+	github.com/libp2p/go-libp2p-pubsub v0.5.0
+	github.com/libp2p/go-libp2p-quic-transport v0.11.2
+	github.com/libp2p/go-libp2p-tls v0.1.3
 	github.com/mattn/go-colorable v0.1.12
 	github.com/mattn/go-isatty v0.0.14
+	github.com/miekg/dns v1.1.43 // indirect
+	github.com/mitchellh/go-homedir v1.1.0
+	github.com/mitchellh/mapstructure v1.4.2 // indirect
 	github.com/multiformats/go-multiaddr v0.3.3
+	github.com/naoina/go-stringutil v0.1.0 // indirect
 	github.com/naoina/toml v0.1.2-0.20170918210437-9fafd6967416
 	github.com/olekukonko/tablewriter v0.0.5
+	github.com/onsi/gomega v1.16.0 // indirect
 	github.com/peterh/liner v1.1.1-0.20190123174540-a2c9a5303de7
+	github.com/prometheus/client_golang v1.11.0
+	github.com/prometheus/common v0.30.0 // indirect
+	github.com/prometheus/procfs v0.7.3 // indirect
 	github.com/prometheus/tsdb v0.7.1
 	github.com/rjeczalik/notify v0.9.1
 	github.com/rs/cors v1.7.0
 	github.com/shirou/gopsutil v3.21.4-0.20210419000835-c7a38de76ee5+incompatible
+	github.com/spf13/cobra v0.0.5
+	github.com/spf13/viper v1.3.2
 	github.com/status-im/keycard-go v0.0.0-20190316090335-8537d3370df4
 	github.com/stretchr/testify v1.7.0
 	github.com/syndtr/goleveldb v1.0.1-0.20210819022825-2ae1ddf74ef7
+	github.com/tklauser/go-sysconf v0.3.9 // indirect
 	github.com/tyler-smith/go-bip39 v1.0.1-0.20181017060643-dbb3b84ba2ef
+	go.uber.org/atomic v1.9.0 // indirect
+	go.uber.org/multierr v1.7.0 // indirect
+	go.uber.org/zap v1.19.1
 	golang.org/x/crypto v0.0.0-20210921155107-089bfa567519
+	golang.org/x/lint v0.0.0-20210508222113-6edffad5e616 // indirect
+	golang.org/x/net v0.0.0-20211005001312-d4b1ae081e3b // indirect
 	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c
 	golang.org/x/sys v0.0.0-20211013075003-97ac67df715c
 	golang.org/x/text v0.3.7
 	golang.org/x/time v0.0.0-20210220033141-f8bda1e9f3ba
 	golang.org/x/tools v0.1.7
+	google.golang.org/grpc v1.41.0 // indirect
+	google.golang.org/protobuf v1.27.1 // indirect
 	gopkg.in/natefinch/npipe.v2 v2.0.0-20160621034901-c1b8fa8bdcce
 	gopkg.in/olebedev/go-duktape.v3 v3.0.0-20200619000410-60c24ae608a6
 	gopkg.in/urfave/cli.v1 v1.20.0
+	gotest.tools v2.2.0+incompatible // indirect
 )
