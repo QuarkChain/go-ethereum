@@ -323,6 +323,13 @@ func (c *Tendermint) verifyHeader(chain consensus.ChainHeaderReader, header *typ
 		return errUnknownBlock
 	}
 	number := header.Number.Uint64()
+	if number == 0 {
+		genesisHeader := chain.GetHeaderByNumber(0)
+		if header.Hash() != genesisHeader.Hash() {
+			return fmt.Errorf("invalid genesis header")
+		}
+		return nil
+	}
 
 	// Don't waste time checking blocks from the future
 	if header.Time > uint64(time.Now().Unix()) {
@@ -351,11 +358,10 @@ func (c *Tendermint) verifyHeader(chain consensus.ChainHeaderReader, header *typ
 		return errInvalidUncleHash
 	}
 	// Ensure that the block's difficulty is meaningful (may not be correct at this point)
-	if number > 0 {
-		if header.Difficulty == nil || (header.Difficulty.Cmp(big.NewInt(1)) != 0) {
-			return errInvalidDifficulty
-		}
+	if header.Difficulty == nil || (header.Difficulty.Cmp(big.NewInt(1)) != 0) {
+		return errInvalidDifficulty
 	}
+
 	// Verify that the gas limit is <= 2^63-1
 	if header.GasLimit > params.MaxGasLimit {
 		return fmt.Errorf("invalid gasLimit: have %v, max %v", header.GasLimit, params.MaxGasLimit)
