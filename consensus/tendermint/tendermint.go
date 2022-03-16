@@ -184,7 +184,6 @@ func (c *Tendermint) Init(chain *core.BlockChain, makeBlock func(parent common.H
 		last,
 		current,
 		c.config.Epoch,
-		int64(c.config.ProposerRepetition),
 	)
 
 	// consensus

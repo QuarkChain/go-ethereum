@@ -100,7 +100,6 @@ func MakeChainState(
 	lastValSet *ValidatorSet,
 	valSet *ValidatorSet,
 	epoch uint64,
-	proposerReptition int64,
 ) *ChainState {
 	return &ChainState{
 		ChainID:                     chainID,
