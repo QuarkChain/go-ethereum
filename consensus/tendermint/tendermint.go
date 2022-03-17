@@ -27,14 +27,14 @@ import (
 	"sync"
 	"time"
 
-	pbftconsensus "github.com/QuarkChain/go-minimal-pbft/consensus"
-	libp2p "github.com/QuarkChain/go-minimal-pbft/p2p"
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/consensus/misc"
 	"github.com/ethereum/go-ethereum/consensus/tendermint/adapter"
+	pbftconsensus "github.com/ethereum/go-ethereum/consensus/tendermint/consensus"
 	"github.com/ethereum/go-ethereum/consensus/tendermint/gov"
+	libp2p "github.com/ethereum/go-ethereum/consensus/tendermint/p2p"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -184,7 +184,6 @@ func (c *Tendermint) Init(chain *core.BlockChain, makeBlock func(parent common.H
 		last,
 		current,
 		c.config.Epoch,
-		int64(c.config.ProposerRepetition),
 	)
 
 	// consensus
