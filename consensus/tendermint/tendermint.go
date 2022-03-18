@@ -406,7 +406,7 @@ func (c *Tendermint) getEpochHeader(chain consensus.ChainHeaderReader, header *t
 	checkpoint := (number % c.config.Epoch) == 0
 	var epochHeight uint64
 	if checkpoint {
-		epochHeight -= c.config.Epoch
+		number -= c.config.Epoch
 	} else {
 		epochHeight = number - (number % c.config.Epoch)
 	}

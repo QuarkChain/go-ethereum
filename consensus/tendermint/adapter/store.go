@@ -178,7 +178,7 @@ func updateState(
 		if len(nextValidators) != len(nextVotingPowers) {
 			panic("len(nextValidators) != len(nextVotingPowers)")
 		}
-		nValSet = types.NewValidatorSet(nextValidators, nextVotingPowers, nValSet.ProposerReptition)
+		nValSet = types.NewValidatorSet(nextValidators, nextVotingPowers, state.Validators.ProposerReptition)
 	} else {
 		nValSet = state.Validators.Copy()
 		// Update validator proposer priority and set state variables.
