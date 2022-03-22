@@ -92,6 +92,10 @@ func (s *Store) SaveBlock(block *types.FullBlock, commit *types.Commit) {
 	s.mux.Post(core.NewMinedBlockEvent{Block: block.WithCommit(commit).Block})
 }
 
+func (s *Store) VerifyBlock(state pbft.ChainState, block *types.FullBlock) (err error) {
+	return s.verifyHeaderFunc(s.chain, block.Header(), true)
+}
+
 // Validate a block without Commit and with LastCommit.
 func (s *Store) ValidateBlock(state pbft.ChainState, block *types.FullBlock) (err error) {
 	header := block.Header()

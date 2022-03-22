@@ -61,6 +61,7 @@ type BlockStore interface {
 }
 
 type BlockExecutor interface {
+	VerifyBlock(ChainState, *FullBlock) error                               // validate the block using commit only
 	ValidateBlock(ChainState, *FullBlock) error                             // validate the block by tentatively executing it
 	ApplyBlock(context.Context, ChainState, *FullBlock) (ChainState, error) // apply the block
 	MakeBlock(chainState *ChainState, height uint64, commit *Commit, proposerAddress common.Address) *FullBlock
@@ -528,15 +529,8 @@ func (cs *ConsensusState) processCommitedBlock(ctx context.Context, block *FullB
 	}
 
 	// fast-path for commit
-	if err := cs.blockExec.ValidateBlock(cs.chainState, block); err != nil {
-		log.Info("processCommitBlock validate err", "err", err)
-		return
-	}
-
-	if err := cs.chainState.Validators.VerifyCommit(
-		cs.chainState.ChainID, block.Hash(), block.NumberU64(), block.Header().Commit); err != nil {
-		log.Info("processCommitBlock verify error", "err", err)
-		return
+	if err := cs.blockExec.VerifyBlock(cs.chainState, block); err != nil {
+		log.Warn("processCommitBlock verify err", "err", err)
 	}
 
 	cs.updateRoundStep(cs.Round, RoundStepCommit)

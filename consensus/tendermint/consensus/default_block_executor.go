@@ -18,6 +18,11 @@ func NewDefaultBlockExecutor(db *leveldb.DB) BlockExecutor {
 	return &DefaultBlockExecutor{}
 }
 
+func (be *DefaultBlockExecutor) VerifyBlock(state ChainState, b *FullBlock) error {
+	// TODO: only need to check commit
+	return validateBlock(state, b)
+}
+
 func (be *DefaultBlockExecutor) ValidateBlock(state ChainState, b *FullBlock) error {
 	return validateBlock(state, b)
 }
