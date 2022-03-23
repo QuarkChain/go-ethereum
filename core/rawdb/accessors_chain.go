@@ -317,7 +317,8 @@ func ReadHeaderRange(db ethdb.Reader, number uint64, count uint64) []rlp.RawValu
 		return rlpHeaders
 	}
 	// read remaining from ancients
-	max := count * 700
+	// expect to support 100 validators with each 100 bytes for commit, 1000 bytes for other header fields
+	max := count * 11000
 	data, err := db.AncientRange(freezerHeaderTable, i+1-count, count, max)
 	if err == nil && uint64(len(data)) == count {
 		// the data is on the order [h, h+1, .., n] -- reordering needed
