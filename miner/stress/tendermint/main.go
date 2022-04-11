@@ -235,6 +235,7 @@ func makeGenesis(faucets []*ecdsa.PrivateKey, sealers []*ecdsa.PrivateKey) *core
 	genesis.GasLimit = 25000000
 	genesis.Config.Tendermint.P2pPort = 0
 	genesis.Config.Tendermint.P2pBootstrap = ""
+	genesis.Config.Tendermint.MaxPeerCount = 50
 
 	genesis.Alloc = core.GenesisAlloc{}
 	for _, faucet := range faucets {

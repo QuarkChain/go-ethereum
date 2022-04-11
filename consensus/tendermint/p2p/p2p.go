@@ -318,7 +318,9 @@ func NewP2PServer(
 	bootstrapPeers string,
 	nodeName string,
 	rootCtxCancel context.CancelFunc,
+	maxPeerCount int,
 ) (*Server, error) {
+	cg := &connGater{h: nil, MaxPeerCount: maxPeerCount}
 	h, err := libp2p.New(ctx,
 		// Use the keypair we generated
 		libp2p.Identity(priv),
@@ -330,6 +332,8 @@ func NewP2PServer(
 			fmt.Sprintf("/ip4/0.0.0.0/udp/%d/quic", port),
 			fmt.Sprintf("/ip6/::/udp/%d/quic", port),
 		),
+
+		libp2p.ConnectionGater(cg),
 
 		// Enable TLS security as the only security protocol.
 		libp2p.Security(libp2ptls.ID, libp2ptls.New),
@@ -362,6 +366,7 @@ func NewP2PServer(
 
 	log.Info("Connecting to bootstrap peers", "bootstrap_peers", bootstrapPeers)
 
+	cg.h = h
 	// Add our own bootstrap nodes
 
 	// Count number of successful connection attempts. If we fail to connect to any bootstrap peer, kill
