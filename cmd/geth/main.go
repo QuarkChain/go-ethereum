@@ -151,6 +151,7 @@ var (
 		utils.Web3QMainnetFlag,
 		utils.ValPortFlag,
 		utils.ValNodeKeyFlag,
+		utils.ValMaxPeerCountFlag,
 		utils.VMEnableDebugFlag,
 		utils.NetworkIdFlag,
 		utils.EthStatsURLFlag,

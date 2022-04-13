@@ -211,8 +211,9 @@ type Config struct {
 	OverrideTerminalTotalDifficulty *big.Int `toml:",omitempty"`
 
 	// Validator config
-	ValP2pPort uint
-	ValNodeKey string
+	ValP2pPort   uint
+	ValNodeKey   string
+	MaxPeerCount int
 }
 
 // CreateConsensusEngine creates a consensus engine for the given chain configuration.

@@ -181,6 +181,10 @@ var (
 		Name:  "validator.nodekey",
 		Usage: "Validator P2P node key file",
 	}
+	ValMaxPeerCountFlag = cli.IntFlag{
+		Name:  "validator.maxpeercount",
+		Usage: "Validator P2P max peer count",
+	}
 	DeveloperFlag = cli.BoolFlag{
 		Name:  "dev",
 		Usage: "Ephemeral proof-of-authority network with a pre-funded developer account, mining enabled",
@@ -1426,6 +1430,9 @@ func setTendermint(ctx *cli.Context, cfg *ethconfig.Config) {
 	}
 	if ctx.GlobalIsSet(ValNodeKeyFlag.Name) {
 		cfg.ValNodeKey = ctx.GlobalString(ValNodeKeyFlag.Name)
+	}
+	if ctx.GlobalIsSet(ValMaxPeerCountFlag.Name) {
+		cfg.MaxPeerCount = ctx.GlobalInt(ValMaxPeerCountFlag.Name)
 	}
 }
 
