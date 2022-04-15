@@ -2300,6 +2300,12 @@ func (bc *BlockChain) InsertHeaderChain(chain []*types.Header, checkFreq int) (i
 }
 
 func (bc *BlockChain) PreExecuteBlock(block *types.Block) (err error) {
+
+	err = bc.validator.ValidateBody(block)
+	if err != nil {
+		return
+	}
+
 	parent := bc.GetBlockByHash(block.ParentHash())
 	statedb, err := bc.StateAt(parent.Root())
 	if err != nil {

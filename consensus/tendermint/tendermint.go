@@ -411,7 +411,7 @@ func (c *Tendermint) verifyHeader(chain consensus.ChainHeaderReader, header *typ
 		return fmt.Errorf("inccorect timestamp")
 	}
 
-	epochHeader := c.getEpochHeader(chain, header)
+	epochHeader := c.getEpochHeader(chain, header, parents)
 	if epochHeader == nil {
 		return fmt.Errorf("epochHeader not found, height:%d", number)
 	}
@@ -440,7 +440,7 @@ func (c *Tendermint) verifyHeader(chain consensus.ChainHeaderReader, header *typ
 	return vs.VerifyCommit(c.config.NetworkID, header.Hash(), number, header.Commit)
 }
 
-func (c *Tendermint) getEpochHeader(chain consensus.ChainHeaderReader, header *types.Header) *types.Header {
+func (c *Tendermint) getEpochHeader(chain consensus.ChainHeaderReader, header *types.Header, parents []*types.Header) *types.Header {
 	number := header.Number.Uint64()
 	checkpoint := (number % c.config.Epoch) == 0
 	var epochHeight uint64
@@ -449,8 +449,20 @@ func (c *Tendermint) getEpochHeader(chain consensus.ChainHeaderReader, header *t
 	} else {
 		epochHeight = number - (number % c.config.Epoch)
 	}
-	return chain.GetHeaderByNumber(epochHeight)
+	epochHeader := chain.GetHeaderByNumber(epochHeight)
+	if epochHeader == nil {
+		// if epochHeader is not in db, it's probably in parents passed in
+		heightDiff := int(number - epochHeight) // always between [1, Epoch]
+		if heightDiff <= len(parents) {
+			epochHeader = parents[len(parents)-heightDiff]
+			// double check
+			if epochHeader.Number.Uint64() != epochHeight {
+				return nil
+			}
+		}
+	}
 
+	return epochHeader
 }
 
 // VerifyUncles implements consensus.Engine, always returning an error for any

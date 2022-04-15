@@ -74,6 +74,7 @@ func (s *Store) SaveBlock(block *types.FullBlock, commit *types.Commit) {
 	n, err := bc.InsertChain(types.Blocks{block.WithSeal(header)})
 	if n == 0 || err != nil {
 		log.Warn("SaveBlock", "n", n, "err", err)
+		return
 	}
 
 	s.mux.Post(core.NewMinedBlockEvent{Block: block.WithCommit(commit).Block})
