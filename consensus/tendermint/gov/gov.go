@@ -1,19 +1,28 @@
 package gov
 
 import (
+	"strings"
+
+	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/params"
 )
 
+const validatorsetABI = `` // TODO add it later
+
 type Governance struct {
-	config *params.TendermintConfig
-	chain  consensus.ChainHeaderReader
+	config          *params.TendermintConfig
+	chain           consensus.ChainHeaderReader
+	validatorSetABI abi.ABI
+	client          *ethclient.Client
 }
 
-func New(config *params.TendermintConfig, chain consensus.ChainHeaderReader) *Governance {
-	return &Governance{config: config, chain: chain}
+func New(config *params.TendermintConfig, chain consensus.ChainHeaderReader, client *ethclient.Client) *Governance {
+	vABI, _ := abi.JSON(strings.NewReader(validatorsetABI))
+	return &Governance{config: config, chain: chain, client: client, validatorSetABI: vABI}
 }
 
 // Returns the validator sets for last, current blocks
@@ -53,19 +62,24 @@ func (g *Governance) GetValidatorSet(height uint64, lastVals *types.ValidatorSet
 	return epochVals
 }
 
-func (g *Governance) NextValidators(height uint64) []common.Address {
+func (g *Governance) NextValidatorsAndPowers(height uint64, number uint64) ([]common.Address, []uint64, error) {
 	if height%g.config.Epoch != 0 {
-		return []common.Address{}
+		return []common.Address{}, []uint64{}, nil
 	}
 
 	switch {
 	case height == 0:
 		header := g.chain.GetHeaderByNumber(0)
-		return header.NextValidators
+		return header.NextValidators, header.NextValidatorPowers, nil
 	default:
 		// TODO: get real validators by calling contract, currently use genesis
-		header := g.chain.GetHeaderByNumber(0)
-		return header.NextValidators
+		epochId := height / g.config.Epoch
+		if g.client == nil || g.config.EnableEpock > epochId {
+			header := g.chain.GetHeaderByNumber(0)
+			return header.NextValidators, header.NextValidatorPowers, nil
+		}
+
+		return g.GetValidatorsAndPowersFromContract(number)
 	}
 }
 
@@ -97,18 +111,7 @@ func CompareValidatorPowers(lhs, rhs []uint64) bool {
 	return true
 }
 
-func (g *Governance) NextValidatorPowers(height uint64) []uint64 {
-	if height%g.config.Epoch != 0 {
-		return []uint64{}
-	}
-
-	switch {
-	case height == 0:
-		header := g.chain.GetHeaderByNumber(0)
-		return header.NextValidatorPowers
-	default:
-		// TODO get real validators by calling contract
-		header := g.chain.GetHeaderByNumber(0)
-		return header.NextValidatorPowers
-	}
+// GetValidatorsAndPowersFromContract get current validators
+func (c *Governance) GetValidatorsAndPowersFromContract(blockNumber uint64) ([]common.Address, []uint64, error) {
+	panic("GetValidatorsAndPowersFromContract")
 }

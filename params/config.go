@@ -305,6 +305,9 @@ var (
 		ArrowGlacierBlock:   nil,
 		Tendermint: &TendermintConfig{
 			Epoch:              100800, // expect 6s block interval = one week
+			ValidatorContract:  "",
+			ContractChainID:    0,
+			EnableEpock:        0,
 			P2pPort:            33333,
 			ProposerRepetition: 8,
 			P2pBootstrap:       strings.Join(Web3QGalileoValBootnodes, ","),
@@ -471,7 +474,10 @@ type CliqueConfig struct {
 }
 
 type TendermintConfig struct {
-	Epoch              uint64 `json:"epoch"` // Epoch lengh to vote new validator
+	Epoch              uint64 `json:"epoch"`             // Epoch lengh to vote new validator
+	ValidatorContract  string `json:"validatorContract"` // Validator set contract
+	ContractChainID    uint64 `json:"contractChainId"`   // Chain ID which Validator contract on
+	EnableEpock        uint64 `json:"enableEpoch"`       // Epock to enable update ValidatorSet from contract
 	NodeKeyPath        string
 	P2pPort            uint
 	NetworkID          string

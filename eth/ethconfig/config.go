@@ -213,16 +213,24 @@ type Config struct {
 	// Validator config
 	ValP2pPort uint
 	ValNodeKey string
+	ValRPC     string
 }
 
 // CreateConsensusEngine creates a consensus engine for the given chain configuration.
-func CreateConsensusEngine(stack *node.Node, chainConfig *params.ChainConfig, config *ethash.Config, notify []string, noverify bool, db ethdb.Database) consensus.Engine {
+func CreateConsensusEngine(
+	stack *node.Node,
+	chainConfig *params.ChainConfig,
+	config *ethash.Config,
+	notify []string,
+	noverify bool,
+	db ethdb.Database,
+	rpc string) consensus.Engine {
 	// If proof-of-authority is requested, set it up
 	var engine consensus.Engine
 	if chainConfig.Clique != nil {
 		engine = clique.New(chainConfig.Clique, db)
 	} else if chainConfig.Tendermint != nil {
-		engine = tendermint.New(chainConfig.Tendermint)
+		engine = tendermint.New(chainConfig.Tendermint, rpc)
 		return engine
 	} else {
 		switch config.PowMode {

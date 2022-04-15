@@ -38,6 +38,7 @@ import (
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
@@ -91,19 +92,57 @@ type Tendermint struct {
 	privVal pbftconsensus.PrivValidator
 
 	p2pserver *libp2p.Server
+	client    *ethclient.Client
 }
 
 // New creates a Clique proof-of-authority consensus engine with the initial
 // signers set to the ones provided by the user.
-func New(config *params.TendermintConfig) *Tendermint {
+func New(config *params.TendermintConfig, rpc string) *Tendermint {
 	// Set any missing consensus parameters to their defaults
 	conf := *config
 	if conf.Epoch == 0 {
 		conf.Epoch = epochLength
 	}
 
+	// Node's main lifecycle context.
+	rootCtx, rootCtxCancel := context.WithCancel(context.Background())
+
+	if conf.EnableEpock == 0 { // EnableEpock > 0 means enable update validator set
+		return &Tendermint{
+			config:        &conf,
+			rootCtx:       rootCtx,
+			rootCtxCancel: rootCtxCancel,
+		}
+	}
+
+	if conf.ContractChainID == 0 {
+		panic("TendermintConfig err: ContractChainID is required when EnableEpock is not 0")
+	}
+
+	if conf.ValidatorContract == "" {
+		panic("TendermintConfig err: ValidatorContract is required when EnableEpock is not 0")
+	}
+
+	client, err := ethclient.Dial(rpc)
+	if err != nil {
+		panic(err)
+	}
+
+	cId, err := client.ChainID(rootCtx)
+	if err != nil {
+		panic(err)
+	}
+
+	if conf.ContractChainID != cId.Uint64() {
+		panic(fmt.Sprintf("ContractChainID is set to %d, but chainId using by rpc %s is %d",
+			conf.ContractChainID, rpc, cId))
+	}
+
 	return &Tendermint{
-		config: &conf,
+		config:        &conf,
+		rootCtx:       rootCtx,
+		rootCtxCancel: rootCtxCancel,
+		client:        client,
 	}
 }
 
@@ -138,11 +177,6 @@ func (c *Tendermint) Init(chain *core.BlockChain, makeBlock func(parent common.H
 	// Inbound observations
 	obsvC := make(chan pbftconsensus.MsgInfo, 1000)
 
-	// Node's main lifecycle context.
-	rootCtx, rootCtxCancel := context.WithCancel(context.Background())
-	c.rootCtxCancel = rootCtxCancel
-	c.rootCtx = rootCtx
-
 	// datastore
 	store := adapter.NewStore(chain, c.VerifyHeader, makeBlock, mux)
 
@@ -157,7 +191,7 @@ func (c *Tendermint) Init(chain *core.BlockChain, makeBlock func(parent common.H
 	}
 
 	// p2p server
-	p2pserver, err := libp2p.NewP2PServer(rootCtx, store, obsvC, sendC, p2pPriv, c.config.P2pPort, c.config.NetworkID, c.config.P2pBootstrap, c.config.NodeName, rootCtxCancel)
+	p2pserver, err := libp2p.NewP2PServer(c.rootCtx, store, obsvC, sendC, p2pPriv, c.config.P2pPort, c.config.NetworkID, c.config.P2pBootstrap, c.config.NodeName, c.rootCtxCancel)
 	if err != nil {
 		return
 	}
@@ -165,13 +199,13 @@ func (c *Tendermint) Init(chain *core.BlockChain, makeBlock func(parent common.H
 	c.p2pserver = p2pserver
 
 	go func() {
-		err := p2pserver.Run(rootCtx)
+		err := p2pserver.Run(c.rootCtx)
 		if err != nil {
 			log.Warn("p2pserver.Run", "err", err)
 		}
 	}()
 
-	gov := gov.New(c.config, chain)
+	gov := gov.New(c.config, chain, c.client)
 
 	block := chain.CurrentHeader()
 	number := block.Number.Uint64()
@@ -189,7 +223,7 @@ func (c *Tendermint) Init(chain *core.BlockChain, makeBlock func(parent common.H
 
 	// consensus
 	consensusState := pbftconsensus.NewConsensusState(
-		rootCtx,
+		c.rootCtx,
 		&c.config.ConsensusConfig,
 		*gcs,
 		store,
@@ -201,14 +235,14 @@ func (c *Tendermint) Init(chain *core.BlockChain, makeBlock func(parent common.H
 	privVal := c.getPrivValidator()
 	if privVal != nil {
 		consensusState.SetPrivValidator(privVal)
-		pubkey, err := privVal.GetPubKey(rootCtx)
+		pubkey, err := privVal.GetPubKey(c.rootCtx)
 		if err != nil {
 			panic("fail to get validator address")
 		}
 		log.Info("Chamber consensus in validator mode", "validator_addr", pubkey.Address())
 	}
 
-	err = consensusState.Start(rootCtx)
+	err = consensusState.Start(c.rootCtx)
 	if err != nil {
 		log.Warn("consensusState.Start", "err", err)
 	}
@@ -336,11 +370,15 @@ func (c *Tendermint) verifyHeader(chain consensus.ChainHeaderReader, header *typ
 		return consensus.ErrFutureBlock
 	}
 
-	governance := gov.New(c.config, chain)
-	if !gov.CompareValidators(header.NextValidators, governance.NextValidators(number)) {
+	governance := gov.New(c.config, chain, c.client)
+	validators, powers, err := governance.NextValidatorsAndPowers(number, 0) // TODO change 0 to remote height getting from header
+	if err != nil {
+		return errors.New(fmt.Sprintf("verifyHeader failed with %s", err.Error()))
+	}
+	if !gov.CompareValidators(header.NextValidators, validators) {
 		return errors.New("NextValidators is incorrect")
 	}
-	if !gov.CompareValidatorPowers(header.NextValidatorPowers, governance.NextValidatorPowers(number)) {
+	if !gov.CompareValidatorPowers(header.NextValidatorPowers, powers) {
 		return errors.New("NextValidatorPowers is incorrect")
 	}
 	if len(header.NextValidatorPowers) != len(header.NextValidators) {
@@ -427,7 +465,7 @@ func (c *Tendermint) VerifyUncles(chain consensus.ChainReader, block *types.Bloc
 // Prepare implements consensus.Engine, preparing all the consensus fields of the
 // header for running the transactions on top.
 // This method should be called by store.MakeBlock() -> worker.getSealingBlock() -> engine.Prepare().
-func (c *Tendermint) Prepare(chain consensus.ChainHeaderReader, header *types.Header) error {
+func (c *Tendermint) Prepare(chain consensus.ChainHeaderReader, header *types.Header) (err error) {
 	number := header.Number.Uint64()
 
 	header.Difficulty = big.NewInt(1)
@@ -438,11 +476,11 @@ func (c *Tendermint) Prepare(chain consensus.ChainHeaderReader, header *types.He
 
 	// Timestamp should be already set in store.MakeBlock()
 
-	governance := gov.New(c.config, chain)
-	header.NextValidators = governance.NextValidators(number)
-	header.NextValidatorPowers = governance.NextValidatorPowers(number)
+	governance := gov.New(c.config, chain, c.client)
 
-	return nil
+	header.NextValidators, header.NextValidatorPowers, err = governance.NextValidatorsAndPowers(number, 0)
+
+	return
 }
 
 // Finalize implements consensus.Engine, ensuring no uncles are set, nor block
