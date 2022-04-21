@@ -383,6 +383,13 @@ func opExtCodeCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext)
 		uint64CodeOffset = 0xffffffffffffffff
 	}
 	addr := common.Address(a.Bytes20())
+	codeSize := interpreter.evm.StateDB.GetCodeSize(addr)
+	if codeSize > params.CodeSizeUnit {
+		extraGas := (uint64(codeSize - 1)) / params.CodeSizeUnit * params.ExtcodeSizeGasEIP150
+		if !scope.Contract.UseGas(extraGas) {
+			return nil, ErrOutOfGas
+		}
+	}
 	codeCopy := getData(interpreter.evm.StateDB.GetCode(addr), uint64CodeOffset, length.Uint64())
 	scope.Memory.Set(memOffset.Uint64(), length.Uint64(), codeCopy)
 

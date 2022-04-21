@@ -17,6 +17,8 @@
 package rawdb
 
 import (
+	"encoding/binary"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/log"
@@ -46,6 +48,16 @@ func ReadCode(db ethdb.KeyValueReader, hash common.Hash) []byte {
 func ReadCodeWithPrefix(db ethdb.KeyValueReader, hash common.Hash) []byte {
 	data, _ := db.Get(codeKey(hash))
 	return data
+}
+
+// ReadCodeSize retrieves the contract code size of the provided code hash.
+// Return 0 if not found
+func ReadCodeSize(db ethdb.KeyValueReader, hash common.Hash) int {
+	data, _ := db.Get(codeSizeKey(hash))
+	if len(data) != 4 {
+		return 0
+	}
+	return int(binary.BigEndian.Uint32(data))
 }
 
 // ReadTrieNode retrieves the trie node of the provided hash.
@@ -95,6 +107,12 @@ func WritePreimages(db ethdb.KeyValueWriter, preimages map[common.Hash][]byte) {
 func WriteCode(db ethdb.KeyValueWriter, hash common.Hash, code []byte) {
 	if err := db.Put(codeKey(hash), code); err != nil {
 		log.Crit("Failed to store contract code", "err", err)
+	}
+
+	var sizeData [4]byte
+	binary.BigEndian.PutUint32(sizeData[:], uint32(len(code)))
+	if err := db.Put(codeSizeKey(hash), sizeData[:]); err != nil {
+		log.Crit("Failed to store contract code size", "err", err)
 	}
 }
 
