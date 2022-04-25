@@ -18,10 +18,13 @@
 package tendermint
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io/ioutil"
+	"math"
 	"math/big"
 	"os"
 	"sync"
@@ -56,6 +59,7 @@ var (
 
 	uncleHash = types.CalcUncleHash(nil) // Always Keccak256(RLP([])) as uncles are meaningless outside of PoW.
 
+	prefix = []byte("headerNumber")
 )
 
 // Various error messages to mark blocks invalid. These should be private to
@@ -149,14 +153,16 @@ func New(config *params.TendermintConfig, rpc string) *Tendermint {
 // SignerFn hashes and signs the data to be signed by a backing account.
 type SignerFn func(signer accounts.Account, mimeType string, message []byte) ([]byte, error)
 
+type SignTxFn func(account accounts.Account, tx *types.Transaction, chainID *big.Int) (*types.Transaction, error)
+
 // Authorize injects a private key into the consensus engine to mint new blocks
 // with.
-func (c *Tendermint) Authorize(signer common.Address, signFn SignerFn) {
+func (c *Tendermint) Authorize(signer common.Address, signFn SignerFn, signTXFn SignTxFn) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
 	log.Info("Authorize", "signer", signer)
-	c.privVal = NewEthPrivValidator(signer, signFn)
+	c.privVal = NewEthPrivValidator(signer, signFn, signTXFn)
 }
 
 func (c *Tendermint) getPrivValidator() pbftconsensus.PrivValidator {
@@ -205,7 +211,7 @@ func (c *Tendermint) Init(chain *core.BlockChain, makeBlock func(parent common.H
 		}
 	}()
 
-	gov := gov.New(c.config, chain, c.client)
+	gov := gov.New(c.config, chain, c.client, c.privVal)
 
 	block := chain.CurrentHeader()
 	number := block.Number.Uint64()
@@ -370,8 +376,14 @@ func (c *Tendermint) verifyHeader(chain consensus.ChainHeaderReader, header *typ
 		return consensus.ErrFutureBlock
 	}
 
-	governance := gov.New(c.config, chain, c.client)
-	validators, powers, err := governance.NextValidatorsAndPowers(number, 0) // TODO change 0 to remote height getting from header
+	governance := gov.New(c.config, chain, c.client, c.privVal)
+	remoteChainNumber := uint64(math.MaxUint64)
+	l := len(prefix)
+	if len(header.Extra) >= l+8 && bytes.Compare(header.Extra[:l], prefix) == 0 {
+		b := header.Extra[l : l+8]
+		remoteChainNumber = binary.BigEndian.Uint64(b)
+	}
+	validators, powers, remoteChainNumber, err := governance.NextValidatorsAndPowers(number, remoteChainNumber)
 	if err != nil {
 		return errors.New(fmt.Sprintf("verifyHeader failed with %s", err.Error()))
 	}
@@ -479,6 +491,7 @@ func (c *Tendermint) VerifyUncles(chain consensus.ChainReader, block *types.Bloc
 // This method should be called by store.MakeBlock() -> worker.getSealingBlock() -> engine.Prepare().
 func (c *Tendermint) Prepare(chain consensus.ChainHeaderReader, header *types.Header) (err error) {
 	number := header.Number.Uint64()
+	remoteChainNumber := uint64(0)
 
 	header.Difficulty = big.NewInt(1)
 	// Use constant nonce at the monent
@@ -488,10 +501,25 @@ func (c *Tendermint) Prepare(chain consensus.ChainHeaderReader, header *types.He
 
 	// Timestamp should be already set in store.MakeBlock()
 
-	governance := gov.New(c.config, chain, c.client)
+	governance := gov.New(c.config, chain, c.client, c.privVal)
 
-	header.NextValidators, header.NextValidatorPowers, err = governance.NextValidatorsAndPowers(number, 0)
+	header.NextValidators, header.NextValidatorPowers, remoteChainNumber, err = governance.NextValidatorsAndPowers(number, 0)
 
+	if remoteChainNumber != 0 {
+		data := prefix
+		b := make([]byte, 8)
+		binary.BigEndian.PutUint64(b, remoteChainNumber)
+		data = append(data, b...)
+		header.Extra = append(data, header.Extra...)
+	}
+	if number%c.config.Epoch != 1 {
+		ph := chain.GetHeader(header.ParentHash, header.Number.Uint64())
+		if ph != nil {
+			governance.SubmitHeaderToContractWithRetry(ph)
+		} else {
+			log.Error("cannot get parent header", "ParentHash", header.ParentHash, "number", header.Number)
+		}
+	}
 	return
 }
 

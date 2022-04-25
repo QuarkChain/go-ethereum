@@ -504,7 +504,7 @@ func (s *Ethereum) StartMining(threads int) error {
 				cli.Authorize(eb, wallet.SignData)
 			}
 			if tm != nil {
-				tm.Authorize(eb, wallet.SignData)
+				tm.Authorize(eb, wallet.SignData, wallet.SignTx)
 			}
 		}
 
