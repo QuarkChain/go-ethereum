@@ -2,14 +2,11 @@ package tendermint
 
 import (
 	"context"
-	"errors"
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/common"
 	pbft "github.com/ethereum/go-ethereum/consensus/tendermint/consensus"
 	"github.com/ethereum/go-ethereum/crypto"
 )
-
-var ErrNotAuthorized = errors.New("not authorized to sign this account")
 
 type EthPrivValidator struct {
 	signer common.Address // Ethereum address of the signing key
