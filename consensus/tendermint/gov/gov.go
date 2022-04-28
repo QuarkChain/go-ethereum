@@ -3,7 +3,6 @@ package gov
 import (
 	"context"
 	"fmt"
-	"github.com/ethereum/go-ethereum/log"
 	"math"
 	"math/big"
 	"strings"
@@ -15,6 +14,7 @@ import (
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 )
 
@@ -120,6 +120,8 @@ func (g *Governance) NextValidatorsAndPowers(height uint64, remoteChainNumber ui
 		}
 
 		validators, powers, err := g.GetValidatorsAndPowersFromContract(remoteChainNumber)
+
+		log.Info("get validators and powers", "validators", validators, "powers", powers)
 		return validators, powers, remoteChainNumber, err
 	}
 }
@@ -172,7 +174,6 @@ func (g *Governance) GetValidatorsAndPowersFromContract(blockNumber uint64) ([]c
 	}
 
 	type validators struct {
-		//		EpochIdx   *big.Int
 		Validators []common.Address
 		Powers     []*big.Int
 	}
@@ -193,6 +194,5 @@ func (g *Governance) GetValidatorsAndPowersFromContract(blockNumber uint64) ([]c
 		powers[i] = p.Uint64()
 	}
 
-	log.Info("get validators and powers", "validators", v.Validators, "powers", v.Powers)
 	return v.Validators, powers, nil
 }

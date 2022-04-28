@@ -2,6 +2,7 @@ package tendermint
 
 import (
 	"context"
+
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/common"
 	pbft "github.com/ethereum/go-ethereum/consensus/tendermint/consensus"
