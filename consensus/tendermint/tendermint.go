@@ -35,7 +35,7 @@ import (
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/consensus/misc"
 	"github.com/ethereum/go-ethereum/consensus/tendermint/adapter"
-	pbftconsensus "github.com/ethereum/go-ethereum/consensus/tendermint/consensus"
+	pbft "github.com/ethereum/go-ethereum/consensus/tendermint/consensus"
 	"github.com/ethereum/go-ethereum/consensus/tendermint/gov"
 	libp2p "github.com/ethereum/go-ethereum/consensus/tendermint/p2p"
 	"github.com/ethereum/go-ethereum/core"
@@ -93,7 +93,7 @@ type Tendermint struct {
 	rootCtx       context.Context
 
 	lock    sync.RWMutex // Protects the signer fields
-	privVal pbftconsensus.PrivValidator
+	privVal pbft.PrivValidator
 
 	p2pserver *libp2p.Server
 	client    *ethclient.Client
@@ -157,15 +157,15 @@ type SignTxFn func(account accounts.Account, tx *types.Transaction, chainID *big
 
 // Authorize injects a private key into the consensus engine to mint new blocks
 // with.
-func (c *Tendermint) Authorize(signer common.Address, signFn SignerFn, signTXFn SignTxFn) {
+func (c *Tendermint) Authorize(signer common.Address, signFn SignerFn) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
 	log.Info("Authorize", "signer", signer)
-	c.privVal = NewEthPrivValidator(signer, signFn, signTXFn)
+	c.privVal = NewEthPrivValidator(signer, signFn)
 }
 
-func (c *Tendermint) getPrivValidator() pbftconsensus.PrivValidator {
+func (c *Tendermint) getPrivValidator() pbft.PrivValidator {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
@@ -178,10 +178,10 @@ func (c *Tendermint) P2pServer() *libp2p.Server {
 
 func (c *Tendermint) Init(chain *core.BlockChain, makeBlock func(parent common.Hash, coinbase common.Address, timestamp uint64) (*types.Block, error), mux *event.TypeMux) (err error) {
 	// Outbound gossip message queue
-	sendC := make(chan pbftconsensus.Message, 1000)
+	sendC := make(chan pbft.Message, 1000)
 
 	// Inbound observations
-	obsvC := make(chan pbftconsensus.MsgInfo, 1000)
+	obsvC := make(chan pbft.MsgInfo, 1000)
 
 	// datastore
 	store := adapter.NewStore(chain, c.VerifyHeader, makeBlock, mux)
@@ -211,13 +211,13 @@ func (c *Tendermint) Init(chain *core.BlockChain, makeBlock func(parent common.H
 		}
 	}()
 
-	gov := gov.New(c.config, chain, c.client, c.privVal)
+	gov := gov.New(c.config, chain, c.client)
 
 	block := chain.CurrentHeader()
 	number := block.Number.Uint64()
 	last, current := gov.GetValidatorSets(number + 1)
 
-	gcs := pbftconsensus.MakeChainState(
+	gcs := pbft.MakeChainState(
 		c.config.NetworkID,
 		number,
 		block.Hash(),
@@ -228,7 +228,7 @@ func (c *Tendermint) Init(chain *core.BlockChain, makeBlock func(parent common.H
 	)
 
 	// consensus
-	consensusState := pbftconsensus.NewConsensusState(
+	consensusState := pbft.NewConsensusState(
 		c.rootCtx,
 		&c.config.ConsensusConfig,
 		*gcs,
@@ -376,7 +376,7 @@ func (c *Tendermint) verifyHeader(chain consensus.ChainHeaderReader, header *typ
 		return consensus.ErrFutureBlock
 	}
 
-	governance := gov.New(c.config, chain, c.client, c.privVal)
+	governance := gov.New(c.config, chain, c.client)
 	remoteChainNumber := uint64(math.MaxUint64)
 	l := len(prefix)
 	if len(header.Extra) >= l+8 && bytes.Compare(header.Extra[:l], prefix) == 0 {
@@ -501,7 +501,7 @@ func (c *Tendermint) Prepare(chain consensus.ChainHeaderReader, header *types.He
 
 	// Timestamp should be already set in store.MakeBlock()
 
-	governance := gov.New(c.config, chain, c.client, c.privVal)
+	governance := gov.New(c.config, chain, c.client)
 
 	header.NextValidators, header.NextValidatorPowers, remoteChainNumber, err = governance.NextValidatorsAndPowers(number, 0)
 
@@ -511,14 +511,6 @@ func (c *Tendermint) Prepare(chain consensus.ChainHeaderReader, header *types.He
 		binary.BigEndian.PutUint64(b, remoteChainNumber)
 		data = append(data, b...)
 		header.Extra = append(data, header.Extra...)
-	}
-	if number%c.config.Epoch != 1 {
-		ph := chain.GetHeader(header.ParentHash, header.Number.Uint64())
-		if ph != nil {
-			governance.SubmitHeaderToContractWithRetry(ph)
-		} else {
-			log.Error("cannot get parent header", "ParentHash", header.ParentHash, "number", header.Number)
-		}
 	}
 	return
 }

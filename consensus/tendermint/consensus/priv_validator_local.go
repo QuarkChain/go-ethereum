@@ -4,22 +4,17 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"crypto/rand"
-	"math/big"
-
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 )
 
 // PrivValidator defines the functionality of a local Tendermint validator
 // that signs votes and proposals, and never double signs.
 type PrivValidator interface {
-	Address() common.Address
 	GetPubKey(context.Context) (PubKey, error)
 
 	SignVote(ctx context.Context, chainID string, vote *Vote) error
 	SignProposal(ctx context.Context, chainID string, proposal *Proposal) error
-	SignTX(tx *types.Transaction, chainID *big.Int) (*types.Transaction, error)
 }
 
 // PrivValidatorType defines the implemtation types.
@@ -89,13 +84,4 @@ func (pv *PrivValidatorLocal) SignProposal(ctx context.Context, chainID string, 
 	sign, err := crypto.Sign(h[:], pv.PrivKey)
 	proposal.Signature = sign
 	return err
-}
-
-func (pv *PrivValidatorLocal) SignTX(tx *types.Transaction, chainID *big.Int) (*types.Transaction, error) {
-	signer := types.LatestSignerForChainID(chainID)
-	signature, err := crypto.Sign(signer.Hash(tx).Bytes(), pv.PrivKey)
-	if err != nil {
-		return nil, err
-	}
-	return tx.WithSignature(signer, signature)
 }

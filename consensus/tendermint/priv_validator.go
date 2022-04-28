@@ -3,21 +3,17 @@ package tendermint
 import (
 	"context"
 	"errors"
-	"math/big"
-
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/common"
 	pbft "github.com/ethereum/go-ethereum/consensus/tendermint/consensus"
-	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 )
 
 var ErrNotAuthorized = errors.New("not authorized to sign this account")
 
 type EthPrivValidator struct {
-	signer   common.Address // Ethereum address of the signing key
-	signFn   SignerFn       // Signer function to authorize hashes with
-	signTxFn SignTxFn       // Function to sign TX
+	signer common.Address // Ethereum address of the signing key
+	signFn SignerFn       // Signer function to authorize hashes with
 }
 
 type EthPubKey struct {
@@ -47,8 +43,8 @@ func (pubkey *EthPubKey) VerifySignature(msg []byte, sig []byte) bool {
 	return signer == pubkey.signer
 }
 
-func NewEthPrivValidator(signer common.Address, signFn SignerFn, signTxFn SignTxFn) pbft.PrivValidator {
-	return &EthPrivValidator{signer: signer, signFn: signFn, signTxFn: signTxFn}
+func NewEthPrivValidator(signer common.Address, signFn SignerFn) pbft.PrivValidator {
+	return &EthPrivValidator{signer: signer, signFn: signFn}
 }
 
 func (pv *EthPrivValidator) Address() common.Address {
@@ -76,8 +72,4 @@ func (pv *EthPrivValidator) SignProposal(ctx context.Context, chainID string, pr
 	sign, err := pv.signFn(accounts.Account{Address: pv.signer}, accounts.MimetypeClique, b)
 	proposal.Signature = sign
 	return err
-}
-
-func (pv *EthPrivValidator) SignTX(tx *types.Transaction, chainID *big.Int) (*types.Transaction, error) {
-	return pv.signTxFn(accounts.Account{Address: pv.signer}, tx, chainID)
 }

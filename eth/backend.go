@@ -155,6 +155,15 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		if config.ValNodeKey != "" {
 			chainConfig.Tendermint.NodeKeyPath = config.ValNodeKey
 		}
+		if config.ValContract != "" {
+			chainConfig.Tendermint.ValidatorContract = config.ValContract
+		}
+		if config.ValChainId != 0 {
+			chainConfig.Tendermint.ContractChainID = config.ValChainId
+		}
+		if config.ValEnableEpoch != 0 {
+			chainConfig.Tendermint.EnableEpock = config.ValEnableEpoch
+		}
 	}
 
 	log.Info("Initialised chain configuration", "config", chainConfig)
@@ -169,7 +178,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		chainDb:           chainDb,
 		eventMux:          stack.EventMux(),
 		accountManager:    stack.AccountManager(),
-		engine:            ethconfig.CreateConsensusEngine(stack, chainConfig, &ethashConfig, config.Miner.Notify, config.Miner.Noverify, chainDb, config.ValRPC),
+		engine:            ethconfig.CreateConsensusEngine(stack, chainConfig, &ethashConfig, config.Miner.Notify, config.Miner.Noverify, chainDb, config.ValRpc),
 		closeBloomHandler: make(chan struct{}),
 		networkID:         config.NetworkId,
 		gasPrice:          config.Miner.GasPrice,
@@ -504,7 +513,7 @@ func (s *Ethereum) StartMining(threads int) error {
 				cli.Authorize(eb, wallet.SignData)
 			}
 			if tm != nil {
-				tm.Authorize(eb, wallet.SignData, wallet.SignTx)
+				tm.Authorize(eb, wallet.SignData)
 			}
 		}
 
