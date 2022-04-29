@@ -18,13 +18,10 @@
 package tendermint
 
 import (
-	"bytes"
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"io/ioutil"
-	"math"
 	"math/big"
 	"os"
 	"sync"
@@ -58,8 +55,6 @@ var (
 	nonceDefault = types.BlockNonce{} // Default nonce number.
 
 	uncleHash = types.CalcUncleHash(nil) // Always Keccak256(RLP([])) as uncles are meaningless outside of PoW.
-
-	prefix = []byte("headerNumber")
 )
 
 // Various error messages to mark blocks invalid. These should be private to
@@ -183,8 +178,9 @@ func (c *Tendermint) Init(chain *core.BlockChain, makeBlock func(parent common.H
 	// Inbound observations
 	obsvC := make(chan pbft.MsgInfo, 1000)
 
+	gov := gov.New(c.config, chain, c.client)
 	// datastore
-	store := adapter.NewStore(chain, c.VerifyHeader, makeBlock, mux)
+	store := adapter.NewStore(chain, c.VerifyHeader, makeBlock, gov, mux)
 
 	// p2p key
 	if TestMode {
@@ -210,8 +206,6 @@ func (c *Tendermint) Init(chain *core.BlockChain, makeBlock func(parent common.H
 			log.Warn("p2pserver.Run", "err", err)
 		}
 	}()
-
-	gov := gov.New(c.config, chain, c.client)
 
 	block := chain.CurrentHeader()
 	number := block.Number.Uint64()
@@ -376,22 +370,8 @@ func (c *Tendermint) verifyHeader(chain consensus.ChainHeaderReader, header *typ
 		return consensus.ErrFutureBlock
 	}
 
-	governance := gov.New(c.config, chain, c.client)
-	remoteChainNumber := uint64(math.MaxUint64)
-	l := len(prefix)
-	if len(header.Extra) >= l+8 && bytes.Compare(header.Extra[:l], prefix) == 0 {
-		b := header.Extra[l : l+8]
-		remoteChainNumber = binary.BigEndian.Uint64(b)
-	}
-	validators, powers, remoteChainNumber, err := governance.NextValidatorsAndPowers(number, remoteChainNumber)
-	if err != nil {
-		return errors.New(fmt.Sprintf("verifyHeader failed with %s", err.Error()))
-	}
-	if !gov.CompareValidators(header.NextValidators, validators) {
-		return errors.New("NextValidators is incorrect")
-	}
-	if !gov.CompareValidatorPowers(header.NextValidatorPowers, powers) {
-		return errors.New("NextValidatorPowers is incorrect")
+	if number%c.config.Epoch != 0 && len(header.NextValidators) != 0 {
+		return errors.New("NextValidators must be empty if number%c.config.Epoch != 0")
 	}
 	if len(header.NextValidatorPowers) != len(header.NextValidators) {
 		return errors.New("NextValidators must have the same len as powers")
@@ -491,7 +471,6 @@ func (c *Tendermint) VerifyUncles(chain consensus.ChainReader, block *types.Bloc
 // This method should be called by store.MakeBlock() -> worker.getSealingBlock() -> engine.Prepare().
 func (c *Tendermint) Prepare(chain consensus.ChainHeaderReader, header *types.Header) (err error) {
 	number := header.Number.Uint64()
-	remoteChainNumber := uint64(0)
 
 	header.Difficulty = big.NewInt(1)
 	// Use constant nonce at the monent
@@ -501,17 +480,14 @@ func (c *Tendermint) Prepare(chain consensus.ChainHeaderReader, header *types.He
 
 	// Timestamp should be already set in store.MakeBlock()
 
-	governance := gov.New(c.config, chain, c.client)
-
-	header.NextValidators, header.NextValidatorPowers, remoteChainNumber, err = governance.NextValidatorsAndPowers(number, 0)
-
-	if remoteChainNumber != 0 {
-		data := prefix
-		b := make([]byte, 8)
-		binary.BigEndian.PutUint64(b, remoteChainNumber)
-		data = append(data, b...)
-		header.Extra = append(data, header.Extra...)
+	// set default validator set and powers, will be update by store.MakeBlock
+	if number%c.config.Epoch == 0 {
+		gh := chain.GetHeaderByNumber(0)
+		header.NextValidators, header.NextValidatorPowers = gh.NextValidators, gh.NextValidatorPowers
+	} else {
+		header.NextValidators, header.NextValidatorPowers = []common.Address{}, []uint64{}
 	}
+
 	return
 }
 

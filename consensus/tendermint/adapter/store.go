@@ -1,23 +1,30 @@
 package adapter
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"math"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus"
 	pbft "github.com/ethereum/go-ethereum/consensus/tendermint/consensus"
+	"github.com/ethereum/go-ethereum/consensus/tendermint/gov"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/log"
 )
 
+var prefix = []byte("HeaderNumber")
+
 type Store struct {
 	chain            *core.BlockChain
 	verifyHeaderFunc func(chain consensus.ChainHeaderReader, header *types.Header, seal bool) error
 	makeBlock        func(parentHash common.Hash, coinbase common.Address, timestamp uint64) (block *types.Block, err error)
+	gov              *gov.Governance
 	mux              *event.TypeMux
 }
 
@@ -25,8 +32,9 @@ func NewStore(
 	chain *core.BlockChain,
 	verifyHeaderFunc func(chain consensus.ChainHeaderReader, header *types.Header, seal bool) error,
 	makeBlock func(parentHash common.Hash, coinbase common.Address, timestamp uint64) (block *types.Block, err error),
+	gov *gov.Governance,
 	mux *event.TypeMux) *Store {
-	return &Store{chain: chain, verifyHeaderFunc: verifyHeaderFunc, makeBlock: makeBlock, mux: mux}
+	return &Store{chain: chain, verifyHeaderFunc: verifyHeaderFunc, makeBlock: makeBlock, gov: gov, mux: mux}
 }
 
 func (s *Store) Base() uint64 {
@@ -82,9 +90,27 @@ func (s *Store) SaveBlock(block *types.FullBlock, commit *types.Commit) {
 
 // Validate a block without Commit and with LastCommit.
 func (s *Store) ValidateBlock(state pbft.ChainState, block *types.FullBlock) (err error) {
-	err = s.verifyHeaderFunc(s.chain, block.Header(), false)
+	header := block.Header()
+	err = s.verifyHeaderFunc(s.chain, header, false)
 	if err != nil {
 		return
+	}
+
+	remoteChainNumber := uint64(math.MaxUint64)
+	l := len(prefix)
+	if len(header.Extra) >= l+8 && bytes.Compare(header.Extra[:l], prefix) == 0 {
+		b := header.Extra[l : l+8]
+		remoteChainNumber = binary.BigEndian.Uint64(b)
+	}
+	validators, powers, remoteChainNumber, err := s.gov.NextValidatorsAndPowers(header.Number.Uint64(), remoteChainNumber)
+	if err != nil {
+		return errors.New(fmt.Sprintf("verifyHeader failed with %s", err.Error()))
+	}
+	if !gov.CompareValidators(header.NextValidators, validators) {
+		return errors.New("NextValidators is incorrect")
+	}
+	if !gov.CompareValidatorPowers(header.NextValidatorPowers, powers) {
+		return errors.New("NextValidatorPowers is incorrect")
 	}
 
 	// Validate if the block matches current state.
@@ -230,6 +256,18 @@ func (s *Store) MakeBlock(
 	}
 	header.TimeMs = timestampMs
 	header.LastCommitHash = commit.Hash()
+
+	remoteChainNumber := uint64(0)
+
+	header.NextValidators, header.NextValidatorPowers, remoteChainNumber, err = s.gov.NextValidatorsAndPowers(header.Number.Uint64(), remoteChainNumber)
+
+	if remoteChainNumber != 0 {
+		data := prefix
+		b := make([]byte, 8)
+		binary.BigEndian.PutUint64(b, remoteChainNumber)
+		data = append(data, b...)
+		header.Extra = append(data, header.Extra...)
+	}
 
 	block = block.WithSeal(header)
 
