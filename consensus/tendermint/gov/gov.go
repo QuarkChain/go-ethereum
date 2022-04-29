@@ -83,46 +83,58 @@ func (g *Governance) GetValidatorSet(height uint64, lastVals *types.ValidatorSet
 	return epochVals
 }
 
-func (g *Governance) NextValidatorsAndPowers(height uint64, remoteChainNumber uint64) ([]common.Address, []uint64, uint64, error) {
+func (g *Governance) NextValidatorsAndPowers(height uint64, remoteChainNumber uint64, hash common.Hash) ([]common.Address, []uint64, uint64, common.Hash, error) {
 	if height%g.config.Epoch != 0 {
-		return []common.Address{}, []uint64{}, 0, nil
+		return []common.Address{}, []uint64{}, 0, common.Hash{}, nil
 	}
 
 	log.Info("new epoch", "epoch", height/g.config.Epoch)
 	switch {
 	case height == 0:
 		header := g.chain.GetHeaderByNumber(0)
-		return header.NextValidators, header.NextValidatorPowers, 0, nil
+		return header.NextValidators, header.NextValidatorPowers, 0, common.Hash{}, nil
 	default:
 		epochId := height / g.config.Epoch
 		if g.client == nil || g.config.EnableEpock > epochId {
 			header := g.chain.GetHeaderByNumber(0)
-			return header.NextValidators, header.NextValidatorPowers, 0, nil
+			return header.NextValidators, header.NextValidatorPowers, 0, common.Hash{}, nil
 		}
 
 		number, err := g.client.BlockNumber(g.ctx)
 		if err != nil {
-			return nil, nil, 0, err
+			return nil, nil, 0, common.Hash{}, err
 		}
 
 		if remoteChainNumber == 0 {
 			if number <= confirmedNumber {
-				return nil, nil, 0, fmt.Errorf("remote chain number %d smaller than confirmedNumber %d", number, confirmedNumber)
+				return nil, nil, 0, common.Hash{}, fmt.Errorf("remote chain number %d smaller than confirmedNumber %d", number, confirmedNumber)
 			}
 			remoteChainNumber = number - confirmedNumber
 		} else if remoteChainNumber == uint64(math.MaxUint64) {
-			return nil, nil, remoteChainNumber, fmt.Errorf("parse remoteChainNumber")
+			return nil, nil, remoteChainNumber, common.Hash{}, fmt.Errorf("parse remoteChainNumber")
 		} else {
 			if number-confirmedNumber/2*3 > remoteChainNumber || number-confirmedNumber/2 < remoteChainNumber {
-				return nil, nil, 0, fmt.Errorf("remoteChainNumber %d is out of range [%d, %d]",
+				return nil, nil, 0, common.Hash{}, fmt.Errorf("remoteChainNumber %d is out of range [%d, %d]",
 					remoteChainNumber, number-confirmedNumber/2*3, number-confirmedNumber/2)
 			}
 		}
 
 		validators, powers, err := g.GetValidatorsAndPowersFromContract(remoteChainNumber)
+		if err != nil {
+			return nil, nil, 0, common.Hash{}, err
+		}
+
+		header, err := g.client.BlockByNumber(g.ctx, new(big.Int).SetUint64(remoteChainNumber))
+		if err != nil {
+			return nil, nil, 0, common.Hash{}, err
+		}
+
+		if hash != header.Hash() {
+			fmt.Errorf("")
+		}
 
 		log.Info("get validators and powers", "validators", validators, "powers", powers)
-		return validators, powers, remoteChainNumber, err
+		return validators, powers, remoteChainNumber, header.Hash(), err
 	}
 }
 

@@ -97,12 +97,15 @@ func (s *Store) ValidateBlock(state pbft.ChainState, block *types.FullBlock) (er
 	}
 
 	remoteChainNumber := uint64(math.MaxUint64)
+	hash := common.Hash{}
 	l := len(prefix)
-	if len(header.Extra) >= l+8 && bytes.Compare(header.Extra[:l], prefix) == 0 {
-		b := header.Extra[l : l+8]
-		remoteChainNumber = binary.BigEndian.Uint64(b)
+	if len(header.Extra) >= l+8+32 && bytes.Compare(header.Extra[:l], prefix) == 0 {
+		nb := header.Extra[l : l+8]
+		remoteChainNumber = binary.BigEndian.Uint64(nb)
+		hb := header.Extra[l+8 : l+8+32]
+		hash = common.BytesToHash(hb)
 	}
-	validators, powers, remoteChainNumber, err := s.gov.NextValidatorsAndPowers(header.Number.Uint64(), remoteChainNumber)
+	validators, powers, remoteChainNumber, hash, err := s.gov.NextValidatorsAndPowers(header.Number.Uint64(), remoteChainNumber, hash)
 	if err != nil {
 		return errors.New(fmt.Sprintf("verifyHeader failed with %s", err.Error()))
 	}
@@ -258,14 +261,19 @@ func (s *Store) MakeBlock(
 	header.LastCommitHash = commit.Hash()
 
 	remoteChainNumber := uint64(0)
+	hash := common.Hash{}
 
-	header.NextValidators, header.NextValidatorPowers, remoteChainNumber, err = s.gov.NextValidatorsAndPowers(header.Number.Uint64(), remoteChainNumber)
+	header.NextValidators, header.NextValidatorPowers, remoteChainNumber, hash, err = s.gov.NextValidatorsAndPowers(header.Number.Uint64(), remoteChainNumber, hash)
+	if err != nil {
+		log.Crit(err.Error())
+	}
 
 	if remoteChainNumber != 0 {
 		data := prefix
 		b := make([]byte, 8)
 		binary.BigEndian.PutUint64(b, remoteChainNumber)
 		data = append(data, b...)
+		data = append(data, hash.Bytes()...)
 		header.Extra = append(data, header.Extra...)
 	}
 
