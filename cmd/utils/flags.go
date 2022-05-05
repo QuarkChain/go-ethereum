@@ -181,19 +181,19 @@ var (
 		Name:  "validator.nodekey",
 		Usage: "Validator P2P node key file",
 	}
-	ValContractKeyFlag = cli.StringFlag{
+	ValContractFlag = cli.StringFlag{
 		Name:  "validator.contract",
 		Usage: "the contract used by Validator to get latest validator set from",
 	}
-	ValChainIdKeyFlag = cli.StringFlag{
+	ValChainIdFlag = cli.StringFlag{
 		Name:  "validator.chainid",
 		Usage: "the chain used by Validator to get latest validator set from",
 	}
-	ValEnableEpockKeyFlag = cli.StringFlag{
-		Name:  "validator.enableepock",
+	ValChangeEpochIdFlag = cli.StringFlag{
+		Name:  "validator.changeepochid",
 		Usage: "the epoch validator start to get validator set from contract, 0 means disable",
 	}
-	ValRpcKeyFlag = cli.StringFlag{
+	ValRpcFlag = cli.StringFlag{
 		Name:  "validator.rpc",
 		Usage: "rpc for Validator to update validator set",
 	}
@@ -1443,17 +1443,17 @@ func setTendermint(ctx *cli.Context, cfg *ethconfig.Config) {
 	if ctx.GlobalIsSet(ValNodeKeyFlag.Name) {
 		cfg.ValNodeKey = ctx.GlobalString(ValNodeKeyFlag.Name)
 	}
-	if ctx.GlobalIsSet(ValRpcKeyFlag.Name) {
-		cfg.ValRpc = ctx.GlobalString(ValRpcKeyFlag.Name)
+	if ctx.GlobalIsSet(ValRpcFlag.Name) {
+		cfg.ValRpc = ctx.GlobalString(ValRpcFlag.Name)
 	}
-	if ctx.GlobalIsSet(ValEnableEpockKeyFlag.Name) {
-		cfg.ValEnableEpoch = ctx.GlobalUint64(ValEnableEpockKeyFlag.Name)
+	if ctx.GlobalIsSet(ValChangeEpochIdFlag.Name) {
+		cfg.ValidatorChangeEpochId = ctx.GlobalUint64(ValChangeEpochIdFlag.Name)
 	}
-	if ctx.GlobalIsSet(ValChainIdKeyFlag.Name) {
-		cfg.ValChainId = ctx.GlobalUint64(ValChainIdKeyFlag.Name)
+	if ctx.GlobalIsSet(ValChainIdFlag.Name) {
+		cfg.ValChainId = ctx.GlobalUint64(ValChainIdFlag.Name)
 	}
-	if ctx.GlobalIsSet(ValContractKeyFlag.Name) {
-		cfg.ValContract = ctx.GlobalString(ValContractKeyFlag.Name)
+	if ctx.GlobalIsSet(ValContractFlag.Name) {
+		cfg.ValContract = ctx.GlobalString(ValContractFlag.Name)
 	}
 }
 

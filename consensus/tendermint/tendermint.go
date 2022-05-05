@@ -96,7 +96,7 @@ type Tendermint struct {
 
 // New creates a Clique proof-of-authority consensus engine with the initial
 // signers set to the ones provided by the user.
-func New(config *params.TendermintConfig, rpc string) *Tendermint {
+func New(config *params.TendermintConfig) (*Tendermint, error) {
 	// Set any missing consensus parameters to their defaults
 	conf := *config
 	if conf.Epoch == 0 {
@@ -106,35 +106,35 @@ func New(config *params.TendermintConfig, rpc string) *Tendermint {
 	// Node's main lifecycle context.
 	rootCtx, rootCtxCancel := context.WithCancel(context.Background())
 
-	if conf.EnableEpock == 0 { // EnableEpock > 0 means enable update validator set
+	if conf.ValidatorChangeEpochId == 0 { // ValidatorChangeEpochId == 0 means disable update validator set
 		return &Tendermint{
 			config:        &conf,
 			rootCtx:       rootCtx,
 			rootCtxCancel: rootCtxCancel,
-		}
+		}, nil
 	}
 
 	if conf.ContractChainID == 0 {
-		panic("TendermintConfig err: ContractChainID is required when EnableEpock is not 0")
+		return nil, errors.New("TendermintConfig err: ContractChainID is required when ValidatorChangeEpochId is not 0")
 	}
 
 	if conf.ValidatorContract == "" {
-		panic("TendermintConfig err: ValidatorContract is required when EnableEpock is not 0")
+		return nil, errors.New("TendermintConfig err: ValidatorContract is required when ValidatorChangeEpochId is not 0")
 	}
 
-	client, err := ethclient.Dial(rpc)
+	client, err := ethclient.Dial(conf.ValRpc)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
 	cId, err := client.ChainID(rootCtx)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
 	if conf.ContractChainID != cId.Uint64() {
-		panic(fmt.Sprintf("ContractChainID is set to %d, but chainId using by rpc %s is %d",
-			conf.ContractChainID, rpc, cId))
+		return nil, fmt.Errorf("ContractChainID is set to %d, but chainId using by rpc %s is %d",
+			conf.ContractChainID, conf.ValRpc, cId)
 	}
 
 	return &Tendermint{
@@ -142,7 +142,7 @@ func New(config *params.TendermintConfig, rpc string) *Tendermint {
 		rootCtx:       rootCtx,
 		rootCtxCancel: rootCtxCancel,
 		client:        client,
-	}
+	}, nil
 }
 
 // SignerFn hashes and signs the data to be signed by a backing account.
@@ -180,7 +180,7 @@ func (c *Tendermint) Init(chain *core.BlockChain, makeBlock func(parent common.H
 
 	gov := gov.New(c.config, chain, c.client)
 	// datastore
-	store := adapter.NewStore(chain, c.VerifyHeader, makeBlock, gov, mux)
+	store := adapter.NewStore(c.config, chain, c.VerifyHeader, makeBlock, gov, mux)
 
 	// p2p key
 	if TestMode {
@@ -470,23 +470,11 @@ func (c *Tendermint) VerifyUncles(chain consensus.ChainReader, block *types.Bloc
 // header for running the transactions on top.
 // This method should be called by store.MakeBlock() -> worker.getSealingBlock() -> engine.Prepare().
 func (c *Tendermint) Prepare(chain consensus.ChainHeaderReader, header *types.Header) (err error) {
-	number := header.Number.Uint64()
-
 	header.Difficulty = big.NewInt(1)
 	// Use constant nonce at the monent
 	header.Nonce = nonceDefault
 	// Mix digest is reserved for now, set to empty
 	header.MixDigest = common.Hash{}
-
-	// Timestamp should be already set in store.MakeBlock()
-
-	// set default validator set and powers, will be update by store.MakeBlock
-	if number%c.config.Epoch == 0 {
-		gh := chain.GetHeaderByNumber(0)
-		header.NextValidators, header.NextValidatorPowers = gh.NextValidators, gh.NextValidatorPowers
-	} else {
-		header.NextValidators, header.NextValidatorPowers = []common.Address{}, []uint64{}
-	}
 
 	return
 }

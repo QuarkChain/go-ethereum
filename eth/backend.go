@@ -161,8 +161,11 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		if config.ValChainId != 0 {
 			chainConfig.Tendermint.ContractChainID = config.ValChainId
 		}
-		if config.ValEnableEpoch != 0 {
-			chainConfig.Tendermint.EnableEpock = config.ValEnableEpoch
+		if config.ValidatorChangeEpochId != 0 {
+			chainConfig.Tendermint.ValidatorChangeEpochId = config.ValidatorChangeEpochId
+		}
+		if config.ValRpc != "" {
+			chainConfig.Tendermint.ValRpc = config.ValRpc
 		}
 	}
 
@@ -178,7 +181,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		chainDb:           chainDb,
 		eventMux:          stack.EventMux(),
 		accountManager:    stack.AccountManager(),
-		engine:            ethconfig.CreateConsensusEngine(stack, chainConfig, &ethashConfig, config.Miner.Notify, config.Miner.Noverify, chainDb, config.ValRpc),
+		engine:            ethconfig.CreateConsensusEngine(stack, chainConfig, &ethashConfig, config.Miner.Notify, config.Miner.Noverify, chainDb),
 		closeBloomHandler: make(chan struct{}),
 		networkID:         config.NetworkId,
 		gasPrice:          config.Miner.GasPrice,

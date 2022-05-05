@@ -211,12 +211,12 @@ type Config struct {
 	OverrideTerminalTotalDifficulty *big.Int `toml:",omitempty"`
 
 	// Validator config
-	ValP2pPort     uint
-	ValNodeKey     string
-	ValRpc         string
-	ValContract    string
-	ValChainId     uint64
-	ValEnableEpoch uint64
+	ValP2pPort             uint
+	ValNodeKey             string
+	ValRpc                 string
+	ValContract            string
+	ValChainId             uint64
+	ValidatorChangeEpochId uint64
 }
 
 // CreateConsensusEngine creates a consensus engine for the given chain configuration.
@@ -226,15 +226,17 @@ func CreateConsensusEngine(
 	config *ethash.Config,
 	notify []string,
 	noverify bool,
-	db ethdb.Database,
-	rpc string) consensus.Engine {
+	db ethdb.Database) consensus.Engine {
 	// If proof-of-authority is requested, set it up
 	var engine consensus.Engine
 	if chainConfig.Clique != nil {
 		engine = clique.New(chainConfig.Clique, db)
 	} else if chainConfig.Tendermint != nil {
-		engine = tendermint.New(chainConfig.Tendermint, rpc)
-		return engine
+		var err error
+		engine, err = tendermint.New(chainConfig.Tendermint)
+		if err != nil {
+			panic(err.Error())
+		}
 	} else {
 		switch config.PowMode {
 		case ethash.ModeFake:
