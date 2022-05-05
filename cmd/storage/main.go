@@ -29,14 +29,14 @@ var CreateCmd = &cobra.Command{
 	Run:   runCreate,
 }
 
-var ReadCmd = &cobra.Command{
-	Use:   "read",
+var ChunkReadCmd = &cobra.Command{
+	Use:   "chunk_read",
 	Short: "Read a chunk from a storage file",
 	Run:   runRead,
 }
 
-var WriteCmd = &cobra.Command{
-	Use:   "write",
+var ChunkWriteCmd = &cobra.Command{
+	Use:   "chunk_write",
 	Short: "Write a chunk from a storage file",
 	Run:   runWrite,
 }
@@ -48,8 +48,8 @@ func init() {
 	verbosity = rootCmd.PersistentFlags().Int("verbosity", 3, "Logging verbosity: 0=silent, 1=error, 2=warn, 3=info, 4=debug, 5=detail")
 	chunkIdx = rootCmd.PersistentFlags().Uint64("idx", 0, "Chunk idx to start/read/write")
 
-	readLen = ReadCmd.Flags().Uint64("readlen", CHUNK_SIZE, "Bytes to read (only for unmasked read)")
-	readMasked = ReadCmd.Flags().Bool("masked", false, "Read masked or not")
+	readLen = ChunkReadCmd.Flags().Uint64("readlen", CHUNK_SIZE, "Bytes to read (only for unmasked read)")
+	readMasked = ChunkReadCmd.Flags().Bool("masked", false, "Read masked or not")
 }
 
 func setupLogger() {
@@ -135,8 +135,8 @@ var rootCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(CreateCmd)
-	rootCmd.AddCommand(ReadCmd)
-	rootCmd.AddCommand(WriteCmd)
+	rootCmd.AddCommand(ChunkReadCmd)
+	rootCmd.AddCommand(ChunkWriteCmd)
 }
 
 func main() {

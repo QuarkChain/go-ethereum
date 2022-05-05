@@ -112,7 +112,11 @@ func Open(filename string) (*DataFile, error) {
 }
 
 func (df *DataFile) Contains(chunkIdx uint64) bool {
-	return chunkIdx >= df.chunkIdxStart && chunkIdx < df.chunkIdxStart+df.chunkIdxLen
+	return chunkIdx >= df.chunkIdxStart && chunkIdx < df.ChunkIdxEnd()
+}
+
+func (df *DataFile) ChunkIdxEnd() uint64 {
+	return df.chunkIdxStart + df.chunkIdxLen
 }
 
 // Reads the raw data without unmasking
