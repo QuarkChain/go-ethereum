@@ -151,6 +151,10 @@ func (df *DataFile) WriteUnmasked(chunkIdx uint64, b []byte) error {
 		return fmt.Errorf("not found")
 	}
 
+	if len(b) > int(CHUNK_SIZE) {
+		return fmt.Errorf("write data too large")
+	}
+
 	md := MaskDataInPlace(getMaskData(chunkIdx, df.maskType), b)
 	_, err := df.file.WriteAt(md, int64(chunkIdx+1)*int64(CHUNK_SIZE))
 	return err

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"os"
@@ -34,6 +35,12 @@ var ReadCmd = &cobra.Command{
 	Run:   runRead,
 }
 
+var WriteCmd = &cobra.Command{
+	Use:   "write",
+	Short: "Write a chunk from a storage file",
+	Run:   runWrite,
+}
+
 func init() {
 	chunkIdxLen = CreateCmd.Flags().Uint64("len", 0, "Chunk idx len")
 
@@ -45,7 +52,7 @@ func init() {
 	readMasked = ReadCmd.Flags().Bool("masked", false, "Read masked or not")
 }
 
-func runCreate(cmd *cobra.Command, args []string) {
+func setupLogger() {
 	glogger := log.NewGlogHandler(log.StreamHandler(os.Stderr, log.TerminalFormat(false)))
 	glogger.Verbosity(log.Lvl(*verbosity))
 	log.Root().SetHandler(glogger)
@@ -61,6 +68,10 @@ func runCreate(cmd *cobra.Command, args []string) {
 	ostream = log.StreamHandler(output, log.TerminalFormat(usecolor))
 
 	glogger.SetHandler(ostream)
+}
+
+func runCreate(cmd *cobra.Command, args []string) {
+	setupLogger()
 
 	_, err := Create(*filename, *chunkIdx, *chunkIdxLen, MASK_KECCAK_256)
 	if err != nil {
@@ -69,21 +80,7 @@ func runCreate(cmd *cobra.Command, args []string) {
 }
 
 func runRead(cmd *cobra.Command, args []string) {
-	glogger := log.NewGlogHandler(log.StreamHandler(os.Stderr, log.TerminalFormat(false)))
-	glogger.Verbosity(log.Lvl(*verbosity))
-	log.Root().SetHandler(glogger)
-
-	// setup logger
-	var ostream log.Handler
-	output := io.Writer(os.Stderr)
-
-	usecolor := (isatty.IsTerminal(os.Stderr.Fd()) || isatty.IsCygwinTerminal(os.Stderr.Fd())) && os.Getenv("TERM") != "dumb"
-	if usecolor {
-		output = colorable.NewColorableStderr()
-	}
-	ostream = log.StreamHandler(output, log.TerminalFormat(usecolor))
-
-	glogger.SetHandler(ostream)
+	setupLogger()
 
 	var err error
 	var df *DataFile
@@ -104,6 +101,32 @@ func runRead(cmd *cobra.Command, args []string) {
 	os.Stdout.Write(b)
 }
 
+func runWrite(cmd *cobra.Command, args []string) {
+	setupLogger()
+
+	var err error
+	var df *DataFile
+	df, err = Open(*filename)
+	if err != nil {
+		log.Crit("open failed", "error", err)
+	}
+
+	in := bufio.NewReader(os.Stdin)
+	b := make([]byte, 0)
+	for {
+		c, err := in.ReadByte()
+		if err == io.EOF {
+			break
+		}
+		b = append(b, c)
+	}
+
+	err = df.WriteUnmasked(*chunkIdx, b)
+	if err != nil {
+		log.Crit("write failed", "error", err)
+	}
+}
+
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
 	Use:   "storage",
@@ -113,6 +136,7 @@ var rootCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(CreateCmd)
 	rootCmd.AddCommand(ReadCmd)
+	rootCmd.AddCommand(WriteCmd)
 }
 
 func main() {
