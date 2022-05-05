@@ -122,7 +122,7 @@ func (df *DataFile) ChunkIdxEnd() uint64 {
 // Reads the raw data without unmasking
 func (df *DataFile) ReadMasked(chunkIdx uint64) ([]byte, error) {
 	if !df.Contains(chunkIdx) {
-		return nil, fmt.Errorf("not found")
+		return nil, fmt.Errorf("chunk not found")
 	}
 	md := make([]byte, CHUNK_SIZE)
 	n, err := df.file.ReadAt(md, int64(chunkIdx+1)*int64(CHUNK_SIZE))
@@ -137,7 +137,7 @@ func (df *DataFile) ReadMasked(chunkIdx uint64) ([]byte, error) {
 
 func (df *DataFile) ReadUnmasked(chunkIdx uint64, len int) ([]byte, error) {
 	if !df.Contains(chunkIdx) {
-		return nil, fmt.Errorf("not found")
+		return nil, fmt.Errorf("chunk not found")
 	}
 	ud := make([]byte, len)
 	n, err := df.file.ReadAt(ud, int64(chunkIdx+1)*int64(CHUNK_SIZE))
@@ -152,7 +152,7 @@ func (df *DataFile) ReadUnmasked(chunkIdx uint64, len int) ([]byte, error) {
 
 func (df *DataFile) WriteUnmasked(chunkIdx uint64, b []byte) error {
 	if !df.Contains(chunkIdx) {
-		return fmt.Errorf("not found")
+		return fmt.Errorf("chunk not found")
 	}
 
 	if len(b) > int(CHUNK_SIZE) {

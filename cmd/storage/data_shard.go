@@ -42,11 +42,18 @@ func (ds *DataShard) IsComplete() bool {
 	return true
 }
 
+func (ds *DataShard) Contains(kvIdx uint64) bool {
+	return kvIdx >= ds.shardIdx*ds.kvEntries && kvIdx < (ds.shardIdx+1)*ds.kvEntries
+}
+
 func (ds *DataShard) ChunkIdx() uint64 {
 	return ds.shardIdx * ds.chunksPerKv * ds.kvEntries
 }
 
 func (ds *DataShard) ReadMasked(kvIdx uint64) ([]byte, error) {
+	if !ds.Contains(kvIdx) {
+		return nil, fmt.Errorf("kv not found")
+	}
 	var data []byte
 	for i := uint64(0); i < ds.chunksPerKv; i++ {
 		chunkIdx := ds.ChunkIdx() + kvIdx*ds.chunksPerKv + i
@@ -60,6 +67,9 @@ func (ds *DataShard) ReadMasked(kvIdx uint64) ([]byte, error) {
 }
 
 func (ds *DataShard) ReadUnmasked(kvIdx uint64, readLen int) ([]byte, error) {
+	if !ds.Contains(kvIdx) {
+		return nil, fmt.Errorf("kv not found")
+	}
 	var data []byte
 	for i := uint64(0); i < ds.chunksPerKv; i++ {
 		if readLen == 0 {
@@ -83,6 +93,10 @@ func (ds *DataShard) ReadUnmasked(kvIdx uint64, readLen int) ([]byte, error) {
 }
 
 func (ds *DataShard) WriteUnmasked(kvIdx uint64, b []byte) error {
+	if !ds.Contains(kvIdx) {
+		return fmt.Errorf("kv not found")
+	}
+
 	for i := uint64(0); i < ds.chunksPerKv; i++ {
 		off := int(i * CHUNK_SIZE)
 		if off >= len(b) {

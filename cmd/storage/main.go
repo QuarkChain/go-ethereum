@@ -13,14 +13,19 @@ import (
 )
 
 var (
-	filename    *string
 	chunkIdxLen *uint64
+	filenames   *[]string
 
 	verbosity *int
 
 	chunkIdx   *uint64
 	readLen    *uint64
 	readMasked *bool
+
+	shardIdx  *uint64
+	kvSize    *uint64
+	kvEntries *uint64
+	kvIdx     *uint64
 )
 
 var CreateCmd = &cobra.Command{
@@ -31,25 +36,42 @@ var CreateCmd = &cobra.Command{
 
 var ChunkReadCmd = &cobra.Command{
 	Use:   "chunk_read",
-	Short: "Read a chunk from a storage file",
-	Run:   runRead,
+	Short: "Read a chunk from a data file",
+	Run:   runChunkRead,
 }
 
 var ChunkWriteCmd = &cobra.Command{
 	Use:   "chunk_write",
-	Short: "Write a chunk from a storage file",
-	Run:   runWrite,
+	Short: "Write a chunk from a data file",
+	Run:   runChunkWrite,
+}
+
+var ShardReadCmd = &cobra.Command{
+	Use:   "shard_read",
+	Short: "Read a KV from a data shard",
+	Run:   runShardRead,
+}
+
+var ShardWriteCmd = &cobra.Command{
+	Use:   "shard_write",
+	Short: "Write a value to a data shard",
+	Run:   runShardWrite,
 }
 
 func init() {
-	chunkIdxLen = CreateCmd.Flags().Uint64("len", 0, "Chunk idx len")
+	chunkIdxLen = CreateCmd.Flags().Uint64("len", 0, "Chunk idx len to create")
 
-	filename = rootCmd.PersistentFlags().String("filename", "", "Data filename")
+	filenames = rootCmd.PersistentFlags().StringArray("filename", []string{}, "Data filename")
 	verbosity = rootCmd.PersistentFlags().Int("verbosity", 3, "Logging verbosity: 0=silent, 1=error, 2=warn, 3=info, 4=debug, 5=detail")
-	chunkIdx = rootCmd.PersistentFlags().Uint64("idx", 0, "Chunk idx to start/read/write")
+	chunkIdx = rootCmd.PersistentFlags().Uint64("chunk_idx", 0, "Chunk idx to start/read/write")
 
-	readLen = ChunkReadCmd.Flags().Uint64("readlen", CHUNK_SIZE, "Bytes to read (only for unmasked read)")
-	readMasked = ChunkReadCmd.Flags().Bool("masked", false, "Read masked or not")
+	shardIdx = rootCmd.PersistentFlags().Uint64("shard_idx", 0, "Shard idx to read/write")
+	kvSize = rootCmd.PersistentFlags().Uint64("kv_size", 4096, "Shard KV size to read/write")
+	kvIdx = rootCmd.PersistentFlags().Uint64("kv_idx", 0, "Shard KV index to read/write")
+	kvEntries = rootCmd.PersistentFlags().Uint64("kv_entries", 0, "Number of KV entries in the shard")
+
+	readMasked = rootCmd.PersistentFlags().Bool("masked", false, "Read masked or not")
+	readLen = rootCmd.PersistentFlags().Uint64("readlen", 0, "Bytes to read (only for unmasked read)")
 }
 
 func setupLogger() {
@@ -73,18 +95,26 @@ func setupLogger() {
 func runCreate(cmd *cobra.Command, args []string) {
 	setupLogger()
 
-	_, err := Create(*filename, *chunkIdx, *chunkIdxLen, MASK_KECCAK_256)
+	if len(*filenames) != 1 {
+		log.Crit("must provide single filename")
+	}
+
+	_, err := Create((*filenames)[0], *chunkIdx, *chunkIdxLen, MASK_KECCAK_256)
 	if err != nil {
 		log.Crit("create failed", "error", err)
 	}
 }
 
-func runRead(cmd *cobra.Command, args []string) {
+func runChunkRead(cmd *cobra.Command, args []string) {
 	setupLogger()
+
+	if len(*filenames) != 1 {
+		log.Crit("must provide a filename")
+	}
 
 	var err error
 	var df *DataFile
-	df, err = Open(*filename)
+	df, err = Open((*filenames)[0])
 	if err != nil {
 		log.Crit("open failed", "error", err)
 	}
@@ -101,16 +131,7 @@ func runRead(cmd *cobra.Command, args []string) {
 	os.Stdout.Write(b)
 }
 
-func runWrite(cmd *cobra.Command, args []string) {
-	setupLogger()
-
-	var err error
-	var df *DataFile
-	df, err = Open(*filename)
-	if err != nil {
-		log.Crit("open failed", "error", err)
-	}
-
+func readInputBytes() []byte {
 	in := bufio.NewReader(os.Stdin)
 	b := make([]byte, 0)
 	for {
@@ -120,8 +141,79 @@ func runWrite(cmd *cobra.Command, args []string) {
 		}
 		b = append(b, c)
 	}
+	return b
+}
 
-	err = df.WriteUnmasked(*chunkIdx, b)
+func runChunkWrite(cmd *cobra.Command, args []string) {
+	setupLogger()
+
+	if len(*filenames) != 1 {
+		log.Crit("must provide a filename")
+	}
+
+	var err error
+	var df *DataFile
+	df, err = Open((*filenames)[0])
+	if err != nil {
+		log.Crit("open failed", "error", err)
+	}
+
+	err = df.WriteUnmasked(*chunkIdx, readInputBytes())
+	if err != nil {
+		log.Crit("write failed", "error", err)
+	}
+}
+
+func runShardRead(cmd *cobra.Command, args []string) {
+	setupLogger()
+
+	ds := CreateDataShard(*shardIdx, *kvSize, *kvEntries)
+	for _, filename := range *filenames {
+		var err error
+		var df *DataFile
+		df, err = Open(filename)
+		if err != nil {
+			log.Crit("open failed", "error", err)
+		}
+		ds.AddDataFile(df)
+	}
+
+	if !ds.IsComplete() {
+		log.Warn("shard is not completed")
+	}
+
+	var b []byte
+	var err error
+	if *readMasked {
+		b, err = ds.ReadMasked(*kvIdx)
+	} else {
+		b, err = ds.ReadUnmasked(*kvIdx, int(*readLen))
+	}
+	if err != nil {
+		log.Crit("read failed", "error", err)
+	}
+	os.Stdout.Write(b)
+}
+
+func runShardWrite(cmd *cobra.Command, args []string) {
+	setupLogger()
+
+	ds := CreateDataShard(*shardIdx, *kvSize, *kvEntries)
+	for _, filename := range *filenames {
+		var err error
+		var df *DataFile
+		df, err = Open(filename)
+		if err != nil {
+			log.Crit("open failed", "error", err)
+		}
+		ds.AddDataFile(df)
+	}
+
+	if !ds.IsComplete() {
+		log.Warn("shard is not completed")
+	}
+
+	err := ds.WriteUnmasked(*kvIdx, readInputBytes())
 	if err != nil {
 		log.Crit("write failed", "error", err)
 	}
@@ -137,6 +229,8 @@ func init() {
 	rootCmd.AddCommand(CreateCmd)
 	rootCmd.AddCommand(ChunkReadCmd)
 	rootCmd.AddCommand(ChunkWriteCmd)
+	rootCmd.AddCommand(ShardReadCmd)
+	rootCmd.AddCommand(ShardWriteCmd)
 }
 
 func main() {
