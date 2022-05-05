@@ -210,7 +210,7 @@ func (df *DataFile) readHeader() error {
 		return fmt.Errorf("not full header read")
 	}
 
-	buf := new(bytes.Buffer)
+	buf := bytes.NewBuffer(b)
 	if err := binary.Read(buf, binary.BigEndian, &header.magic); err != nil {
 		return err
 	}
