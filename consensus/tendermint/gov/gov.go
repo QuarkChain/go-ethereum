@@ -83,9 +83,9 @@ func (g *Governance) GetValidatorSet(height uint64, lastVals *types.ValidatorSet
 	return epochVals
 }
 
-// NextValidatorsAndPowers get next validators according to block height and config
-func (g *Governance) NextValidatorsAndPowers(epochId uint64, remoteChainNumber uint64, hash common.Hash) ([]common.Address, []uint64, uint64, common.Hash, error) {
-	log.Info("new epoch", "epoch", epochId)
+// NextValidatorsAndPowersForProposal get next validators according to block height and config
+func (g *Governance) NextValidatorsAndPowersForProposal(epochId uint64) ([]common.Address, []uint64, uint64, common.Hash, error) {
+	log.Debug("NextValidatorsAndPowersForProposal", "epoch", epochId)
 	if g.config.ValidatorChangeEpochId == 0 || g.config.ValidatorChangeEpochId > epochId {
 		header := g.chain.GetHeaderByNumber(0)
 		return header.NextValidators, header.NextValidatorPowers, 0, common.Hash{}, nil
@@ -96,64 +96,60 @@ func (g *Governance) NextValidatorsAndPowers(epochId uint64, remoteChainNumber u
 		return nil, nil, 0, common.Hash{}, err
 	}
 
-	if remoteChainNumber == 0 {
-		if number <= confirmedNumber {
-			return nil, nil, 0, common.Hash{}, fmt.Errorf("remote chain number %d smaller than confirmedNumber %d", number, confirmedNumber)
-		}
-		remoteChainNumber = number - confirmedNumber
-	} else if remoteChainNumber == uint64(math.MaxUint64) {
-		return nil, nil, remoteChainNumber, common.Hash{}, fmt.Errorf("parse remoteChainNumber")
-	} else {
-		if number-confirmedNumber/2*3 > remoteChainNumber || number-confirmedNumber/2 < remoteChainNumber {
-			return nil, nil, 0, common.Hash{}, fmt.Errorf("remoteChainNumber %d is out of range [%d, %d]",
-				remoteChainNumber, number-confirmedNumber/2*3, number-confirmedNumber/2)
-		}
+	if number <= confirmedNumber {
+		return nil, nil, 0, common.Hash{}, fmt.Errorf(
+			"remote chain number %d smaller than confirmedNumber %d", number, confirmedNumber)
+	}
+	number = number - confirmedNumber
+
+	validators, powers, err := g.getValidatorsAndPowersFromContract(number)
+	if err != nil {
+		return nil, nil, 0, common.Hash{}, err
+	}
+
+	header, err := g.client.BlockByNumber(g.ctx, new(big.Int).SetUint64(number))
+	if err != nil {
+		return nil, nil, 0, common.Hash{}, err
+	}
+
+	log.Debug("get validators and powers", "validators", validators, "powers", powers)
+	return validators, powers, number, header.Hash(), err
+}
+
+// NextValidatorsAndPowersAt get next validators according to block height and config
+func (g *Governance) NextValidatorsAndPowersAt(epochId uint64, remoteChainNumber uint64, hash common.Hash) ([]common.Address, []uint64, error) {
+	log.Debug("NextValidatorsAndPowersAt", "epoch", epochId)
+	if g.config.ValidatorChangeEpochId == 0 || g.config.ValidatorChangeEpochId > epochId {
+		header := g.chain.GetHeaderByNumber(0)
+		return header.NextValidators, header.NextValidatorPowers, nil
+	}
+
+	number, err := g.client.BlockNumber(g.ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	if number-confirmedNumber/2*3 > remoteChainNumber || number-confirmedNumber/2 < remoteChainNumber {
+		return nil, nil, fmt.Errorf("remoteChainNumber %d is out of range [%d, %d]",
+			remoteChainNumber, number-confirmedNumber/2*3, number-confirmedNumber/2)
 	}
 
 	validators, powers, err := g.getValidatorsAndPowersFromContract(remoteChainNumber)
 	if err != nil {
-		return nil, nil, 0, common.Hash{}, err
+		return nil, nil, err
 	}
 
 	header, err := g.client.BlockByNumber(g.ctx, new(big.Int).SetUint64(remoteChainNumber))
 	if err != nil {
-		return nil, nil, 0, common.Hash{}, err
+		return nil, nil, err
 	}
 
 	if hash != header.Hash() {
 		fmt.Errorf("block hash mismatch", "remoteChainNumber hash", header.Hash(), "hash", hash)
 	}
 
-	log.Info("get validators and powers", "validators", validators, "powers", powers)
-	return validators, powers, remoteChainNumber, header.Hash(), err
-}
-
-func CompareValidators(lhs, rhs []common.Address) bool {
-	if len(lhs) != len(rhs) {
-		return false
-	}
-
-	for i := 0; i < len(lhs); i++ {
-		if lhs[i] != rhs[i] {
-			return false
-		}
-	}
-
-	return true
-}
-
-func CompareValidatorPowers(lhs, rhs []uint64) bool {
-	if len(lhs) != len(rhs) {
-		return false
-	}
-
-	for i := 0; i < len(lhs); i++ {
-		if lhs[i] != rhs[i] {
-			return false
-		}
-	}
-
-	return true
+	log.Debug("get validators and powers", "validators", validators, "powers", powers)
+	return validators, powers, err
 }
 
 // getValidatorsAndPowersFromContract get next validators from contract
@@ -197,4 +193,32 @@ func (g *Governance) getValidatorsAndPowersFromContract(blockNumber uint64) ([]c
 	}
 
 	return v.Validators, powers, nil
+}
+
+func CompareValidators(lhs, rhs []common.Address) bool {
+	if len(lhs) != len(rhs) {
+		return false
+	}
+
+	for i := 0; i < len(lhs); i++ {
+		if lhs[i] != rhs[i] {
+			return false
+		}
+	}
+
+	return true
+}
+
+func CompareValidatorPowers(lhs, rhs []uint64) bool {
+	if len(lhs) != len(rhs) {
+		return false
+	}
+
+	for i := 0; i < len(lhs); i++ {
+		if lhs[i] != rhs[i] {
+			return false
+		}
+	}
+
+	return true
 }

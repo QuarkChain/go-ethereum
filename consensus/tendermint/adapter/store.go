@@ -6,8 +6,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"math"
-
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus"
 	pbft "github.com/ethereum/go-ethereum/consensus/tendermint/consensus"
@@ -102,21 +100,27 @@ func (s *Store) ValidateBlock(state pbft.ChainState, block *types.FullBlock) (er
 	validators, powers := []common.Address{}, []uint64{}
 	if header.Number.Uint64()%s.config.Epoch == 0 {
 		epochId := header.Number.Uint64() / s.config.Epoch
-		remoteChainNumber := uint64(math.MaxUint64)
-		hash := common.Hash{}
+		remoteChainNumber := uint64(0)
+		hash, etmpyhash := common.Hash{}, common.Hash{}
 		if s.config.ValidatorChangeEpochId > 0 && s.config.ValidatorChangeEpochId <= epochId {
 			l := len(prefix)
 			if len(header.Extra) >= l+8+32 && bytes.Compare(header.Extra[:l], prefix) == 0 {
 				nb := header.Extra[l : l+8]
 				remoteChainNumber = binary.BigEndian.Uint64(nb)
+				if remoteChainNumber == 0 {
+					return errors.New("invalid remoteChainNumber in header.Extra")
+				}
 				hb := header.Extra[l+8 : l+8+32]
 				hash = common.BytesToHash(hb)
+				if hash == etmpyhash {
+					return errors.New("invalid remote block hash in header.Extra")
+				}
 			} else {
 				return errors.New("header.Extra missing validator chain block heigh and hash")
 			}
 		}
 
-		validators, powers, _, _, err = s.gov.NextValidatorsAndPowers(epochId, remoteChainNumber, hash)
+		validators, powers, err = s.gov.NextValidatorsAndPowersAt(epochId, remoteChainNumber, hash)
 		if err != nil {
 			return errors.New(fmt.Sprintf("verifyHeader failed with %s", err.Error()))
 		}
@@ -277,11 +281,15 @@ func (s *Store) MakeBlock(
 		remoteChainNumber := uint64(0)
 		hash := common.Hash{}
 
-		header.NextValidators, header.NextValidatorPowers, remoteChainNumber, hash, err = s.gov.NextValidatorsAndPowers(epochId, remoteChainNumber, hash)
+		header.NextValidators, header.NextValidatorPowers, remoteChainNumber, hash, err =
+			s.gov.NextValidatorsAndPowersForProposal(epochId)
 		if err != nil {
 			log.Crit(err.Error())
 		}
 
+		// remoteChainNumber == 0 when NextValidatorsAndPowers return err or
+		// when update validator from contract is not enable. as err has been handled above.
+		// so only when remoteChainNumber != 0 need to add number and hash to header.Extra.
 		if remoteChainNumber != 0 {
 			data := prefix
 			b := make([]byte, 8)
