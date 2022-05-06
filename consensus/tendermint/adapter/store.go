@@ -284,7 +284,8 @@ func (s *Store) MakeBlock(
 		header.NextValidators, header.NextValidatorPowers, remoteChainNumber, hash, err =
 			s.gov.NextValidatorsAndPowersForProposal(epochId)
 		if err != nil {
-			log.Crit(err.Error())
+			log.Error(err.Error())
+			return nil
 		}
 
 		// remoteChainNumber == 0 when NextValidatorsAndPowers return err or
