@@ -101,7 +101,7 @@ func (s *Store) ValidateBlock(state pbft.ChainState, block *types.FullBlock) (er
 	if header.Number.Uint64()%s.config.Epoch == 0 {
 		epochId := header.Number.Uint64() / s.config.Epoch
 		remoteChainNumber := uint64(0)
-		hash, etmpyhash := common.Hash{}, common.Hash{}
+		hash, etmpyHash := common.Hash{}, common.Hash{}
 		if s.config.ValidatorChangeEpochId > 0 && s.config.ValidatorChangeEpochId <= epochId {
 			l := len(prefix)
 			if len(header.Extra) >= l+8+32 && bytes.Compare(header.Extra[:l], prefix) == 0 {
@@ -112,11 +112,11 @@ func (s *Store) ValidateBlock(state pbft.ChainState, block *types.FullBlock) (er
 				}
 				hb := header.Extra[l+8 : l+8+32]
 				hash = common.BytesToHash(hb)
-				if hash == etmpyhash {
+				if hash == etmpyHash {
 					return errors.New("invalid remote block hash in header.Extra")
 				}
 			} else {
-				return errors.New("header.Extra missing validator chain block heigh and hash")
+				return errors.New("header.Extra missing validator chain block height and hash")
 			}
 		}
 
