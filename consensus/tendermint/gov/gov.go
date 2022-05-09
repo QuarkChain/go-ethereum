@@ -21,7 +21,7 @@ import (
 const (
 	validatorsetABI           = `[{"inputs": [],"name": "GetEpochValidators","outputs": [{"internalType": "uint256","name": "EpochIdx","type": "uint256"},{"internalType": "address[]","name": "Validators","type": "address[]"},{"internalType": "uint256[]","name": "Powers","type": "uint256[]"}],"stateMutability": "view","type": "function"},{"inputs": [],"name": "proposedValidators","outputs": [{"internalType": "address[]","name": "Validators","type": "address[]"},{"internalType": "uint256[]","name": "Powers","type": "uint256[]"}],"stateMutability": "view","type": "function"}]`
 	confirmedNumber           = 96
-	contractFunc_GetValidator = "proposalValidators"
+	contractFunc_GetValidator = "proposedValidators"
 	gas                       = uint64(math.MaxUint64 / 2)
 )
 
@@ -102,12 +102,12 @@ func (g *Governance) NextValidatorsAndPowersForProposal(epochId uint64) ([]commo
 	}
 	number = number - confirmedNumber
 
-	validators, powers, err := g.getValidatorsAndPowersFromContract(number)
+	header, err := g.client.BlockByNumber(g.ctx, new(big.Int).SetUint64(number))
 	if err != nil {
 		return nil, nil, 0, common.Hash{}, err
 	}
 
-	header, err := g.client.BlockByNumber(g.ctx, new(big.Int).SetUint64(number))
+	validators, powers, err := g.getValidatorsAndPowersFromContract(header.Hash())
 	if err != nil {
 		return nil, nil, 0, common.Hash{}, err
 	}
@@ -134,11 +134,6 @@ func (g *Governance) NextValidatorsAndPowersAt(epochId uint64, remoteChainNumber
 			remoteChainNumber, number-confirmedNumber/2*3, number-confirmedNumber/2)
 	}
 
-	validators, powers, err := g.getValidatorsAndPowersFromContract(remoteChainNumber)
-	if err != nil {
-		return nil, nil, err
-	}
-
 	header, err := g.client.BlockByNumber(g.ctx, new(big.Int).SetUint64(remoteChainNumber))
 	if err != nil {
 		return nil, nil, err
@@ -148,12 +143,17 @@ func (g *Governance) NextValidatorsAndPowersAt(epochId uint64, remoteChainNumber
 		fmt.Errorf("block hash mismatch", "remoteChainNumber hash", header.Hash(), "hash", hash)
 	}
 
+	validators, powers, err := g.getValidatorsAndPowersFromContract(hash)
+	if err != nil {
+		return nil, nil, err
+	}
+
 	log.Debug("get validators and powers", "validators", validators, "powers", powers)
 	return validators, powers, err
 }
 
 // getValidatorsAndPowersFromContract get next validators from contract
-func (g *Governance) getValidatorsAndPowersFromContract(blockNumber uint64) ([]common.Address, []uint64, error) {
+func (g *Governance) getValidatorsAndPowersFromContract(blockHash common.Hash) ([]common.Address, []uint64, error) {
 	data, err := g.validatorSetABI.Pack(contractFunc_GetValidator)
 	if err != nil {
 		return nil, nil, err
@@ -166,7 +166,7 @@ func (g *Governance) getValidatorsAndPowersFromContract(blockNumber uint64) ([]c
 		Gas:  gas,
 		Data: msgData,
 	}
-	result, err := g.client.CallContract(g.ctx, msg, new(big.Int).SetUint64(blockNumber))
+	result, err := g.client.CallContractAtHash(g.ctx, msg, blockHash)
 	if err != nil {
 		return nil, nil, err
 	}
