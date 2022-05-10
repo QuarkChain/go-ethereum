@@ -8,7 +8,6 @@ import (
 	"github.com/ethereum/go-ethereum/rlp"
 	"io"
 	"io/ioutil"
-	"math"
 	"math/big"
 	"os"
 	"strings"
@@ -27,11 +26,11 @@ import (
 )
 
 const (
-	ABI                    = `[{"inputs": [],"name": "getNextEpochHeight","outputs": [{"internalType": "uint256","name": "","type": "uint256"}],"stateMutability": "view","type": "function"},{"inputs": [{"internalType": "bytes","name": "_epochHeaderBytes","type": "bytes"},{"internalType": "bytes","name": "commitBytes","type": "bytes"}],"name": "submitHead","outputs": [],"stateMutability": "nonpayable","type": "function"}]`
+	ABI                    = `[{"inputs":[],"name":"curEpochHeight","outputs":[{"internalType":"uint256","name":"height","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"curEpochIdx","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"epochPeriod","outputs":[{"internalType":"uint256","name":"height","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"getCurrentEpoch","outputs":[{"internalType":"uint256","name":"","type":"uint256"},{"internalType":"address[]","name":"","type":"address[]"},{"internalType":"uint256[]","name":"","type":"uint256[]"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"getNextEpochHeight","outputs":[{"internalType":"uint256","name":"height","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"getStaking","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address[]","name":"epochSigners","type":"address[]"},{"internalType":"uint256[]","name":"epochVotingPowers","type":"uint256[]"},{"internalType":"uint256","name":"height","type":"uint256"},{"internalType":"bytes32","name":"headHash","type":"bytes32"}],"name":"initEpoch","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[],"name":"proposedValidators","outputs":[{"internalType":"address[]","name":"","type":"address[]"},{"internalType":"uint256[]","name":"","type":"uint256[]"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256","name":"_epochPeriod","type":"uint256"}],"name":"setEpochPeriod","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"bytes","name":"_epochHeaderBytes","type":"bytes"},{"internalType":"bytes","name":"commitBytes","type":"bytes"},{"internalType":"bool","name":"lookByIndex","type":"bool"}],"name":"submitHead","outputs":[],"stateMutability":"nonpayable","type":"function"}]`
 	SubmitHeaderFunc       = "submitHead"
 	GetNextEpochHeightFunc = "getNextEpochHeight"
-	gas                    = uint64(math.MaxUint64 / 2)
-	comfirmCount           = 50 // 10 * 60 / 12
+	gas                    = uint64(1000000) // uint64(math.MaxUint64 / 2)
+	comfirmCount           = 50              // 10 * 60 / 12
 )
 
 var (
@@ -190,7 +189,7 @@ func runRelay(cmd *cobra.Command, args []string) {
 
 			err = relayer.SubmitHeaderToContract(header)
 			if err == nil {
-				time.Sleep(10 * time.Second)
+				time.Sleep(1 * time.Minute)
 				continue
 			}
 			log.Error("SubmitHeaderToContract failed", "err", err.Error())
@@ -241,7 +240,7 @@ func (r *relayer) SubmitHeaderToContract(header *types.Header) error {
 		return err
 	}
 
-	data, err := r.valABI.Pack(SubmitHeaderFunc, eHeader, eCommit)
+	data, err := r.valABI.Pack(SubmitHeaderFunc, eHeader, eCommit, false)
 	if err != nil {
 		return err
 	}
@@ -295,9 +294,6 @@ func (r *relayer) GetNextEpochHeight(blockNumber uint64) (uint64, error) {
 	}
 
 	var rh t
-
-	//	var rh = new(big.Int).SetInt64(0)
-
 	if err := r.valABI.UnpackIntoInterface(&rh, GetNextEpochHeightFunc, result); err != nil {
 		return 0, err
 	}
