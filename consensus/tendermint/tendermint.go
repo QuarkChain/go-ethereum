@@ -157,7 +157,7 @@ func (c *Tendermint) Init(chain *core.BlockChain, makeBlock func(parent common.H
 	}
 
 	// p2p server
-	p2pserver, err := libp2p.NewP2PServer(rootCtx, store, obsvC, sendC, p2pPriv, c.config.P2pPort, c.config.NetworkID, c.config.P2pBootstrap, c.config.NodeName, rootCtxCancel)
+	p2pserver, err := libp2p.NewP2PServer(rootCtx, store, obsvC, sendC, p2pPriv, c.config.P2pPort, c.config.NetworkID, c.config.P2pBootstrap, c.config.NodeName, rootCtxCancel, c.config.MaxPeerCount)
 	if err != nil {
 		return
 	}

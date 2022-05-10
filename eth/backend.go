@@ -150,6 +150,10 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		if config.ValP2pPort != 0 {
 			chainConfig.Tendermint.P2pPort = config.ValP2pPort
 		}
+		// Setup MaxPeerCount
+		if config.MaxPeerCount != 0 {
+			chainConfig.Tendermint.MaxPeerCount = config.MaxPeerCount
+		}
 		// Setup p2p node key
 		// TODO: Use node key in default datadir
 		if config.ValNodeKey != "" {

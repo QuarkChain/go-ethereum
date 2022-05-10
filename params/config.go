@@ -306,6 +306,7 @@ var (
 		Tendermint: &TendermintConfig{
 			Epoch:              100800, // expect 6s block interval = one week
 			P2pPort:            33333,
+			MaxPeerCount:       50,
 			ProposerRepetition: 8,
 			P2pBootstrap:       strings.Join(Web3QGalileoValBootnodes, ","),
 			NodeKeyPath:        "",
@@ -499,6 +500,7 @@ type TendermintConfig struct {
 	Epoch              uint64 `json:"epoch"` // Epoch lengh to vote new validator
 	NodeKeyPath        string
 	P2pPort            uint
+	MaxPeerCount       int
 	NetworkID          string
 	P2pBootstrap       string
 	NodeName           string

@@ -42,6 +42,7 @@ var (
 	timeoutCommitMs    *uint64
 	consensusSyncMs    *uint64
 	proposerRepetition *uint64
+	maxPeerCount       *int
 )
 
 var NodeCmd = &cobra.Command{
@@ -73,6 +74,7 @@ func init() {
 	consensusSyncMs = NodeCmd.Flags().Uint64("consensusSyncMs", 500, "Consensus sync in ms")
 	proposerRepetition = NodeCmd.Flags().Uint64("proposerRepetition", 8, "proposer repetition")
 
+	maxPeerCount = NodeCmd.Flags().Int("maxPeerCount", 10, "proposer repetition")
 }
 
 func runNode(cmd *cobra.Command, args []string) {
@@ -191,7 +193,7 @@ func runNode(cmd *cobra.Command, args []string) {
 	bs := NewDefaultBlockStore(db)
 	executor := consensus.NewDefaultBlockExecutor(db)
 
-	p2pserver, err := p2p.NewP2PServer(rootCtx, bs, obsvC, sendC, p2pPriv, *p2pPort, *p2pNetworkID, *p2pBootstrap, *nodeName, rootCtxCancel)
+	p2pserver, err := p2p.NewP2PServer(rootCtx, bs, obsvC, sendC, p2pPriv, *p2pPort, *p2pNetworkID, *p2pBootstrap, *nodeName, rootCtxCancel, *maxPeerCount)
 
 	go func() {
 		p2pserver.Run(rootCtx)
