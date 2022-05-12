@@ -743,6 +743,7 @@ func (s *PublicBlockChainAPI) GetHeaderByHash(ctx context.Context, hash common.H
 // * When fullTx is true all transactions in the block are returned, otherwise
 //   only the transaction hash is returned.
 func (s *PublicBlockChainAPI) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber, fullTx bool) (map[string]interface{}, error) {
+	log.Warn("=============================GetBlockByNumber==============================")
 	block, err := s.b.BlockByNumber(ctx, number)
 	if block != nil && err == nil {
 		response, err := s.rpcMarshalBlock(ctx, block, true, fullTx)
@@ -1186,23 +1187,28 @@ func FormatLogs(logs []logger.StructLog) []StructLogRes {
 // RPCMarshalHeader converts the given header to the RPC output .
 func RPCMarshalHeader(head *types.Header) map[string]interface{} {
 	result := map[string]interface{}{
-		"number":           (*hexutil.Big)(head.Number),
-		"hash":             head.Hash(),
-		"parentHash":       head.ParentHash,
-		"nonce":            head.Nonce,
-		"mixHash":          head.MixDigest,
-		"sha3Uncles":       head.UncleHash,
-		"logsBloom":        head.Bloom,
-		"stateRoot":        head.Root,
-		"miner":            head.Coinbase,
-		"difficulty":       (*hexutil.Big)(head.Difficulty),
-		"extraData":        hexutil.Bytes(head.Extra),
-		"size":             hexutil.Uint64(head.Size()),
-		"gasLimit":         hexutil.Uint64(head.GasLimit),
-		"gasUsed":          hexutil.Uint64(head.GasUsed),
-		"timestamp":        hexutil.Uint64(head.Time),
-		"transactionsRoot": head.TxHash,
-		"receiptsRoot":     head.ReceiptHash,
+		"number":              (*hexutil.Big)(head.Number),
+		"hash":                head.Hash(),
+		"parentHash":          head.ParentHash,
+		"nonce":               head.Nonce,
+		"mixHash":             head.MixDigest,
+		"sha3Uncles":          head.UncleHash,
+		"logsBloom":           head.Bloom,
+		"stateRoot":           head.Root,
+		"miner":               head.Coinbase,
+		"difficulty":          (*hexutil.Big)(head.Difficulty),
+		"extraData":           hexutil.Bytes(head.Extra),
+		"size":                hexutil.Uint64(head.Size()),
+		"gasLimit":            hexutil.Uint64(head.GasLimit),
+		"gasUsed":             hexutil.Uint64(head.GasUsed),
+		"timestamp":           hexutil.Uint64(head.Time),
+		"transactionsRoot":    head.TxHash,
+		"receiptsRoot":        head.ReceiptHash,
+		"timeMs":              head.TimeMs,
+		"nextValidators":      head.NextValidators,
+		"nextValidatorPowers": head.NextValidatorPowers,
+		"LastCommitHash":      head.LastCommitHash,
+		"commit":              head.Commit,
 	}
 
 	if head.BaseFee != nil {

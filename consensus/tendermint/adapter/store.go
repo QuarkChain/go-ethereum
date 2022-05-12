@@ -200,6 +200,10 @@ func (s *Store) ValidateBlock(state pbft.ChainState, block *types.FullBlock) (er
 	}
 
 	err = s.chain.PreExecuteBlock(block.Block)
+	if err == core.ErrKnownBlock {
+		log.Warn("ValidateBlock treated ErrKnownBlock as nil")
+		err = nil
+	}
 	return
 }
 
