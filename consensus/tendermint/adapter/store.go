@@ -118,13 +118,18 @@ func (s *Store) ValidateBlock(state pbft.ChainState, block *types.FullBlock) (er
 			} else {
 				return errors.New("header.Extra missing validator chain block height and hash")
 			}
-		}
 
-		validators, powers, err = s.gov.NextValidatorsAndPowersAt(epochId, remoteChainNumber, hash)
-		if err != nil {
-			return errors.New(fmt.Sprintf("verifyHeader failed with %s", err.Error()))
+			log.Debug("NextValidatorsAndPowersForProposal", "epoch", epochId)
+			validators, powers, err = s.gov.NextValidatorsAndPowersAt(remoteChainNumber, hash)
+			if err != nil {
+				return errors.New(fmt.Sprintf("verifyHeader failed with %s", err.Error()))
+			}
+		} else {
+			header := s.chain.GetHeaderByNumber(0)
+			validators, powers = header.NextValidators, header.NextValidatorPowers
 		}
 	}
+
 	if !gov.CompareValidators(header.NextValidators, validators) {
 		return errors.New("NextValidators is incorrect")
 	}
@@ -282,26 +287,24 @@ func (s *Store) MakeBlock(
 
 	if height%s.config.Epoch == 0 {
 		epochId := height / s.config.Epoch
-		remoteChainNumber := uint64(0)
-		hash := common.Hash{}
+		if s.config.ValidatorChangeEpochId > 0 && s.config.ValidatorChangeEpochId <= epochId {
+			log.Debug("NextValidatorsAndPowersAt", "epoch", epochId)
+			validators, powers, number, hash, err := s.gov.NextValidatorsAndPowersForProposal()
+			if err != nil {
+				log.Error(err.Error())
+				return nil
+			}
+			header.NextValidators, header.NextValidatorPowers = validators, powers
 
-		header.NextValidators, header.NextValidatorPowers, remoteChainNumber, hash, err =
-			s.gov.NextValidatorsAndPowersForProposal(epochId)
-		if err != nil {
-			log.Error(err.Error())
-			return nil
-		}
-
-		// remoteChainNumber == 0 when NextValidatorsAndPowers return err or
-		// when update validator from contract is not enable. as err has been handled above.
-		// so only when remoteChainNumber != 0 need to add number and hash to header.Extra.
-		if remoteChainNumber != 0 {
 			data := prefix
 			b := make([]byte, 8)
-			binary.BigEndian.PutUint64(b, remoteChainNumber)
+			binary.BigEndian.PutUint64(b, number)
 			data = append(data, b...)
 			data = append(data, hash.Bytes()...)
 			header.Extra = append(data, header.Extra...)
+		} else {
+			h := s.chain.GetHeaderByNumber(0)
+			header.NextValidators, header.NextValidatorPowers = h.NextValidators, h.NextValidatorPowers
 		}
 	} else {
 		header.NextValidators, header.NextValidatorPowers = []common.Address{}, []uint64{}

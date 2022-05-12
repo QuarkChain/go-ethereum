@@ -84,13 +84,7 @@ func (g *Governance) GetValidatorSet(height uint64, lastVals *types.ValidatorSet
 }
 
 // NextValidatorsAndPowersForProposal get next validators according to block height and config
-func (g *Governance) NextValidatorsAndPowersForProposal(epochId uint64) ([]common.Address, []uint64, uint64, common.Hash, error) {
-	log.Debug("NextValidatorsAndPowersForProposal", "epoch", epochId)
-	if g.config.ValidatorChangeEpochId == 0 || g.config.ValidatorChangeEpochId > epochId {
-		header := g.chain.GetHeaderByNumber(0)
-		return header.NextValidators, header.NextValidatorPowers, 0, common.Hash{}, nil
-	}
-
+func (g *Governance) NextValidatorsAndPowersForProposal() ([]common.Address, []uint64, uint64, common.Hash, error) {
 	number, err := g.client.BlockNumber(g.ctx)
 	if err != nil {
 		return nil, nil, 0, common.Hash{}, err
@@ -117,13 +111,7 @@ func (g *Governance) NextValidatorsAndPowersForProposal(epochId uint64) ([]commo
 }
 
 // NextValidatorsAndPowersAt get next validators according to block height and config
-func (g *Governance) NextValidatorsAndPowersAt(epochId uint64, remoteChainNumber uint64, hash common.Hash) ([]common.Address, []uint64, error) {
-	log.Debug("NextValidatorsAndPowersAt", "epoch", epochId)
-	if g.config.ValidatorChangeEpochId == 0 || g.config.ValidatorChangeEpochId > epochId {
-		header := g.chain.GetHeaderByNumber(0)
-		return header.NextValidators, header.NextValidatorPowers, nil
-	}
-
+func (g *Governance) NextValidatorsAndPowersAt(remoteChainNumber uint64, hash common.Hash) ([]common.Address, []uint64, error) {
 	number, err := g.client.BlockNumber(g.ctx)
 	if err != nil {
 		return nil, nil, err
