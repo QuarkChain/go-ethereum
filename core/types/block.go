@@ -88,11 +88,11 @@ type Header struct {
 	BaseFee *big.Int `json:"baseFeePerGas" rlp:"optional"`
 
 	// Chamber-related data structure
-	TimeMs              uint64           `json:"TimeMs" rlp:"optional"`
-	NextValidators      []common.Address `json:"NextValidators" rlp:"optional"`
-	NextValidatorPowers []uint64         `json:"NextValidatorPowers" rlp:"optional"`
-	LastCommitHash      common.Hash      `json:"LastCommitHash" rlp:"optional"`
-	Commit              *Commit          `json:"Commit" rlp:"optional"`
+	TimeMs              uint64           `json:"timeMs" rlp:"optional"`
+	NextValidators      []common.Address `json:"nextValidators" rlp:"optional"`
+	NextValidatorPowers []uint64         `json:"nextValidatorPowers" rlp:"optional"`
+	LastCommitHash      common.Hash      `json:"lastCommitHash" rlp:"optional"`
+	Commit              *Commit          `json:"commit" rlp:"optional"`
 
 	/*
 		TODO (MariusVanDerWijden) Add this field once needed
