@@ -169,7 +169,6 @@ func (g *Governance) getValidatorsAndPowersFromContract(blockHash common.Hash) (
 	if err := g.validatorSetABI.UnpackIntoInterface(&v, contractFunc_GetValidator, result); err != nil {
 		return nil, nil, err
 	}
-
 	if len(v.Validators) != len(v.Powers) {
 		return nil, nil, fmt.Errorf("invalid validator set: validator count %d is mismatch with power count %d",
 			len(v.Validators), len(v.Powers))
