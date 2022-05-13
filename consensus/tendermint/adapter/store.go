@@ -106,7 +106,7 @@ func (s *Store) ValidateBlock(state pbft.ChainState, block *types.FullBlock) (er
 		// if update validator set from contract enable
 		if s.config.ValidatorChangeEpochId > 0 && s.config.ValidatorChangeEpochId <= epochId {
 			l := len(prefix)
-			if len(header.Extra) < l+8+32 || bytes.Compare(header.Extra[:l], prefix) != 0 {
+			if len(header.Extra) < l+8+32 || bytes.Equal(header.Extra[:l], prefix) {
 				return errors.New("header.Extra missing validator chain block height and hash")
 			}
 
