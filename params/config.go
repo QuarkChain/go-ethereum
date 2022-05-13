@@ -304,11 +304,15 @@ var (
 		LondonBlock:         big.NewInt(0),
 		ArrowGlacierBlock:   nil,
 		Tendermint: &TendermintConfig{
-			Epoch:              100800, // expect 6s block interval = one week
-			P2pPort:            33333,
-			ProposerRepetition: 8,
-			P2pBootstrap:       strings.Join(Web3QGalileoValBootnodes, ","),
-			NodeKeyPath:        "",
+			Epoch:                  100800, // expect 6s block interval = one week
+			ValidatorContract:      "",
+			ContractChainID:        0,
+			ValidatorChangeEpochId: 0,
+			ValRpc:                 "",
+			P2pPort:                33333,
+			ProposerRepetition:     8,
+			P2pBootstrap:           strings.Join(Web3QGalileoValBootnodes, ","),
+			NodeKeyPath:            "",
 			ConsensusConfig: ConsensusConfig{
 				// WalPath:                     filepath.Join(defaultDataDir, "cs.wal", "wal"),
 				TimeoutPropose:               3000 * time.Millisecond,
@@ -496,14 +500,18 @@ type CliqueConfig struct {
 }
 
 type TendermintConfig struct {
-	Epoch              uint64 `json:"epoch"` // Epoch lengh to vote new validator
-	NodeKeyPath        string
-	P2pPort            uint
-	NetworkID          string
-	P2pBootstrap       string
-	NodeName           string
-	ProposerRepetition uint64
-	ConsensusConfig    ConsensusConfig
+	Epoch                  uint64 `json:"epoch"`             // Epoch lengh to vote new validator
+	ValidatorContract      string `json:"validatorContract"` // Validator set contract
+	ContractChainID        uint64 `json:"contractChainId"`   // Chain ID which Validator contract on
+	ValidatorChangeEpochId uint64 `json:"valChangeEpochId"`       // Epoch to enable update ValidatorSet from contract
+	ValRpc                 string `json:"valRpc"`            // rpc for ethclient to get ValidatorSet from contract
+	NodeKeyPath            string
+	P2pPort                uint
+	NetworkID              string
+	P2pBootstrap           string
+	NodeName               string
+	ProposerRepetition     uint64
+	ConsensusConfig        ConsensusConfig
 }
 
 // String implements the stringer interface, returning the consensus engine details.
