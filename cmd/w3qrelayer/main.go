@@ -12,14 +12,14 @@ var cfgFile string
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
-	Use:   "mrelayer",
-	Short: "Minimal Relayer server",
+	Use:   "w3qrelayer",
+	Short: "Web3q Relayer server",
 }
 
 func init() {
-	// cobra.OnInitialize(initConfig)
+	cobra.OnInitialize(initConfig)
 	//
-	// rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.guardiand.yaml)")
+	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.guardiand.yaml)")
 	rootCmd.AddCommand(RelayCmd)
 }
 
@@ -36,9 +36,9 @@ func initConfig() {
 			os.Exit(1)
 		}
 
-		// Search config in home directory with name ".guardiand" (without extension).
+		// Search config in home directory with name ".relayer" (without extension).
 		viper.AddConfigPath(home)
-		viper.SetConfigName(".guardiand.yaml")
+		viper.SetConfigName(".relayer.yaml")
 	}
 
 	viper.AutomaticEnv() // read in environment variables that match

@@ -158,8 +158,9 @@ func runRelay(cmd *cobra.Command, args []string) {
 			log.Info("round", "i", i)
 			i++
 			var (
-				header      *types.Header
-				blockNumber uint64
+				header          *types.Header
+				nextEpochHeight uint64
+				w3qCurNumber    uint64
 			)
 			curNumber, err := relayer.ethClient.BlockNumber(relayer.ctx)
 			if err != nil {
@@ -167,17 +168,27 @@ func runRelay(cmd *cobra.Command, args []string) {
 				goto sleep
 			}
 
-			blockNumber, err = relayer.GetNextEpochHeight(curNumber - comfirmCount)
+			nextEpochHeight, err = relayer.GetNextEpochHeight(curNumber - comfirmCount)
 			if err != nil {
 				log.Error("GetNextEpochHeight failed", "err", err.Error())
 				goto sleep
 			}
 
-			if blockNumber == 0 {
+			if nextEpochHeight == 0 {
 				goto sleep
 			}
 
-			header, err = relayer.web3qClient.HeaderByNumber(relayer.ctx, new(big.Int).SetUint64(blockNumber))
+			w3qCurNumber, err = relayer.web3qClient.BlockNumber(relayer.ctx)
+			if err != nil {
+				log.Error("Get block number failed", "err", err.Error())
+				goto sleep
+			}
+
+			if w3qCurNumber < nextEpochHeight {
+				goto sleep
+			}
+
+			header, err = relayer.web3qClient.HeaderByNumber(relayer.ctx, new(big.Int).SetUint64(nextEpochHeight))
 			if err != nil {
 				log.Error("FetchWeb3qHeader failed", "err", err.Error())
 				goto sleep
