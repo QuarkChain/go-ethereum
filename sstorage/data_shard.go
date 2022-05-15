@@ -1,4 +1,4 @@
-package main
+package sstorage
 
 import "fmt"
 
@@ -10,7 +10,7 @@ type DataShard struct {
 	dataFiles   []*DataFile
 }
 
-func CreateDataShard(shardIdx uint64, kvSize uint64, kvEntries uint64) *DataShard {
+func NewDataShard(shardIdx uint64, kvSize uint64, kvEntries uint64) *DataShard {
 	if kvSize%CHUNK_SIZE != 0 {
 		panic("kvSize must be CHUNK_SIZE at the moment")
 	}

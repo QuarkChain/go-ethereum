@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/sstorage"
 	"github.com/mattn/go-colorable"
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
@@ -30,7 +31,7 @@ var (
 
 var CreateCmd = &cobra.Command{
 	Use:   "create",
-	Short: "Create a storage file",
+	Short: "Create a data file",
 	Run:   runCreate,
 }
 
@@ -99,7 +100,7 @@ func runCreate(cmd *cobra.Command, args []string) {
 		log.Crit("must provide single filename")
 	}
 
-	_, err := Create((*filenames)[0], *chunkIdx, *chunkIdxLen, MASK_KECCAK_256)
+	_, err := sstorage.Create((*filenames)[0], *chunkIdx, *chunkIdxLen, sstorage.MASK_KECCAK_256)
 	if err != nil {
 		log.Crit("create failed", "error", err)
 	}
@@ -113,8 +114,8 @@ func runChunkRead(cmd *cobra.Command, args []string) {
 	}
 
 	var err error
-	var df *DataFile
-	df, err = Open((*filenames)[0])
+	var df *sstorage.DataFile
+	df, err = sstorage.OpenDataFile((*filenames)[0])
 	if err != nil {
 		log.Crit("open failed", "error", err)
 	}
@@ -152,8 +153,8 @@ func runChunkWrite(cmd *cobra.Command, args []string) {
 	}
 
 	var err error
-	var df *DataFile
-	df, err = Open((*filenames)[0])
+	var df *sstorage.DataFile
+	df, err = sstorage.OpenDataFile((*filenames)[0])
 	if err != nil {
 		log.Crit("open failed", "error", err)
 	}
@@ -167,11 +168,11 @@ func runChunkWrite(cmd *cobra.Command, args []string) {
 func runShardRead(cmd *cobra.Command, args []string) {
 	setupLogger()
 
-	ds := CreateDataShard(*shardIdx, *kvSize, *kvEntries)
+	ds := sstorage.NewDataShard(*shardIdx, *kvSize, *kvEntries)
 	for _, filename := range *filenames {
 		var err error
-		var df *DataFile
-		df, err = Open(filename)
+		var df *sstorage.DataFile
+		df, err = sstorage.OpenDataFile(filename)
 		if err != nil {
 			log.Crit("open failed", "error", err)
 		}
@@ -198,11 +199,11 @@ func runShardRead(cmd *cobra.Command, args []string) {
 func runShardWrite(cmd *cobra.Command, args []string) {
 	setupLogger()
 
-	ds := CreateDataShard(*shardIdx, *kvSize, *kvEntries)
+	ds := sstorage.NewDataShard(*shardIdx, *kvSize, *kvEntries)
 	for _, filename := range *filenames {
 		var err error
-		var df *DataFile
-		df, err = Open(filename)
+		var df *sstorage.DataFile
+		df, err = sstorage.OpenDataFile(filename)
 		if err != nil {
 			log.Crit("open failed", "error", err)
 		}
@@ -221,8 +222,8 @@ func runShardWrite(cmd *cobra.Command, args []string) {
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
-	Use:   "storage",
-	Short: "Storage tools",
+	Use:   "sstorage",
+	Short: "Sharded storage tools",
 }
 
 func init() {

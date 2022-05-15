@@ -1,4 +1,4 @@
-package main
+package sstorage
 
 import (
 	"bytes"
@@ -100,7 +100,7 @@ func Create(filename string, chunkIdxStart uint64, chunkIdxLen uint64, maskType 
 	return dataFile, nil
 }
 
-func Open(filename string) (*DataFile, error) {
+func OpenDataFile(filename string) (*DataFile, error) {
 	file, err := os.OpenFile(filename, os.O_RDWR, 0755)
 	if err != nil {
 		return nil, err
