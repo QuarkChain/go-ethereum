@@ -155,6 +155,18 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		if config.ValNodeKey != "" {
 			chainConfig.Tendermint.NodeKeyPath = config.ValNodeKey
 		}
+		if config.ValContract != "" {
+			chainConfig.Tendermint.ValidatorContract = config.ValContract
+		}
+		if config.ValChainId != 0 {
+			chainConfig.Tendermint.ContractChainID = config.ValChainId
+		}
+		if config.ValidatorChangeEpochId != 0 {
+			chainConfig.Tendermint.ValidatorChangeEpochId = config.ValidatorChangeEpochId
+		}
+		if config.ValRpc != "" {
+			chainConfig.Tendermint.ValRpc = config.ValRpc
+		}
 	}
 
 	log.Info("Initialised chain configuration", "config", chainConfig)

@@ -163,6 +163,10 @@ const (
 	// up to half the consumed gas could be refunded. Redefined as 1/5th in EIP-3529
 	RefundQuotient        uint64 = 2
 	RefundQuotientEIP3529 uint64 = 5
+
+	CalldataGasCostEIP4488         = 3       // NEW_CALLDATA_GAS_COST in EIP-4488
+	BaseMaxCalldataPerBlockEIP4488 = 1048576 // BASE_MAX_CALLDATA_PER_BLOCK in EIP-4488
+	CalldataPerTxStipendEIP4488    = 300     // CALLDATA_PER_TX_STIPEND in EIP-4488
 )
 
 // Gas discount table for BLS12-381 G1 and G2 multi exponentiation operations

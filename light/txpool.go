@@ -68,6 +68,7 @@ type TxPool struct {
 	clearIdx     uint64                               // earliest block nr that can contain mined tx info
 
 	istanbul bool // Fork indicator whether we are in the istanbul stage.
+	pisa     bool // Fork indicator whether we are in the Pisa stage.
 	eip2718  bool // Fork indicator whether we are in the eip2718 stage.
 }
 
@@ -314,6 +315,7 @@ func (pool *TxPool) setNewHead(head *types.Header) {
 	// Update fork indicator by next pending block number
 	next := new(big.Int).Add(head.Number, big.NewInt(1))
 	pool.istanbul = pool.config.IsIstanbul(next)
+	pool.pisa = pool.config.IsPisa(next)
 	pool.eip2718 = pool.config.IsBerlin(next)
 }
 
@@ -382,7 +384,7 @@ func (pool *TxPool) validateTx(ctx context.Context, tx *types.Transaction) error
 	}
 
 	// Should supply enough intrinsic gas
-	gas, err := core.IntrinsicGas(tx.Data(), tx.AccessList(), tx.To() == nil, true, pool.istanbul)
+	gas, err := core.IntrinsicGas(tx.Data(), tx.AccessList(), tx.To() == nil, true, pool.istanbul, pool.pisa)
 	if err != nil {
 		return err
 	}

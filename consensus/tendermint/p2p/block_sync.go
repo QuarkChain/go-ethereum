@@ -78,7 +78,7 @@ func (bs *BlockSync) sync(ctx context.Context) error {
 				return err
 			}
 
-			if err := bs.executor.ValidateBlock(bs.chainState, &vb); err != nil {
+			if err := bs.executor.ValidateBlock(bs.chainState, &vb, true); err != nil {
 				return err
 			}
 

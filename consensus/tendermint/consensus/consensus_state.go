@@ -61,7 +61,7 @@ type BlockStore interface {
 }
 
 type BlockExecutor interface {
-	ValidateBlock(ChainState, *FullBlock) error                             // validate the block by tentatively executing it
+	ValidateBlock(ChainState, *FullBlock, bool) error                       // validate the block by tentatively executing it
 	ApplyBlock(context.Context, ChainState, *FullBlock) (ChainState, error) // apply the block
 	MakeBlock(chainState *ChainState, height uint64, commit *Commit, proposerAddress common.Address) *FullBlock
 }
@@ -528,15 +528,8 @@ func (cs *ConsensusState) processCommitedBlock(ctx context.Context, block *FullB
 	}
 
 	// fast-path for commit
-	if err := cs.blockExec.ValidateBlock(cs.chainState, block); err != nil {
-		log.Info("processCommitBlock validate err", "err", err)
-		return
-	}
-
-	if err := cs.chainState.Validators.VerifyCommit(
-		cs.chainState.ChainID, block.Hash(), block.NumberU64(), block.Header().Commit); err != nil {
-		log.Info("processCommitBlock verify error", "err", err)
-		return
+	if err := cs.blockExec.ValidateBlock(cs.chainState, block, true); err != nil {
+		log.Warn("processCommitBlock verify err", "err", err)
 	}
 
 	cs.updateRoundStep(cs.Round, RoundStepCommit)
@@ -1324,7 +1317,7 @@ func (cs *ConsensusState) defaultDoPrevote(ctx context.Context, height uint64, r
 	}
 
 	// Validate proposal block
-	err := cs.blockExec.ValidateBlock(cs.chainState, cs.ProposalBlock)
+	err := cs.blockExec.ValidateBlock(cs.chainState, cs.ProposalBlock, false)
 	if err != nil {
 		// ProposalBlock is invalid, prevote nil.
 		log.Error("prevote step: ProposalBlock is invalid", "height", height, "round", round, "err", err)
@@ -1444,7 +1437,7 @@ func (cs *ConsensusState) enterPrecommit(ctx context.Context, height uint64, rou
 		log.Debug("precommit step; +2/3 prevoted proposal block; locking", "height", height, "round", round, "hash", blockID)
 
 		// Validate the block.
-		if err := cs.blockExec.ValidateBlock(cs.chainState, cs.ProposalBlock); err != nil {
+		if err := cs.blockExec.ValidateBlock(cs.chainState, cs.ProposalBlock, false); err != nil {
 			panic(fmt.Sprintf("precommit step; +2/3 prevoted for an invalid block: %v", err))
 		}
 
@@ -1598,7 +1591,7 @@ func (cs *ConsensusState) finalizeCommit(ctx context.Context, height uint64) {
 		panic("cannot finalize commit; proposal block does not hash to commit hash")
 	}
 
-	if err := cs.blockExec.ValidateBlock(cs.chainState, block); err != nil {
+	if err := cs.blockExec.ValidateBlock(cs.chainState, block, false); err != nil {
 		panic(fmt.Errorf("+2/3 committed an invalid block: %w", err))
 	}
 
