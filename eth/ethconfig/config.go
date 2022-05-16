@@ -237,6 +237,7 @@ func CreateConsensusEngine(
 		if err != nil {
 			panic(err.Error())
 		}
+		return engine
 	} else {
 		switch config.PowMode {
 		case ethash.ModeFake:
