@@ -32,6 +32,7 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/rlp"
+	"github.com/ethereum/go-ethereum/sstorage"
 )
 
 var (
@@ -89,6 +90,39 @@ type Database struct {
 	preimagesSize common.StorageSize // Storage size of the preimages cache
 
 	lock sync.RWMutex
+
+	// This map holds sharded KV puts
+	shardedStorage         map[common.Address]map[uint64][]byte
+	contractToShardManager map[common.Address]*sstorage.ShardManager
+}
+
+func (s *Database) SstorageMaxKVSize(addr common.Address) uint64 {
+	if sm, ok := s.contractToShardManager[addr]; !ok {
+		return 0
+	} else {
+		return sm.MaxKvSize()
+	}
+}
+
+func (s *Database) SstorageWrite(addr common.Address, kvIdx uint64, data []byte) {
+	if _, ok := s.shardedStorage[addr]; !ok {
+		s.shardedStorage[addr] = make(map[uint64][]byte)
+	}
+	// Assume data is immutable.
+	s.shardedStorage[addr][kvIdx] = data
+}
+
+func (s *Database) SstorageRead(addr common.Address, kvIdx uint64, readLen int) ([]byte, bool, error) {
+	if m, ok0 := s.shardedStorage[addr]; ok0 {
+		if b, ok1 := m[kvIdx]; ok1 {
+			return b[0:readLen], true, nil
+		}
+	}
+
+	if s, ok0 := s.contractToShardManager[addr]; ok0 {
+		return s.TryRead(kvIdx, readLen)
+	}
+	return nil, false, nil
 }
 
 // rawNode is a simple binary blob used to differentiate between collapsed trie
@@ -304,6 +338,8 @@ func NewDatabaseWithConfig(diskdb ethdb.KeyValueStore, config *Config) *Database
 		dirties: map[common.Hash]*cachedNode{{}: {
 			children: make(map[common.Hash]uint16),
 		}},
+		contractToShardManager: sstorage.ContractToShardManager,
+		shardedStorage:         make(map[common.Address]map[uint64][]byte),
 	}
 	if config == nil || config.Preimages { // TODO(karalabe): Flip to default off in the future
 		db.preimages = make(map[common.Hash][]byte)
@@ -723,6 +759,18 @@ func (db *Database) Commit(node common.Hash, report bool, callback func(common.H
 		log.Error("Failed to write trie to disk", "err", err)
 		return err
 	}
+
+	for addr, m := range db.shardedStorage {
+		sm := db.contractToShardManager[addr]
+		for kvIdx, b := range m {
+			_, err := sm.TryWrite(kvIdx, b)
+			if err != nil {
+				log.Error("Failed to write sstorage", "kvIdx", kvIdx, "err", err)
+			}
+		}
+	}
+	db.shardedStorage = make(map[common.Address]map[uint64][]byte)
+
 	// Uncache any leftovers in the last batch
 	db.lock.Lock()
 	defer db.lock.Unlock()

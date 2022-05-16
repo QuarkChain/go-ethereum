@@ -79,6 +79,9 @@ type StateDB struct {
 	stateObjectsPending map[common.Address]struct{} // State objects finalized but not yet written to the trie
 	stateObjectsDirty   map[common.Address]struct{} // State objects modified in the current execution
 
+	// This map holds sharded KV puts
+	shardedStorage map[common.Address]map[uint64][]byte
+
 	// DB error.
 	// State objects are used by the consensus core and VM which are
 	// unable to deal with database-level errors. Any error that occurs
@@ -143,6 +146,7 @@ func New(root common.Hash, db Database, snaps *snapshot.Tree) (*StateDB, error) 
 		journal:             newJournal(),
 		accessList:          newAccessList(),
 		hasher:              crypto.NewKeccakState(),
+		shardedStorage:      make(map[common.Address]map[uint64][]byte),
 	}
 	if sdb.snaps != nil {
 		if sdb.snap = sdb.snaps.Snapshot(root); sdb.snap != nil {
@@ -152,6 +156,28 @@ func New(root common.Hash, db Database, snaps *snapshot.Tree) (*StateDB, error) 
 		}
 	}
 	return sdb, nil
+}
+
+func (s *StateDB) SstorageMaxKVSize(addr common.Address) uint64 {
+	return s.db.TrieDB().SstorageMaxKVSize(addr)
+}
+
+func (s *StateDB) SstorageWrite(addr common.Address, kvIdx uint64, data []byte) {
+	if _, ok := s.shardedStorage[addr]; !ok {
+		s.shardedStorage[addr] = make(map[uint64][]byte)
+	}
+	// Assume data is immutable
+	s.shardedStorage[addr][kvIdx] = data
+}
+
+func (s *StateDB) SstorageRead(addr common.Address, kvIdx uint64, readLen int) ([]byte, bool, error) {
+	if m, ok0 := s.shardedStorage[addr]; ok0 {
+		if b, ok1 := m[kvIdx]; ok1 {
+			return b[0:readLen], true, nil
+		}
+	}
+
+	return s.db.TrieDB().SstorageRead(addr, kvIdx, readLen)
 }
 
 // StartPrefetcher initializes a new trie prefetcher to pull in nodes from the
@@ -657,6 +683,7 @@ func (s *StateDB) Copy() *StateDB {
 		preimages:           make(map[common.Hash][]byte, len(s.preimages)),
 		journal:             newJournal(),
 		hasher:              crypto.NewKeccakState(),
+		shardedStorage:      make(map[common.Address]map[uint64][]byte),
 	}
 	// Copy the dirty states, logs, and preimages
 	for addr := range s.journal.dirties {
@@ -736,6 +763,12 @@ func (s *StateDB) Copy() *StateDB {
 				temp[kk] = vv
 			}
 			state.snapStorage[k] = temp
+		}
+	}
+	for addr, m := range s.shardedStorage {
+		state.shardedStorage[addr] = make(map[uint64][]byte)
+		for k, v := range m {
+			state.shardedStorage[addr][k] = v
 		}
 	}
 	return state
@@ -981,6 +1014,13 @@ func (s *StateDB) Commit(deleteEmptyObjects bool) (common.Hash, error) {
 		}
 		s.snap, s.snapDestructs, s.snapAccounts, s.snapStorage = nil, nil, nil, nil
 	}
+	triedb := s.db.TrieDB()
+	for addr, m := range s.shardedStorage {
+		for k, v := range m {
+			triedb.SstorageWrite(addr, k, v)
+		}
+	}
+	s.shardedStorage = make(map[common.Address]map[uint64][]byte)
 	return root, err
 }
 
