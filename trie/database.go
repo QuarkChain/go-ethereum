@@ -105,6 +105,9 @@ func (s *Database) SstorageMaxKVSize(addr common.Address) uint64 {
 }
 
 func (s *Database) SstorageWrite(addr common.Address, kvIdx uint64, data []byte) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
 	if _, ok := s.shardedStorage[addr]; !ok {
 		s.shardedStorage[addr] = make(map[uint64][]byte)
 	}
@@ -113,6 +116,9 @@ func (s *Database) SstorageWrite(addr common.Address, kvIdx uint64, data []byte)
 }
 
 func (s *Database) SstorageRead(addr common.Address, kvIdx uint64, readLen int) ([]byte, bool, error) {
+	s.lock.RLock()
+	defer s.lock.RUnlock()
+
 	if m, ok0 := s.shardedStorage[addr]; ok0 {
 		if b, ok1 := m[kvIdx]; ok1 {
 			return b[0:readLen], true, nil
@@ -760,6 +766,13 @@ func (db *Database) Commit(node common.Hash, report bool, callback func(common.H
 		return err
 	}
 
+	// Uncache any leftovers in the last batch
+	db.lock.Lock()
+	defer db.lock.Unlock()
+
+	batch.Replay(uncacher)
+	batch.Reset()
+
 	for addr, m := range db.shardedStorage {
 		sm := db.contractToShardManager[addr]
 		for kvIdx, b := range m {
@@ -770,13 +783,6 @@ func (db *Database) Commit(node common.Hash, report bool, callback func(common.H
 		}
 	}
 	db.shardedStorage = make(map[common.Address]map[uint64][]byte)
-
-	// Uncache any leftovers in the last batch
-	db.lock.Lock()
-	defer db.lock.Unlock()
-
-	batch.Replay(uncacher)
-	batch.Reset()
 
 	// Reset the storage counters and bumped metrics
 	if db.preimages != nil {
