@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus"
 	pbft "github.com/ethereum/go-ethereum/consensus/tendermint/consensus"
@@ -92,15 +93,11 @@ func (s *Store) SaveBlock(block *types.FullBlock, commit *types.Commit) {
 	s.mux.Post(core.NewMinedBlockEvent{Block: block.WithCommit(commit).Block})
 }
 
-func (s *Store) VerifyBlock(state pbft.ChainState, block *types.FullBlock) (err error) {
-	return s.verifyHeaderFunc(s.chain, block.Header(), true)
-}
-
 // Validate a block without Commit and with LastCommit.
-func (s *Store) ValidateBlock(state pbft.ChainState, block *types.FullBlock) (err error) {
+func (s *Store) ValidateBlock(state pbft.ChainState, block *types.FullBlock, committed bool) (err error) {
 	header := block.Header()
-	err = s.verifyHeaderFunc(s.chain, header, false)
-	if err != nil {
+	err = s.verifyHeaderFunc(s.chain, header, committed)
+	if err != nil || committed {
 		return
 	}
 
