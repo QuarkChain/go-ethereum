@@ -166,6 +166,11 @@ func (s *StateDB) SstorageWrite(addr common.Address, kvIdx uint64, data []byte) 
 	if _, ok := s.shardedStorage[addr]; !ok {
 		s.shardedStorage[addr] = make(map[uint64][]byte)
 	}
+	s.journal.append(sstorageChange{
+		address:   &addr,
+		prevBytes: s.shardedStorage[addr][kvIdx],
+		kvIdx:     kvIdx,
+	})
 	// Assume data is immutable
 	s.shardedStorage[addr][kvIdx] = data
 }
@@ -1014,6 +1019,8 @@ func (s *StateDB) Commit(deleteEmptyObjects bool) (common.Hash, error) {
 		}
 		s.snap, s.snapDestructs, s.snapAccounts, s.snapStorage = nil, nil, nil, nil
 	}
+	// Write the sharded storage changes to the underlying trie db
+	// This assumes no fork (with instant finality consensus)
 	triedb := s.db.TrieDB()
 	for addr, m := range s.shardedStorage {
 		for k, v := range m {
