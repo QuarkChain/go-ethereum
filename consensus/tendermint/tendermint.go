@@ -148,8 +148,6 @@ func New(config *params.TendermintConfig) (*Tendermint, error) {
 // SignerFn hashes and signs the data to be signed by a backing account.
 type SignerFn func(signer accounts.Account, mimeType string, message []byte) ([]byte, error)
 
-type SignTxFn func(account accounts.Account, tx *types.Transaction, chainID *big.Int) (*types.Transaction, error)
-
 // Authorize injects a private key into the consensus engine to mint new blocks
 // with.
 func (c *Tendermint) Authorize(signer common.Address, signFn SignerFn) {
