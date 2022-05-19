@@ -20,6 +20,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/ethereum/go-ethereum/params"
 	"io/ioutil"
 	"testing"
 	"time"
@@ -29,10 +31,10 @@ import (
 
 // precompiledTest defines the input/output pairs for precompiled contract tests.
 type precompiledTest struct {
-	Input, Expected string
-	Gas             uint64
-	Name            string
-	NoBenchmark     bool // Benchmark primarily the worst-cases
+	Input, Expected, Want string
+	Gas                   uint64
+	Name                  string
+	NoBenchmark           bool // Benchmark primarily the worst-cases
 }
 
 // precompiledFailureTest defines the input/error pairs for precompiled
@@ -91,12 +93,44 @@ var blake2FMalformedInputTests = []precompiledFailureTest{
 	},
 }
 
+var crossChainCallTest = []precompiledTest{
+	{
+		Input: "99e20070000000000000000000000000000000000000000000000000000000000000000419c0c9b16f4e5cf388581ce71aea86641fdd877ce11af2c60d8db523cd2e02e3000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000000000000000000000000000000000000000000a",
+		Want:  "000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000004ec000000000000000000000000a1230a772e3501b09fc6dcae819889bf30d1415e000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000c00000000000000000000000000000000000000000000000000000000000000002dce721dc2d078c030530aeb5511eb76663a705797c2a4a4d41a70dddfb8efca9000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000002aaaa000000000000000000000000000000000000000000000000000000000000",
+	},
+}
+
+func TestCrossChainCall(t *testing.T) {
+	var test precompiledTest = crossChainCallTest[0]
+	p := &crossChainCall{}
+
+	in := common.Hex2Bytes(test.Input)
+	fmt.Println(in)
+	gas := p.RequiredGas(in)
+
+	eClient, err := ethclient.Dial("https://rinkeby.infura.io/v3/4e3e18f80d8d4ad5959b7404e85e0143")
+	if err != nil {
+		t.Error(err)
+	}
+
+	evm := NewEVM(BlockContext{}, TxContext{}, nil, params.TestChainConfig, Config{})
+	evm.SetExternalClient(eClient)
+	evmInterpreter := NewEVMInterpreter(evm, evm.Config)
+	evm.interpreter = evmInterpreter
+
+	if res, _, err := RunPrecompiledContract(&PrecompiledContractToCrossChainCallEnv{evm}, p, in, gas); err != nil {
+		t.Error(err)
+	} else {
+		bytes.Equal(common.Hex2Bytes(test.Want), res)
+	}
+}
+
 func testPrecompiled(addr string, test precompiledTest, t *testing.T) {
 	p := allPrecompiles[common.HexToAddress(addr)]
 	in := common.Hex2Bytes(test.Input)
 	gas := p.RequiredGas(in)
 	t.Run(fmt.Sprintf("%s-Gas=%d", test.Name, gas), func(t *testing.T) {
-		if res, _, err := RunPrecompiledContract(p, in, gas); err != nil {
+		if res, _, err := RunPrecompiledContract(&PrecompiledContractToCrossChainCallEnv{}, p, in, gas); err != nil {
 			t.Error(err)
 		} else if common.Bytes2Hex(res) != test.Expected {
 			t.Errorf("Expected %v, got %v", test.Expected, common.Bytes2Hex(res))
@@ -118,7 +152,7 @@ func testPrecompiledOOG(addr string, test precompiledTest, t *testing.T) {
 	gas := p.RequiredGas(in) - 1
 
 	t.Run(fmt.Sprintf("%s-Gas=%d", test.Name, gas), func(t *testing.T) {
-		_, _, err := RunPrecompiledContract(p, in, gas)
+		_, _, err := RunPrecompiledContract(&PrecompiledContractToCrossChainCallEnv{}, p, in, gas)
 		if err.Error() != "out of gas" {
 			t.Errorf("Expected error [out of gas], got [%v]", err)
 		}
@@ -135,7 +169,7 @@ func testPrecompiledFailure(addr string, test precompiledFailureTest, t *testing
 	in := common.Hex2Bytes(test.Input)
 	gas := p.RequiredGas(in)
 	t.Run(test.Name, func(t *testing.T) {
-		_, _, err := RunPrecompiledContract(p, in, gas)
+		_, _, err := RunPrecompiledContract(&PrecompiledContractToCrossChainCallEnv{}, p, in, gas)
 		if err.Error() != test.ExpectedError {
 			t.Errorf("Expected error [%v], got [%v]", test.ExpectedError, err)
 		}
@@ -167,7 +201,7 @@ func benchmarkPrecompiled(addr string, test precompiledTest, bench *testing.B) {
 		bench.ResetTimer()
 		for i := 0; i < bench.N; i++ {
 			copy(data, in)
-			res, _, err = RunPrecompiledContract(p, data, reqGas)
+			res, _, err = RunPrecompiledContract(&PrecompiledContractToCrossChainCallEnv{}, p, data, reqGas)
 		}
 		bench.StopTimer()
 		elapsed := uint64(time.Since(start))

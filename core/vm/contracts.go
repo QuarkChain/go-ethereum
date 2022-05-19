@@ -17,9 +17,14 @@
 package vm
 
 import (
+	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
+	"fmt"
+	"github.com/ethereum/go-ethereum/accounts/abi"
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -40,6 +45,14 @@ import (
 type PrecompiledContract interface {
 	RequiredGas(input []byte) uint64  // RequiredPrice calculates the contract gas use
 	Run(input []byte) ([]byte, error) // Run runs the precompiled contract
+}
+
+type PrecompiledContractToCrossChainCallEnv struct {
+	evm *EVM
+}
+
+type PrecompiledContractWithCrossChainCall interface {
+	RunWith(env *PrecompiledContractToCrossChainCallEnv, input []byte) ([]byte, uint64, error)
 }
 
 // PrecompiledContractsHomestead contains the default set of pre-compiled Ethereum
@@ -90,6 +103,21 @@ var PrecompiledContractsBerlin = map[common.Address]PrecompiledContract{
 	common.BytesToAddress([]byte{7}): &bn256ScalarMulIstanbul{},
 	common.BytesToAddress([]byte{8}): &bn256PairingIstanbul{},
 	common.BytesToAddress([]byte{9}): &blake2F{},
+}
+
+// PrecompiledContractsPisa contains the default set of pre-compiled Ethereum
+// contracts used in the Berlin release.
+var PrecompiledContractsPisa = map[common.Address]PrecompiledContract{
+	common.BytesToAddress([]byte{1}):  &ecrecover{},
+	common.BytesToAddress([]byte{2}):  &sha256hash{},
+	common.BytesToAddress([]byte{3}):  &ripemd160hash{},
+	common.BytesToAddress([]byte{4}):  &dataCopy{},
+	common.BytesToAddress([]byte{5}):  &bigModExp{eip2565: true},
+	common.BytesToAddress([]byte{6}):  &bn256AddIstanbul{},
+	common.BytesToAddress([]byte{7}):  &bn256ScalarMulIstanbul{},
+	common.BytesToAddress([]byte{8}):  &bn256PairingIstanbul{},
+	common.BytesToAddress([]byte{9}):  &blake2F{},
+	common.BytesToAddress([]byte{20}): &crossChainCall{},
 }
 
 // PrecompiledContractsBLS contains the set of pre-compiled Ethereum
@@ -147,14 +175,22 @@ func ActivePrecompiles(rules params.Rules) []common.Address {
 // - the returned bytes,
 // - the _remaining_ gas,
 // - any error that occurred
-func RunPrecompiledContract(p PrecompiledContract, input []byte, suppliedGas uint64) (ret []byte, remainingGas uint64, err error) {
+func RunPrecompiledContract(env *PrecompiledContractToCrossChainCallEnv, p PrecompiledContract, input []byte, suppliedGas uint64) (ret []byte, remainingGas uint64, err error) {
 	gasCost := p.RequiredGas(input)
 	if suppliedGas < gasCost {
 		return nil, 0, ErrOutOfGas
 	}
 	suppliedGas -= gasCost
-	output, err := p.Run(input)
-	return output, suppliedGas, err
+
+	if pw, ok := p.(PrecompiledContractWithCrossChainCall); ok {
+		var actualGasUsed uint64
+		ret, actualGasUsed, err = pw.RunWith(env, input)
+		// gas refund
+		suppliedGas += gasCost - actualGasUsed
+	} else {
+		ret, err = p.Run(input)
+	}
+	return ret, suppliedGas, err
 }
 
 // ECRECOVER implemented as a native contract.
@@ -1042,4 +1078,116 @@ func (c *bls12381MapG2) Run(input []byte) ([]byte, error) {
 
 	// Encode the G2 point to 256 bytes
 	return g.EncodePoint(r), nil
+}
+
+var (
+	getLogByTxHashId, _ = hex.DecodeString("99e20070") // getLogByTxHash(uint256,bytes32,uint256,uint256,uint256)
+)
+
+// getLogByTxHash(uint256 chainId , bytes32 txHash, uint256 logIdx ,uint256 maxDataLen, uint256 confirms)
+// input = 4 + 5*32 = 196 byte
+type crossChainCall struct {
+}
+
+// overpay gas
+func (c *crossChainCall) RequiredGas(input []byte) uint64 {
+	if len(input) != 164 {
+		return 0
+	}
+
+	maxDataLen := new(big.Int).SetBytes(getData(input, 4+3*32, 32)).Uint64()
+	inputGas := uint64(len(input)) * 3
+	var returnGas uint64 = 32 + 32*4 // pay address and topics
+	returnGas += maxDataLen * 3
+	gasUsed := returnGas + inputGas
+	/*
+		call result size:
+			address size = 32byte
+			topics size = 32byte * 4
+			data size = maxDataLen
+	*/
+
+	return gasUsed
+}
+
+func (c *crossChainCall) Run(input []byte) ([]byte, error) {
+	return nil, nil
+}
+
+func (c *crossChainCall) RunWith(env *PrecompiledContractToCrossChainCallEnv, input []byte) ([]byte, uint64, error) {
+	ctx := context.Background()
+	fmt.Println(common.Bytes2Hex(input[0:4]))
+	if bytes.Equal(input[0:4], getLogByTxHashId) {
+
+		client := env.evm.externalClient
+		// todo : deal with chainId
+		txHash := common.BytesToHash(getData(input, 4+32, 32))
+		logIdx := new(big.Int).SetBytes(getData(input, 4+64, 32)).Uint64()
+		maxDataLen := new(big.Int).SetBytes(getData(input, 4+96, 32)).Uint64()
+		confirms := new(big.Int).SetBytes(getData(input, 4+128, 32)).Uint64()
+
+		receipt, err := client.TransactionReceipt(ctx, txHash)
+		if err != nil {
+			return nil, 0, err
+		}
+
+		happenedBlockNumber := receipt.BlockNumber
+		latestBlockNumber, err := client.BlockNumber(ctx)
+		if err != nil {
+			return nil, 0, err
+		}
+
+		if latestBlockNumber-happenedBlockNumber.Uint64() < confirms {
+			return nil, 0, fmt.Errorf("confirms no enough")
+		}
+
+		log := receipt.Logs[logIdx]
+
+		var data []byte
+		var actualDataLen = len(log.Data)
+		if uint64(actualDataLen) < maxDataLen {
+			data = log.Data
+		} else {
+			data = getData(log.Data, 0, maxDataLen)
+			actualDataLen = int(maxDataLen)
+		}
+
+		// calculate actual cost of gas
+		actualGasUsed := len(log.Topics) * 32 * 3 // topics
+		actualGasUsed += actualDataLen * 3        // data
+		actualGasUsed += 32 * 3                   // address
+		actualGasUsed += len(input) * 3
+
+		// return (abi.encodePack( abi.encodePack(log.Address,log.Topics,data) , gas) )
+		resultValue := &CallResult{
+			Address: log.Address,
+			Topics:  log.Topics,
+			Data:    data,
+		}
+		resultType, err := abi.NewType("tuple", "", []abi.ArgumentMarshaling{{Name: "Address", Type: "address"}, {Name: "Topics", Type: "bytes32[]"}, {Name: "Data", Type: "bytes"}})
+		gasType, err := abi.NewType("uint256", "", nil)
+		arg0 := abi.Argument{Name: "callResult", Type: resultType, Indexed: false}
+		arg1 := abi.Argument{Name: "gasUsed", Type: gasType, Indexed: false}
+		var args = abi.Arguments{arg0, arg1}
+		packResult, err := args.Pack(resultValue, big.NewInt(int64(actualGasUsed)))
+		if err != nil {
+			return nil, 0, err
+		}
+
+		env.evm.interpreter.crossChainCallResults = append(env.evm.interpreter.crossChainCallResults, packResult)
+
+		return packResult, uint64(actualGasUsed), nil
+	}
+
+	return nil, 0, errors.New("unsupported method")
+}
+
+type CallResult struct {
+	// address of the contract that generated the event
+	Address common.Address `json:"address" gencodec:"required"`
+	// list of topics provided by the contract.
+	Topics []common.Hash `json:"topics" gencodec:"required"`
+	// supplied by the contract, usually ABI-encoded
+	//Data []byte `json:"data" gencodec:"required"`
+	Data []byte `json:"data" gencodec:"required"`
 }
