@@ -17,6 +17,7 @@
 package core
 
 import (
+	"bytes"
 	"fmt"
 	"math/big"
 
@@ -70,9 +71,16 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 	if p.config.DAOForkSupport && p.config.DAOForkBlock != nil && p.config.DAOForkBlock.Cmp(block.Number()) == 0 {
 		misc.ApplyDAOHardFork(statedb)
 	}
+
 	blockContext := NewEVMBlockContext(header, p.bc, nil)
 	vmenv := vm.NewEVM(blockContext, vm.TxContext{}, statedb, p.config, cfg)
-	// Iterate over and process the individual transactions
+
+	// set external client of evm
+	if p.bc.engine.ExternalCallClient() != nil {
+		vmenv.SetExternalClient(p.bc.engine.ExternalCallClient())
+	}
+	
+	// Iterate over and process the individual transactions=
 	for i, tx := range block.Transactions() {
 		msg, err := tx.AsMessage(types.MakeSigner(p.config, header.Number), header.BaseFee)
 		if err != nil {
@@ -101,6 +109,15 @@ func applyTransaction(msg types.Message, config *params.ChainConfig, bc ChainCon
 	result, err := ApplyMessage(evm, msg, gp)
 	if err != nil {
 		return nil, err
+	}
+
+	// verify or set transaction.externalCall
+	if tx.ExternalCallResult() == nil {
+		tx.SetExternalCallResult(result.CrossChainCallResults)
+	} else {
+		if !bytes.Equal(tx.ExternalCallResult(), result.CrossChainCallResults) {
+			return nil, fmt.Errorf("validate external call result of tx with failure")
+		}
 	}
 
 	// Update the state with pending changes.

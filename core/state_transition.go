@@ -18,6 +18,7 @@ package core
 
 import (
 	"fmt"
+	"github.com/ethereum/go-ethereum/accounts/abi"
 	"math"
 	"math/big"
 
@@ -82,9 +83,10 @@ type Message interface {
 // ExecutionResult includes all output after executing given evm
 // message no matter the execution itself is successful or not.
 type ExecutionResult struct {
-	UsedGas    uint64 // Total used gas but include the refunded gas
-	Err        error  // Any error encountered during the execution(listed in core/vm/errors.go)
-	ReturnData []byte // Returned data from evm(function result or data supplied with revert opcode)
+	UsedGas               uint64 // Total used gas but include the refunded gas
+	Err                   error  // Any error encountered during the execution(listed in core/vm/errors.go)
+	ReturnData            []byte // Returned data from evm(function result or data supplied with revert opcode)
+	CrossChainCallResults []byte
 }
 
 // Unwrap returns the internal evm error which allows us for further
@@ -345,10 +347,31 @@ func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
 	}
 	st.state.AddBalance(st.evm.Context.Coinbase, new(big.Int).Mul(new(big.Int).SetUint64(st.gasUsed()), effectiveTip))
 
+	/*
+		encodePack(version [crossChainResult1,crossChainResult2])
+	*/
+	crossChainResults := st.evm.Interpreter().CrossChainCallResults()
+	resultType, err := abi.NewType("bytes[]", "", nil)
+	if err != nil {
+		return nil, err
+	}
+	versionType, err := abi.NewType("uint8", "", nil)
+	if err != nil {
+		return nil, err
+	}
+	arg1 := abi.Argument{Name: "crossChainResults", Type: resultType, Indexed: false}
+	arg0 := abi.Argument{Name: "version", Type: versionType, Indexed: false}
+	var args abi.Arguments = abi.Arguments{arg0, arg1}
+	packResult, err := args.Pack(crossChainResults)
+	if err != nil {
+		return nil, err
+	}
+
 	return &ExecutionResult{
-		UsedGas:    st.gasUsed(),
-		Err:        vmerr,
-		ReturnData: ret,
+		UsedGas:               st.gasUsed(),
+		Err:                   vmerr,
+		ReturnData:            ret,
+		CrossChainCallResults: packResult,
 	}, nil
 }
 
