@@ -70,7 +70,123 @@ var (
 		NewEIP2930Signer(big.NewInt(1)),
 		common.Hex2Bytes("c9519f4f2b30335884581971573fadf60c6204f59a911df35ee8a540456b266032f1e8e2c5dd761f9e4f88f41c8310aeaba26a8bfcdacfedfa12ec3862d3752101"),
 	)
+
+	globalchainId = big.NewInt(1)
+
+	externalCallTxs = []*Transaction{
+		NewTx(&AccessListTx{
+			ChainID:            globalchainId,
+			Nonce:              3,
+			To:                 &testAddr,
+			Value:              big.NewInt(10),
+			Gas:                25000,
+			GasPrice:           big.NewInt(1),
+			Data:               common.FromHex("554112233444"),
+			ExternalCallResult: common.FromHex("1122334455667788998877665544332211"),
+		}),
+
+		NewTx(&LegacyTx{
+			Nonce:              3,
+			To:                 &testAddr,
+			Value:              big.NewInt(10),
+			Gas:                25000,
+			GasPrice:           big.NewInt(1),
+			Data:               common.FromHex("554112233444"),
+			ExternalCallResult: common.FromHex("1122334455667788998877665544332211"),
+		}),
+
+		NewTx(&DynamicFeeTx{
+			Nonce:              3,
+			To:                 &testAddr,
+			Value:              big.NewInt(10),
+			Gas:                25000,
+			GasTipCap:          big.NewInt(20),
+			GasFeeCap:          big.NewInt(40),
+			Data:               common.FromHex("554112233444"),
+			ExternalCallResult: common.FromHex("1122334455667788998877665544332211"),
+		}),
+	}
 )
+
+func TestExternalTransaction(t *testing.T) {
+
+	for _, externalCallTx := range externalCallTxs {
+
+		txBytes, err := rlp.EncodeToBytes(externalCallTx)
+		if err != nil {
+			t.Error(err)
+		}
+		var tx = &Transaction{}
+		err = rlp.DecodeBytes(txBytes, tx)
+		if err != nil {
+			t.Error(err)
+		}
+
+		if !bytes.Equal(tx.ExternalCallResult(), externalCallTx.ExternalCallResult()) {
+			t.Errorf("want: %x , get: %x", tx.ExternalCallResult(), externalCallTx.ExternalCallResult())
+		}
+
+		if !bytes.Equal(tx.Data(), externalCallTx.Data()) {
+			t.Errorf("want: %x , get: %x", tx.Data(), externalCallTx.Data())
+		}
+
+		if tx.Hash() != externalCallTx.Hash() {
+			t.Error("fail to decode tx by rlp")
+		}
+
+		/*
+			rlp encode the transaction with signature
+		*/
+		key, _ := crypto.GenerateKey()
+		signerAddr := crypto.PubkeyToAddress(key.PublicKey)
+
+		signer := LatestSignerForChainID(globalchainId)
+		signTx, err := SignTx(externalCallTx, signer, key)
+		if err != nil {
+			t.Error(err)
+		}
+
+		from, err := Sender(signer, signTx)
+		if err != nil {
+			t.Error(err)
+		}
+
+		if from != signerAddr {
+			t.Errorf("fail to recover signature signer address")
+		}
+
+		toBytes, err := rlp.EncodeToBytes(signTx)
+		if err != nil {
+			t.Error(err)
+		}
+		var signTxDecode = &Transaction{}
+		err = rlp.DecodeBytes(toBytes, signTxDecode)
+		if err != nil {
+			t.Error(err)
+		}
+
+		if signTxDecode.Hash() != signTx.Hash() {
+			t.Error("fail to decode signTx by rlp")
+		}
+
+		/*
+			Make sure tx.ExternalCallResult() is not involved in signing
+		*/
+
+		hash1 := signer.Hash(signTx)
+		if len(signTx.ExternalCallResult()) == 0 {
+			t.Error("Error: tx.ExternalCallResult() is empty")
+		}
+		signTx.SetExternalCallResult([]byte{})
+
+		hash2 := signer.Hash(signTx)
+		hash3 := signer.Hash(externalCallTx)
+		if hash1 != hash2 || hash2 != hash3 {
+			t.Error("Error: tx.ExternalCallResult() is involved in signing")
+		}
+	}
+
+}
 
 func TestDecodeEmptyTypedTx(t *testing.T) {
 	input := []byte{0x80}
