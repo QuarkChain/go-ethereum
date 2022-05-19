@@ -85,6 +85,17 @@ type TxData interface {
 
 	rawSignatureValues() (v, r, s *big.Int)
 	setSignatureValues(chainID, v, r, s *big.Int)
+
+	externalCallResult() []byte
+	setExternalCallResult([]byte)
+}
+
+func (tx *Transaction) ExternalCallResult() []byte {
+	return tx.inner.externalCallResult()
+}
+
+func (tx *Transaction) SetExternalCallResult(res []byte) {
+	tx.inner.setExternalCallResult(res)
 }
 
 // EncodeRLP implements rlp.Encoder

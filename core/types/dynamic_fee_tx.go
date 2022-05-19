@@ -37,6 +37,8 @@ type DynamicFeeTx struct {
 	V *big.Int `json:"v" gencodec:"required"`
 	R *big.Int `json:"r" gencodec:"required"`
 	S *big.Int `json:"s" gencodec:"required"`
+
+	ExternalCallResult []byte
 }
 
 // copy creates a deep copy of the transaction data and initializes all fields.
@@ -47,14 +49,15 @@ func (tx *DynamicFeeTx) copy() TxData {
 		Data:  common.CopyBytes(tx.Data),
 		Gas:   tx.Gas,
 		// These are copied below.
-		AccessList: make(AccessList, len(tx.AccessList)),
-		Value:      new(big.Int),
-		ChainID:    new(big.Int),
-		GasTipCap:  new(big.Int),
-		GasFeeCap:  new(big.Int),
-		V:          new(big.Int),
-		R:          new(big.Int),
-		S:          new(big.Int),
+		AccessList:         make(AccessList, len(tx.AccessList)),
+		Value:              new(big.Int),
+		ChainID:            new(big.Int),
+		GasTipCap:          new(big.Int),
+		GasFeeCap:          new(big.Int),
+		V:                  new(big.Int),
+		R:                  new(big.Int),
+		S:                  new(big.Int),
+		ExternalCallResult: common.CopyBytes(tx.ExternalCallResult),
 	}
 	copy(cpy.AccessList, tx.AccessList)
 	if tx.Value != nil {
@@ -100,4 +103,12 @@ func (tx *DynamicFeeTx) rawSignatureValues() (v, r, s *big.Int) {
 
 func (tx *DynamicFeeTx) setSignatureValues(chainID, v, r, s *big.Int) {
 	tx.ChainID, tx.V, tx.R, tx.S = chainID, v, r, s
+}
+
+func (tx *DynamicFeeTx) externalCallResult() []byte {
+	return tx.ExternalCallResult
+}
+
+func (tx *DynamicFeeTx) setExternalCallResult(callRes []byte) {
+	tx.ExternalCallResult = callRes
 }
