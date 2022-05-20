@@ -350,28 +350,35 @@ func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
 	/*
 		encodePack(version [crossChainResult1,crossChainResult2])
 	*/
-	crossChainResults := st.evm.Interpreter().CrossChainCallResults()
-	resultType, err := abi.NewType("bytes[]", "", nil)
-	if err != nil {
-		return nil, err
-	}
-	versionType, err := abi.NewType("uint8", "", nil)
-	if err != nil {
-		return nil, err
-	}
-	arg1 := abi.Argument{Name: "crossChainResults", Type: resultType, Indexed: false}
-	arg0 := abi.Argument{Name: "version", Type: versionType, Indexed: false}
-	var args abi.Arguments = abi.Arguments{arg0, arg1}
-	packResult, err := args.Pack(crossChainResults)
-	if err != nil {
-		return nil, err
+	if len(st.evm.Interpreter().CrossChainCallResults()) != 0 {
+		crossChainResults := st.evm.Interpreter().CrossChainCallResults()
+		resultType, err := abi.NewType("bytes[]", "", nil)
+		if err != nil {
+			return nil, err
+		}
+		versionType, err := abi.NewType("uint8", "", nil)
+		if err != nil {
+			return nil, err
+		}
+		arg1 := abi.Argument{Name: "crossChainResults", Type: resultType, Indexed: false}
+		arg0 := abi.Argument{Name: "version", Type: versionType, Indexed: false}
+		var args abi.Arguments = abi.Arguments{arg0, arg1}
+		packResult, err := args.Pack(uint8(1), crossChainResults)
+		if err != nil {
+			return nil, err
+		}
+		return &ExecutionResult{
+			UsedGas:               st.gasUsed(),
+			Err:                   vmerr,
+			ReturnData:            ret,
+			CrossChainCallResults: packResult,
+		}, nil
 	}
 
 	return &ExecutionResult{
-		UsedGas:               st.gasUsed(),
-		Err:                   vmerr,
-		ReturnData:            ret,
-		CrossChainCallResults: packResult,
+		UsedGas:    st.gasUsed(),
+		Err:        vmerr,
+		ReturnData: ret,
 	}, nil
 }
 

@@ -79,7 +79,7 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 	if p.bc.engine.ExternalCallClient() != nil {
 		vmenv.SetExternalClient(p.bc.engine.ExternalCallClient())
 	}
-	
+
 	// Iterate over and process the individual transactions=
 	for i, tx := range block.Transactions() {
 		msg, err := tx.AsMessage(types.MakeSigner(p.config, header.Number), header.BaseFee)
@@ -112,7 +112,7 @@ func applyTransaction(msg types.Message, config *params.ChainConfig, bc ChainCon
 	}
 
 	// verify or set transaction.externalCall
-	if tx.ExternalCallResult() == nil {
+	if len(tx.ExternalCallResult()) == 0 {
 		tx.SetExternalCallResult(result.CrossChainCallResults)
 	} else {
 		if !bytes.Equal(tx.ExternalCallResult(), result.CrossChainCallResults) {

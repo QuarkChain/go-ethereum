@@ -1081,11 +1081,10 @@ func (c *bls12381MapG2) Run(input []byte) ([]byte, error) {
 }
 
 var (
+	// getLogByTxHash(uint256 chainId , bytes32 txHash, uint256 logIdx ,uint256 maxDataLen, uint256 confirms)
 	getLogByTxHashId, _ = hex.DecodeString("99e20070") // getLogByTxHash(uint256,bytes32,uint256,uint256,uint256)
 )
 
-// getLogByTxHash(uint256 chainId , bytes32 txHash, uint256 logIdx ,uint256 maxDataLen, uint256 confirms)
-// input = 4 + 5*32 = 196 byte
 type crossChainCall struct {
 }
 
