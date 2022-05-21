@@ -63,7 +63,7 @@ type EVMInterpreter struct {
 	readOnly   bool   // Whether to throw on stateful modifications
 	returnData []byte // Last CALL's return data for subsequent reuse
 
-	crossChainCallResults [][]byte
+	crossChainCallResults []*CrossChainCallTrace
 }
 
 // NewEVMInterpreter returns a new instance of the Interpreter.
@@ -109,7 +109,7 @@ func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 	}
 }
 
-func (in *EVMInterpreter) CrossChainCallResults() [][]byte {
+func (in *EVMInterpreter) CrossChainCallResults() []*CrossChainCallTrace {
 	return in.crossChainCallResults
 }
 

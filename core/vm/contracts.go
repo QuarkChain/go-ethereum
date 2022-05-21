@@ -1164,16 +1164,21 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractToCrossChainCallEnv, in
 			Data:    data,
 		}
 		resultType, err := abi.NewType("tuple", "", []abi.ArgumentMarshaling{{Name: "Address", Type: "address"}, {Name: "Topics", Type: "bytes32[]"}, {Name: "Data", Type: "bytes"}})
-		gasType, err := abi.NewType("uint256", "", nil)
+		if err != nil {
+			return nil, 0, err
+		}
 		arg0 := abi.Argument{Name: "callResult", Type: resultType, Indexed: false}
-		arg1 := abi.Argument{Name: "gasUsed", Type: gasType, Indexed: false}
-		var args = abi.Arguments{arg0, arg1}
-		packResult, err := args.Pack(resultValue, big.NewInt(int64(actualGasUsed)))
+		var args = abi.Arguments{arg0}
+		packResult, err := args.Pack(resultValue)
 		if err != nil {
 			return nil, 0, err
 		}
 
-		env.evm.interpreter.crossChainCallResults = append(env.evm.interpreter.crossChainCallResults, packResult)
+		trace := &CrossChainCallTrace{
+			CallRes: resultValue,
+			GasUsed: uint64(actualGasUsed),
+		}
+		env.evm.interpreter.crossChainCallResults = append(env.evm.interpreter.crossChainCallResults, trace)
 
 		return packResult, uint64(actualGasUsed), nil
 	}
@@ -1189,4 +1194,9 @@ type CallResult struct {
 	// supplied by the contract, usually ABI-encoded
 	//Data []byte `json:"data" gencodec:"required"`
 	Data []byte `json:"data" gencodec:"required"`
+}
+
+type CrossChainCallTrace struct {
+	CallRes *CallResult
+	GasUsed uint64
 }
