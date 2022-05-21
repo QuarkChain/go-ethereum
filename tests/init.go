@@ -212,6 +212,9 @@ var Forks = map[string]*params.ChainConfig{
 		LondonBlock:         big.NewInt(0),
 		ArrowGlacierBlock:   big.NewInt(0),
 		PisaBlock:           big.NewInt(0),
+		ExternalCall: &params.ExternalCallConfig{
+			Version: "1.0.0",
+		},
 	},
 }
 

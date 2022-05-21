@@ -338,6 +338,11 @@ func TestWeb3QState(t *testing.T) {
 						t.Error("EVM ERROR:", err)
 						statedb.RevertToSnapshot(snapshot)
 					}
+
+					if res.Err != nil {
+						t.Error("EVM ERROR:", res.Err)
+						statedb.RevertToSnapshot(snapshot)
+					}
 					t.Log("cross call result:", common.Bytes2Hex(res.CrossChainCallResults))
 					t.Log("evm call result:", common.Bytes2Hex(res.ReturnData))
 					// Commit block
