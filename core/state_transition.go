@@ -89,11 +89,6 @@ type ExecutionResult struct {
 	CrossChainCallResults []byte
 }
 
-type CrossChainCallResult struct {
-	Version string
-	Traces  []*vm.CrossChainCallTrace
-}
-
 // Unwrap returns the internal evm error which allows us for further
 // analysis outside.
 func (result *ExecutionResult) Unwrap() error {
@@ -355,8 +350,8 @@ func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
 	/*
 		deal with the result of cross chain call
 	*/
-	if len(st.evm.Interpreter().CrossChainCallResults()) != 0 {
-		crossChainResults := st.evm.Interpreter().CrossChainCallResults()
+	if len(st.evm.Interpreter().CrossChainCallTraces()) != 0 {
+		traces := st.evm.Interpreter().CrossChainCallTraces()
 
 		var version string
 		if st.evm.ChainConfig().ExternalCall.Version != "" {
@@ -365,9 +360,9 @@ func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
 			version = "0.0.0"
 		}
 
-		cr := CrossChainCallResult{
+		cr := vm.CrossChainCallResult{
 			Version: version,
-			Traces:  crossChainResults,
+			Traces:  traces,
 		}
 
 		cb, err := rlp.EncodeToBytes(cr)

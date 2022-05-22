@@ -77,7 +77,7 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 
 	// set external client of evm
 	if p.bc.engine.ExternalCallClient() != nil {
-		vmenv.SetExternalClient(p.bc.engine.ExternalCallClient())
+		vmenv.SetExternalCallClient(p.bc.engine.ExternalCallClient())
 	}
 
 	// Iterate over and process the individual transactions=
@@ -105,18 +105,28 @@ func applyTransaction(msg types.Message, config *params.ChainConfig, bc ChainCon
 	txContext := NewEVMTxContext(msg)
 	evm.Reset(txContext, statedb)
 
+	if evm.ExternalCallClient() == nil && len(tx.ExternalCallResult()) != 0 {
+		err := evm.Interpreter().SetCrossChainCallTraces(tx.ExternalCallResult())
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	// Apply the transaction to the current state (included in the env).
 	result, err := ApplyMessage(evm, msg, gp)
 	if err != nil {
 		return nil, err
 	}
 
-	// verify or set transaction.externalCall
-	if len(tx.ExternalCallResult()) == 0 {
-		tx.SetExternalCallResult(result.CrossChainCallResults)
-	} else {
-		if !bytes.Equal(tx.ExternalCallResult(), result.CrossChainCallResults) {
-			return nil, fmt.Errorf("validate external call result of tx with failure")
+	// only the validators and proposer have the ExternalCallClient
+	if evm.ExternalCallClient() != nil {
+		// verify or set transaction.externalCall
+		if len(tx.ExternalCallResult()) == 0 {
+			tx.SetExternalCallResult(result.CrossChainCallResults)
+		} else {
+			if !bytes.Equal(tx.ExternalCallResult(), result.CrossChainCallResults) {
+				return nil, fmt.Errorf("validate external call result of tx with failure")
+			}
 		}
 	}
 

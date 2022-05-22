@@ -17,13 +17,13 @@
 package vm
 
 import (
-	"github.com/ethereum/go-ethereum/ethclient"
 	"math/big"
 	"sync/atomic"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/holiman/uint256"
 )
@@ -104,7 +104,7 @@ type EVM struct {
 	TxContext
 
 	// External Client
-	externalClient *ethclient.Client
+	externalCallClient *ethclient.Client
 
 	// StateDB gives access to the underlying state
 	StateDB StateDB
@@ -145,8 +145,12 @@ func NewEVM(blockCtx BlockContext, txCtx TxContext, statedb StateDB, chainConfig
 	return evm
 }
 
-func (evm *EVM) SetExternalClient(c *ethclient.Client) {
-	evm.externalClient = c
+func (evm *EVM) SetExternalCallClient(c *ethclient.Client) {
+	evm.externalCallClient = c
+}
+
+func (evm *EVM) ExternalCallClient() *ethclient.Client {
+	return evm.externalCallClient
 }
 
 // Reset resets the EVM with a new transaction context.Reset

@@ -1118,69 +1118,79 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractToCrossChainCallEnv, in
 	fmt.Println(common.Bytes2Hex(input[0:4]))
 	if bytes.Equal(input[0:4], getLogByTxHashId) {
 
-		client := env.evm.externalClient
-		// todo : deal with chainId
-		txHash := common.BytesToHash(getData(input, 4+32, 32))
-		logIdx := new(big.Int).SetBytes(getData(input, 4+64, 32)).Uint64()
-		maxDataLen := new(big.Int).SetBytes(getData(input, 4+96, 32)).Uint64()
-		confirms := new(big.Int).SetBytes(getData(input, 4+128, 32)).Uint64()
+		client := env.evm.ExternalCallClient()
+		var trace *CrossChainCallTrace
 
-		receipt, err := client.TransactionReceipt(ctx, txHash)
-		if err != nil {
-			return nil, 0, err
-		}
-
-		happenedBlockNumber := receipt.BlockNumber
-		latestBlockNumber, err := client.BlockNumber(ctx)
-		if err != nil {
-			return nil, 0, err
-		}
-
-		if latestBlockNumber-happenedBlockNumber.Uint64() < confirms {
-			return nil, 0, fmt.Errorf("confirms no enough")
-		}
-
-		log := receipt.Logs[logIdx]
-
-		var data []byte
-		var actualDataLen = len(log.Data)
-		if uint64(actualDataLen) < maxDataLen {
-			data = log.Data
+		if client == nil {
+			tracePtr := env.evm.Interpreter().TracePtr()
+			trace = env.evm.Interpreter().CrossChainCallTraces()[tracePtr]
+			env.evm.Interpreter().AddTracePtr()
 		} else {
-			data = getData(log.Data, 0, maxDataLen)
-			actualDataLen = int(maxDataLen)
+			// todo : deal with chainId
+			txHash := common.BytesToHash(getData(input, 4+32, 32))
+			logIdx := new(big.Int).SetBytes(getData(input, 4+64, 32)).Uint64()
+			maxDataLen := new(big.Int).SetBytes(getData(input, 4+96, 32)).Uint64()
+			confirms := new(big.Int).SetBytes(getData(input, 4+128, 32)).Uint64()
+
+			receipt, err := client.TransactionReceipt(ctx, txHash)
+			if err != nil {
+				return nil, 0, err
+			}
+
+			happenedBlockNumber := receipt.BlockNumber
+			latestBlockNumber, err := client.BlockNumber(ctx)
+			if err != nil {
+				return nil, 0, err
+			}
+
+			if latestBlockNumber-happenedBlockNumber.Uint64() < confirms {
+				return nil, 0, fmt.Errorf("confirms no enough")
+			}
+
+			log := receipt.Logs[logIdx]
+
+			var data []byte
+			var actualDataLen = len(log.Data)
+			if uint64(actualDataLen) < maxDataLen {
+				data = log.Data
+			} else {
+				data = getData(log.Data, 0, maxDataLen)
+				actualDataLen = int(maxDataLen)
+			}
+
+			// calculate actual cost of gas
+			actualGasUsed := len(log.Topics) * 32 * 3 // topics
+			actualGasUsed += actualDataLen * 3        // data
+			actualGasUsed += 32 * 3                   // address
+			actualGasUsed += len(input) * 3
+
+			// return (abi.encodePack( abi.encodePack(log.Address,log.Topics,data) , gas) )
+			resultValue := &CallResult{
+				Address: log.Address,
+				Topics:  log.Topics,
+				Data:    data,
+			}
+
+			trace = &CrossChainCallTrace{
+				CallRes: resultValue,
+				GasUsed: uint64(actualGasUsed),
+			}
+
+			env.evm.interpreter.crossChainCallTraces = append(env.evm.interpreter.crossChainCallTraces, trace)
 		}
 
-		// calculate actual cost of gas
-		actualGasUsed := len(log.Topics) * 32 * 3 // topics
-		actualGasUsed += actualDataLen * 3        // data
-		actualGasUsed += 32 * 3                   // address
-		actualGasUsed += len(input) * 3
-
-		// return (abi.encodePack( abi.encodePack(log.Address,log.Topics,data) , gas) )
-		resultValue := &CallResult{
-			Address: log.Address,
-			Topics:  log.Topics,
-			Data:    data,
-		}
 		resultType, err := abi.NewType("tuple", "", []abi.ArgumentMarshaling{{Name: "Address", Type: "address"}, {Name: "Topics", Type: "bytes32[]"}, {Name: "Data", Type: "bytes"}})
 		if err != nil {
 			return nil, 0, err
 		}
 		arg0 := abi.Argument{Name: "callResult", Type: resultType, Indexed: false}
 		var args = abi.Arguments{arg0}
-		packResult, err := args.Pack(resultValue)
+		packResult, err := args.Pack(trace.CallRes)
 		if err != nil {
 			return nil, 0, err
 		}
 
-		trace := &CrossChainCallTrace{
-			CallRes: resultValue,
-			GasUsed: uint64(actualGasUsed),
-		}
-		env.evm.interpreter.crossChainCallResults = append(env.evm.interpreter.crossChainCallResults, trace)
-
-		return packResult, uint64(actualGasUsed), nil
+		return packResult, uint64(trace.GasUsed), nil
 	}
 
 	return nil, 0, errors.New("unsupported method")
@@ -1199,4 +1209,9 @@ type CallResult struct {
 type CrossChainCallTrace struct {
 	CallRes *CallResult
 	GasUsed uint64
+}
+
+type CrossChainCallResult struct {
+	Version string
+	Traces  []*CrossChainCallTrace
 }

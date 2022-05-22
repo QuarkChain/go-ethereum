@@ -22,6 +22,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/rlp"
 )
 
 // Config are the configuration options for the Interpreter
@@ -63,7 +64,8 @@ type EVMInterpreter struct {
 	readOnly   bool   // Whether to throw on stateful modifications
 	returnData []byte // Last CALL's return data for subsequent reuse
 
-	crossChainCallResults []*CrossChainCallTrace
+	crossChainCallTraces []*CrossChainCallTrace
+	tracePtr             uint64
 }
 
 // NewEVMInterpreter returns a new instance of the Interpreter.
@@ -109,8 +111,26 @@ func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 	}
 }
 
-func (in *EVMInterpreter) CrossChainCallResults() []*CrossChainCallTrace {
-	return in.crossChainCallResults
+func (in *EVMInterpreter) TracePtr() uint64 {
+	return in.tracePtr
+}
+
+func (in *EVMInterpreter) AddTracePtr() {
+	in.tracePtr++
+}
+
+func (in *EVMInterpreter) CrossChainCallTraces() []*CrossChainCallTrace {
+	return in.crossChainCallTraces
+}
+
+func (in *EVMInterpreter) SetCrossChainCallTraces(b []byte) error {
+	cr := &CrossChainCallResult{}
+	err := rlp.DecodeBytes(b, cr)
+	if err != nil {
+		return err
+	}
+	in.crossChainCallTraces = cr.Traces
+	return nil
 }
 
 // Run loops and evaluates the contract's code with the given input data and returns
