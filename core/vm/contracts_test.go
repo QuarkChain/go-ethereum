@@ -114,7 +114,7 @@ func TestCrossChainCall(t *testing.T) {
 	}
 
 	evm := NewEVM(BlockContext{}, TxContext{}, nil, params.TestChainConfig, Config{})
-	evm.SetExternalClient(eClient)
+	evm.SetExternalCallClient(eClient)
 	evmInterpreter := NewEVMInterpreter(evm, evm.Config)
 	evm.interpreter = evmInterpreter
 

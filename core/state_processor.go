@@ -176,5 +176,11 @@ func ApplyTransaction(config *params.ChainConfig, bc ChainContext, author *commo
 	// Create a new context to be used in the EVM environment
 	blockContext := NewEVMBlockContext(header, bc, author)
 	vmenv := vm.NewEVM(blockContext, vm.TxContext{}, statedb, config, cfg)
+
+	// set external client of evm
+	if bc.Engine().ExternalCallClient() != nil {
+		vmenv.SetExternalCallClient(bc.Engine().ExternalCallClient())
+	}
+
 	return applyTransaction(msg, config, bc, author, gp, statedb, header.Number, header.Hash(), tx, usedGas, vmenv)
 }
