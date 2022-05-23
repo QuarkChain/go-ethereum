@@ -18,6 +18,7 @@
 package state
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"math/big"
@@ -162,10 +163,15 @@ func (s *StateDB) SstorageMaxKVSize(addr common.Address) uint64 {
 	return s.db.TrieDB().SstorageMaxKVSize(addr)
 }
 
-func (s *StateDB) SstorageWrite(addr common.Address, kvIdx uint64, data []byte) {
+func (s *StateDB) SstorageWrite(addr common.Address, kvIdx uint64, data []byte) error {
 	if _, ok := s.shardedStorage[addr]; !ok {
 		s.shardedStorage[addr] = make(map[uint64][]byte)
 	}
+
+	if len(data) > int(s.SstorageMaxKVSize(addr)) {
+		return fmt.Errorf("put too large")
+	}
+
 	s.journal.append(sstorageChange{
 		address:   &addr,
 		prevBytes: s.shardedStorage[addr][kvIdx],
@@ -173,11 +179,19 @@ func (s *StateDB) SstorageWrite(addr common.Address, kvIdx uint64, data []byte) 
 	})
 	// Assume data is immutable
 	s.shardedStorage[addr][kvIdx] = data
+	return nil
 }
 
 func (s *StateDB) SstorageRead(addr common.Address, kvIdx uint64, readLen int) ([]byte, bool, error) {
+	if readLen > int(s.SstorageMaxKVSize(addr)) {
+		return nil, false, fmt.Errorf("readLen too large")
+	}
+
 	if m, ok0 := s.shardedStorage[addr]; ok0 {
 		if b, ok1 := m[kvIdx]; ok1 {
+			if readLen > len(b) {
+				return append(b, bytes.Repeat([]byte{0}, readLen-len(b))...), true, nil
+			}
 			return b[0:readLen], true, nil
 		}
 	}
