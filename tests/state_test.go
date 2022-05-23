@@ -20,7 +20,6 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
-	"github.com/ethereum/go-ethereum/ethclient"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -29,6 +28,8 @@ import (
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/ethclient"
+
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/state"
@@ -257,7 +258,9 @@ func runBenchmark(b *testing.B, t *StateTest) {
 	}
 }
 
-var web3QStateTestDir = filepath.Join(baseDir, "Web3QTest/ExternalCall/")
+//var web3QStateTestDir = filepath.Join(baseDir, "Web3QTest/ExternalCall/")
+
+var web3QStateTestDir = filepath.Join(baseDir, "Web3QTest/")
 
 func TestWeb3QState(t *testing.T) {
 	t.Parallel()
@@ -316,6 +319,7 @@ func TestWeb3QState(t *testing.T) {
 					}
 
 					// Prepare the EVM.
+
 					txContext := core.NewEVMTxContext(msg)
 					context := core.NewEVMBlockContext(block.Header(), nil, &test.json.Env.Coinbase)
 					context.GetHash = vmTestBlockHash
@@ -325,26 +329,31 @@ func TestWeb3QState(t *testing.T) {
 					if err != nil {
 						panic(err)
 					}
-					evm.SetExternalClient(eClient)
+					evm.SetExternalCallClient(eClient)
 
 					// Execute the message.
 					snapshot := statedb.Snapshot()
 					gaspool := new(core.GasPool)
 					gaspool.AddGas(block.GasLimit())
 
-					res, err := core.ApplyMessage(evm, msg, gaspool)
-
+					_, err = core.ApplyMessage(evm, msg, gaspool)
 					if err != nil {
 						t.Error("EVM ERROR:", err)
 						statedb.RevertToSnapshot(snapshot)
+						printStateTrie(statedb, test, t)
 					}
 
-					if res.Err != nil {
-						t.Error("EVM ERROR:", res.Err)
-						statedb.RevertToSnapshot(snapshot)
-					}
-					t.Log("cross call result:", common.Bytes2Hex(res.CrossChainCallResults))
-					t.Log("evm call result:", common.Bytes2Hex(res.ReturnData))
+					//if res.Err != nil {
+					//	t.Error("EVM ERROR:", res.Err)
+					//	printStateTrie(statedb, test, t)
+					//}
+					//t.Log("cross call result:", common.Bytes2Hex(res.CrossChainCallResults))
+					//call_result := &vm.CrossChainCallResult{}
+					//err = rlp.DecodeBytes(res.CrossChainCallResults, call_result)
+					//if err != nil {
+					//	t.Error("rlp decode err:", err)
+					//}
+					//t.Log("evm call result:", common.Bytes2Hex(res.ReturnData))
 					// Commit block
 					statedb.Commit(config.IsEIP158(block.Number()))
 					statedb.AddBalance(block.Coinbase(), new(big.Int))
@@ -352,6 +361,7 @@ func TestWeb3QState(t *testing.T) {
 
 					if root != common.Hash(post.Root) {
 						t.Error(fmt.Errorf("post state root mismatch: got %x, want %x", root, post.Root))
+						printStateTrie(statedb, test, t)
 					}
 
 				})
