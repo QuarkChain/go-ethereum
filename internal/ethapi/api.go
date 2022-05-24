@@ -1206,7 +1206,7 @@ func RPCMarshalHeader(head *types.Header) map[string]interface{} {
 		"timeMs":              head.TimeMs,
 		"nextValidators":      head.NextValidators,
 		"nextValidatorPowers": head.NextValidatorPowers,
-		"LastCommitHash":      head.LastCommitHash,
+		"lastCommitHash":      head.LastCommitHash,
 		"commit":              head.Commit,
 	}
 
