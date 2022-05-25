@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus"
 	pbft "github.com/ethereum/go-ethereum/consensus/tendermint/consensus"
@@ -93,10 +94,10 @@ func (s *Store) SaveBlock(block *types.FullBlock, commit *types.Commit) {
 }
 
 // Validate a block without Commit and with LastCommit.
-func (s *Store) ValidateBlock(state pbft.ChainState, block *types.FullBlock) (err error) {
+func (s *Store) ValidateBlock(state pbft.ChainState, block *types.FullBlock, committed bool) (err error) {
 	header := block.Header()
-	err = s.verifyHeaderFunc(s.chain, header, false)
-	if err != nil {
+	err = s.verifyHeaderFunc(s.chain, header, committed)
+	if err != nil || committed {
 		return
 	}
 
@@ -106,7 +107,7 @@ func (s *Store) ValidateBlock(state pbft.ChainState, block *types.FullBlock) (er
 		// if update validator set from contract enable
 		if s.config.ValidatorChangeEpochId > 0 && s.config.ValidatorChangeEpochId <= epochId {
 			l := len(prefix)
-			if len(header.Extra) < l+8+32 || bytes.Equal(header.Extra[:l], prefix) {
+			if len(header.Extra) < l+8+32 || !bytes.Equal(header.Extra[:l], prefix) {
 				return errors.New("header.Extra missing validator chain block height and hash")
 			}
 

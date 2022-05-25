@@ -115,7 +115,7 @@ func (result *ExecutionResult) Revert() []byte {
 }
 
 // IntrinsicGas computes the 'intrinsic gas' for a message with the given data.
-func IntrinsicGas(data []byte, accessList types.AccessList, isContractCreation bool, isHomestead, isEIP2028 bool) (uint64, error) {
+func IntrinsicGas(data []byte, accessList types.AccessList, isContractCreation bool, isHomestead, isEIP2028, isPisa bool) (uint64, error) {
 	// Set the starting gas for the raw transaction
 	var gas uint64
 	if isContractCreation && isHomestead {
@@ -125,28 +125,34 @@ func IntrinsicGas(data []byte, accessList types.AccessList, isContractCreation b
 	}
 	// Bump the required gas by the amount of transactional data
 	if len(data) > 0 {
-		// Zero and non-zero bytes are priced differently
-		var nz uint64
-		for _, byt := range data {
-			if byt != 0 {
-				nz++
+		switch {
+		case isPisa:
+			gas += uint64(len(data)) * params.CalldataGasCostEIP4488
+		default:
+			// Zero and non-zero bytes are priced differently
+			var nz uint64
+			for _, byt := range data {
+				if byt != 0 {
+					nz++
+				}
 			}
-		}
-		// Make sure we don't exceed uint64 for all data combinations
-		nonZeroGas := params.TxDataNonZeroGasFrontier
-		if isEIP2028 {
-			nonZeroGas = params.TxDataNonZeroGasEIP2028
-		}
-		if (math.MaxUint64-gas)/nonZeroGas < nz {
-			return 0, ErrGasUintOverflow
-		}
-		gas += nz * nonZeroGas
+			// Make sure we don't exceed uint64 for all data combinations
+			nonZeroGas := params.TxDataNonZeroGasFrontier
+			if isEIP2028 {
+				nonZeroGas = params.TxDataNonZeroGasEIP2028
+			}
+			if (math.MaxUint64-gas)/nonZeroGas < nz {
+				return 0, ErrGasUintOverflow
+			}
+			gas += nz * nonZeroGas
 
-		z := uint64(len(data)) - nz
-		if (math.MaxUint64-gas)/params.TxDataZeroGas < z {
-			return 0, ErrGasUintOverflow
+			z := uint64(len(data)) - nz
+			if (math.MaxUint64-gas)/params.TxDataZeroGas < z {
+				return 0, ErrGasUintOverflow
+			}
+			gas += z * params.TxDataZeroGas
 		}
-		gas += z * params.TxDataZeroGas
+
 	}
 	if accessList != nil {
 		gas += uint64(len(accessList)) * params.TxAccessListAddressGas
@@ -292,10 +298,11 @@ func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
 	homestead := st.evm.ChainConfig().IsHomestead(st.evm.Context.BlockNumber)
 	istanbul := st.evm.ChainConfig().IsIstanbul(st.evm.Context.BlockNumber)
 	london := st.evm.ChainConfig().IsLondon(st.evm.Context.BlockNumber)
+	pisa := st.evm.ChainConfig().IsPisa(st.evm.Context.BlockNumber)
 	contractCreation := msg.To() == nil
 
 	// Check clauses 4-5, subtract intrinsic gas if everything is correct
-	gas, err := IntrinsicGas(st.data, st.msg.AccessList(), contractCreation, homestead, istanbul)
+	gas, err := IntrinsicGas(st.data, st.msg.AccessList(), contractCreation, homestead, istanbul, pisa)
 	if err != nil {
 		return nil, err
 	}

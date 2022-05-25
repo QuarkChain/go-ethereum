@@ -18,11 +18,12 @@ func NewDefaultBlockExecutor(db *leveldb.DB) BlockExecutor {
 	return &DefaultBlockExecutor{}
 }
 
-func (be *DefaultBlockExecutor) ValidateBlock(state ChainState, b *FullBlock) error {
-	return validateBlock(state, b)
+func (be *DefaultBlockExecutor) ValidateBlock(state ChainState, b *FullBlock, committed bool) error {
+	return validateBlock(state, b, committed)
 }
 
-func validateBlock(state ChainState, block *FullBlock) error {
+func validateBlock(state ChainState, block *FullBlock, committed bool) error {
+	// TODO: verify signatures only when committed=true
 
 	// Validate basic info.
 

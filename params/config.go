@@ -34,7 +34,7 @@ var (
 	SepoliaGenesisHash      = common.HexToHash("0x25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9")
 	RinkebyGenesisHash      = common.HexToHash("0x6341fd3daf94b748c72ced5a5b26028f2474f5f00d824504e4fa37a75767e177")
 	GoerliGenesisHash       = common.HexToHash("0xbf7e331f7f7c1dd2e05159666b3bf8bc7a8a3a9eb1d518969eab529dd9b88c1a")
-	Web3QTestnetGenesisHash = common.HexToHash("0x1cf5a870ae77dcff37b14ca5ca8ba05d428e3dc722f544f958c4e19e4747953d")
+	Web3QTestnetGenesisHash = common.HexToHash("0xe1b551a47236ea806a1a9f6a9082ab989cffd999a44caa6015edc27136e0aab5")
 	Web3QGalileoGenesisHash = common.HexToHash("0xa576a985390f3a643e2acdeaed074cc9866c99f6bdf3ca8c49ec959054703745")
 )
 
@@ -256,6 +256,11 @@ var (
 		Threshold: 2,
 	}
 
+	Web3QTestnetValBootnodes = []string{
+		"/ip4/68.183.157.114/udp/33333/quic/p2p/12D3KooWEZ94qZgJgUNYiLwXahknkniYgozxw5eocijZJkew6Mj5",
+		"/ip4/128.199.102.174/udp/33333/quic/p2p/12D3KooWNjKALie7Cdpb4KG8axgABA4VCCsKoBQdvYvRhVZhbtPk",
+	}
+
 	// Web3QTestnetChainConfig contains the chain parameters to run a node on the Web3Q test network.
 	Web3QTestnetChainConfig = &ChainConfig{
 		ChainID:             big.NewInt(3333),
@@ -273,9 +278,31 @@ var (
 		BerlinBlock:         big.NewInt(0),
 		LondonBlock:         big.NewInt(0),
 		ArrowGlacierBlock:   nil,
-		Clique: &CliqueConfig{
-			Period: 6,
-			Epoch:  100800, // one week
+		Tendermint: &TendermintConfig{
+			Epoch:                  10000,
+			ValidatorContract:      "",
+			ContractChainID:        0,
+			ValidatorChangeEpochId: 0,
+			ValRpc:                 "",
+			P2pPort:                33333,
+			ProposerRepetition:     8,
+			P2pBootstrap:           strings.Join(Web3QTestnetValBootnodes, ","),
+			NodeKeyPath:            "",
+			ConsensusConfig: ConsensusConfig{
+				// WalPath:                     filepath.Join(defaultDataDir, "cs.wal", "wal"),
+				TimeoutPropose:               3000 * time.Millisecond,
+				TimeoutProposeDelta:          500 * time.Millisecond,
+				TimeoutPrevote:               1000 * time.Millisecond,
+				TimeoutPrevoteDelta:          500 * time.Millisecond,
+				TimeoutPrecommit:             1000 * time.Millisecond,
+				TimeoutPrecommitDelta:        500 * time.Millisecond,
+				TimeoutCommit:                5000 * time.Millisecond,
+				SkipTimeoutCommit:            false,
+				PeerGossipSleepDuration:      100 * time.Millisecond,
+				PeerQueryMaj23SleepDuration:  2000 * time.Millisecond,
+				DoubleSignCheckHeight:        uint64(0),
+				ConsensusSyncRequestDuration: 500 * time.Millisecond,
+			},
 		},
 	}
 
@@ -503,7 +530,7 @@ type TendermintConfig struct {
 	Epoch                  uint64 `json:"epoch"`             // Epoch lengh to vote new validator
 	ValidatorContract      string `json:"validatorContract"` // Validator set contract
 	ContractChainID        uint64 `json:"contractChainId"`   // Chain ID which Validator contract on
-	ValidatorChangeEpochId uint64 `json:"valChangeEpochId"`       // Epoch to enable update ValidatorSet from contract
+	ValidatorChangeEpochId uint64 `json:"valChangeEpochId"`  // Epoch to enable update ValidatorSet from contract
 	ValRpc                 string `json:"valRpc"`            // rpc for ethclient to get ValidatorSet from contract
 	NodeKeyPath            string
 	P2pPort                uint

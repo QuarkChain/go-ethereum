@@ -83,12 +83,13 @@ const (
 type environment struct {
 	signer types.Signer
 
-	state     *state.StateDB // apply state changes here
-	ancestors mapset.Set     // ancestor set (used for checking uncle parent validity)
-	family    mapset.Set     // family set (used for checking uncle invalidity)
-	tcount    int            // tx count in cycle
-	gasPool   *core.GasPool  // available gas used to pack transactions
-	coinbase  common.Address
+	state         *state.StateDB // apply state changes here
+	ancestors     mapset.Set     // ancestor set (used for checking uncle parent validity)
+	family        mapset.Set     // family set (used for checking uncle invalidity)
+	tcount        int            // tx count in cycle
+	totalCalldata int            // total calldata in cycle
+	gasPool       *core.GasPool  // available gas used to pack transactions
+	coinbase      common.Address
 
 	header   *types.Header
 	txs      []*types.Transaction
@@ -99,14 +100,15 @@ type environment struct {
 // copy creates a deep copy of environment.
 func (env *environment) copy() *environment {
 	cpy := &environment{
-		signer:    env.signer,
-		state:     env.state.Copy(),
-		ancestors: env.ancestors.Clone(),
-		family:    env.family.Clone(),
-		tcount:    env.tcount,
-		coinbase:  env.coinbase,
-		header:    types.CopyHeader(env.header),
-		receipts:  copyReceipts(env.receipts),
+		signer:        env.signer,
+		state:         env.state.Copy(),
+		ancestors:     env.ancestors.Clone(),
+		family:        env.family.Clone(),
+		tcount:        env.tcount,
+		totalCalldata: env.totalCalldata,
+		coinbase:      env.coinbase,
+		header:        types.CopyHeader(env.header),
+		receipts:      copyReceipts(env.receipts),
 	}
 	if env.gasPool != nil {
 		gasPool := *env.gasPool
@@ -800,6 +802,7 @@ func (w *worker) makeEnv(parent *types.Block, header *types.Header, coinbase com
 	}
 	// Keep track of transactions which return errors so they can be removed
 	env.tcount = 0
+	env.totalCalldata = 0
 	return env, nil
 }
 
@@ -888,11 +891,19 @@ func (w *worker) commitTransactions(env *environment, txs *types.TransactionsByP
 			log.Trace("Not enough gas for further transactions", "have", env.gasPool, "want", params.TxGas)
 			break
 		}
+
 		// Retrieve the next transaction and abort if all done
 		tx := txs.Peek()
 		if tx == nil {
 			break
 		}
+
+		if w.chainConfig.IsPisa(env.header.Number) && env.totalCalldata+len(tx.Data()) > core.MaxCalldataEIP4488(env.tcount+1) {
+			log.Trace("Total transaction calldata exceeded, ignoring transaction", "hash", tx.Hash(), "eip4488", w.chainConfig.PisaBlock)
+
+			break
+		}
+
 		// Error may be ignored here. The error has already been checked
 		// during transaction acceptance is the transaction pool.
 		//
@@ -930,6 +941,7 @@ func (w *worker) commitTransactions(env *environment, txs *types.TransactionsByP
 			// Everything ok, collect the logs and shift in the next transaction from the same account
 			coalescedLogs = append(coalescedLogs, logs...)
 			env.tcount++
+			env.totalCalldata += len(tx.Data())
 			txs.Shift()
 
 		case errors.Is(err, core.ErrTxTypeNotSupported):
@@ -1162,7 +1174,7 @@ func (w *worker) commit(env *environment, interval func(), update bool, start ti
 			case w.taskCh <- &task{receipts: env.receipts, state: env.state, block: block, createdAt: time.Now()}:
 				w.unconfirmed.Shift(block.NumberU64() - 1)
 				log.Info("Commit new sealing work", "number", block.Number(), "sealhash", w.engine.SealHash(block.Header()),
-					"uncles", len(env.uncles), "txs", env.tcount,
+					"uncles", len(env.uncles), "txs", env.tcount, "totalCalldata", env.totalCalldata,
 					"gas", block.GasUsed(), "fees", totalFees(block, env.receipts),
 					"elapsed", common.PrettyDuration(time.Since(start)))
 
