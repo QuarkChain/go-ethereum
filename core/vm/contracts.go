@@ -1122,14 +1122,23 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractToCrossChainCallEnv, in
 
 		if client == nil {
 			tracePtr := env.evm.Interpreter().TracePtr()
+			if tracePtr >= uint64(len(env.evm.Interpreter().CrossChainCallTraces())) {
+				return nil, 0, fmt.Errorf("CrossChainCall : tracePtr exceeds the bound of Interpreter.CrossChainCallTraces")
+			}
 			trace = env.evm.Interpreter().CrossChainCallTraces()[tracePtr]
 			env.evm.Interpreter().AddTracePtr()
 		} else {
-			// todo : deal with chainId
+
+			ChainId := new(big.Int).SetBytes(getData(input, 4+64, 32)).Uint64()
 			txHash := common.BytesToHash(getData(input, 4+32, 32))
 			logIdx := new(big.Int).SetBytes(getData(input, 4+64, 32)).Uint64()
 			maxDataLen := new(big.Int).SetBytes(getData(input, 4+96, 32)).Uint64()
 			confirms := new(big.Int).SetBytes(getData(input, 4+128, 32)).Uint64()
+
+			// todo : deal with chainId
+			if ChainId != 4 {
+				return nil, 0, fmt.Errorf("CrossChainCall : ChindId %d no support")
+			}
 
 			receipt, err := client.TransactionReceipt(ctx, txHash)
 			if err != nil {
