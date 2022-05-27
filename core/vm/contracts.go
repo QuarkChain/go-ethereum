@@ -1146,8 +1146,8 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractToCrossChainCallEnv, in
 				return nil, 0, fmt.Errorf("confirms no enough")
 			}
 
-			if logIdx > uint64(len(receipt.Logs)) {
-
+			if logIdx >= uint64(len(receipt.Logs)) {
+				return nil, 0, fmt.Errorf("CrossChainCall: logIdX exceeds the bounds of the log array")
 			}
 			log := receipt.Logs[logIdx]
 
