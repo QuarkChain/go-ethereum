@@ -108,16 +108,16 @@ var PrecompiledContractsBerlin = map[common.Address]PrecompiledContract{
 // PrecompiledContractsPisa contains the default set of pre-compiled Ethereum
 // contracts used in the Berlin release.
 var PrecompiledContractsPisa = map[common.Address]PrecompiledContract{
-	common.BytesToAddress([]byte{1}):  &ecrecover{},
-	common.BytesToAddress([]byte{2}):  &sha256hash{},
-	common.BytesToAddress([]byte{3}):  &ripemd160hash{},
-	common.BytesToAddress([]byte{4}):  &dataCopy{},
-	common.BytesToAddress([]byte{5}):  &bigModExp{eip2565: true},
-	common.BytesToAddress([]byte{6}):  &bn256AddIstanbul{},
-	common.BytesToAddress([]byte{7}):  &bn256ScalarMulIstanbul{},
-	common.BytesToAddress([]byte{8}):  &bn256PairingIstanbul{},
-	common.BytesToAddress([]byte{9}):  &blake2F{},
-	common.BytesToAddress([]byte{20}): &crossChainCall{},
+	common.BytesToAddress([]byte{1}):          &ecrecover{},
+	common.BytesToAddress([]byte{2}):          &sha256hash{},
+	common.BytesToAddress([]byte{3}):          &ripemd160hash{},
+	common.BytesToAddress([]byte{4}):          &dataCopy{},
+	common.BytesToAddress([]byte{5}):          &bigModExp{eip2565: true},
+	common.BytesToAddress([]byte{6}):          &bn256AddIstanbul{},
+	common.BytesToAddress([]byte{7}):          &bn256ScalarMulIstanbul{},
+	common.BytesToAddress([]byte{8}):          &bn256PairingIstanbul{},
+	common.BytesToAddress([]byte{9}):          &blake2F{},
+	common.BytesToAddress([]byte{3, 0x33, 3}): &crossChainCall{},
 }
 
 // PrecompiledContractsBLS contains the set of pre-compiled Ethereum
@@ -1115,7 +1115,6 @@ func (c *crossChainCall) Run(input []byte) ([]byte, error) {
 
 func (c *crossChainCall) RunWith(env *PrecompiledContractToCrossChainCallEnv, input []byte) ([]byte, uint64, error) {
 	ctx := context.Background()
-	fmt.Println(common.Bytes2Hex(input[0:4]))
 	if bytes.Equal(input[0:4], getLogByTxHashId) {
 
 		client := env.evm.ExternalCallClient()
@@ -1147,6 +1146,9 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractToCrossChainCallEnv, in
 				return nil, 0, fmt.Errorf("confirms no enough")
 			}
 
+			if logIdx > uint64(len(receipt.Logs)) {
+
+			}
 			log := receipt.Logs[logIdx]
 
 			var data []byte
