@@ -329,7 +329,7 @@ var (
 				ConsensusSyncRequestDuration: 500 * time.Millisecond,
 			},
 		},
-		ExternalCall: &ExternalCallConfig{Version: "1.0"},
+		ExternalCall: &ExternalCallConfig{Version: 1, SupportChainId: 4},
 	}
 
 	// Web3QMainnetChainConfig contains the chain parameters to run a node on the Web3Q mainnet.
@@ -519,7 +519,8 @@ type TendermintConfig struct {
 }
 
 type ExternalCallConfig struct {
-	Version string `json:"version"`
+	Version        uint64 `json:"version"`
+	SupportChainId uint64 `json:"supportChainId"`
 }
 
 // String implements the stringer interface

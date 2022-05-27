@@ -1230,6 +1230,6 @@ type CrossChainCallTrace struct {
 }
 
 type CrossChainCallTracesWithVersion struct {
-	Version string
+	Version uint64
 	Traces  []*CrossChainCallTrace
 }

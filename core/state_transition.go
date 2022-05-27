@@ -353,11 +353,11 @@ func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
 	if len(st.evm.Interpreter().CrossChainCallTraces()) != 0 {
 		traces := st.evm.Interpreter().CrossChainCallTraces()
 
-		var version string
-		if st.evm.ChainConfig().ExternalCall.Version != "" {
+		var version uint64
+		if st.evm.ChainConfig().ExternalCall.Version != 0 {
 			version = st.evm.ChainConfig().ExternalCall.Version
 		} else {
-			version = "0.0.0"
+			version = 0
 		}
 
 		cr := vm.CrossChainCallTracesWithVersion{
