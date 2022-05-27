@@ -1135,8 +1135,7 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractToCrossChainCallEnv, in
 			maxDataLen := new(big.Int).SetBytes(getData(input, 4+96, 32)).Uint64()
 			confirms := new(big.Int).SetBytes(getData(input, 4+128, 32)).Uint64()
 
-			// todo : add support chainId at ChainConfig
-			if ChainId != 4 {
+			if ChainId != env.evm.ChainConfig().ExternalCall.SupportChainId {
 				return nil, 0, fmt.Errorf("CrossChainCall : ChindId %d no support", ChainId)
 			}
 

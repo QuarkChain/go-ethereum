@@ -112,7 +112,7 @@ func TestCrossChainCall(t *testing.T) {
 		t.Error(err)
 	}
 
-	evm := NewEVM(BlockContext{}, TxContext{}, nil, params.TestChainConfig, Config{})
+	evm := NewEVM(BlockContext{}, TxContext{}, nil, params.Web3QGalileoChainConfig, Config{})
 	evm.SetExternalCallClient(eClient)
 	evmInterpreter := NewEVMInterpreter(evm, evm.Config)
 	evm.interpreter = evmInterpreter
