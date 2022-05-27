@@ -365,9 +365,7 @@ func (w *worker) pendingBlockAndReceipts() (*types.Block, types.Receipts) {
 	return w.snapshotBlock, w.snapshotReceipts
 }
 
-// start sets the running status as 1 and triggers new work submitting.
-func (w *worker) start() {
-
+func (w *worker) init() {
 	tm, isTm := w.engine.(*tendermint.Tendermint)
 	if isTm {
 		err := tm.Init(w.chain, func(parent common.Hash, coinbase common.Address, timestamp uint64) (*types.Block, error) {
@@ -378,8 +376,12 @@ func (w *worker) start() {
 		}
 	}
 
-	atomic.StoreInt32(&w.running, 1)
 	w.startCh <- struct{}{}
+}
+
+// start sets the running status as 1 and triggers new work submitting.
+func (w *worker) start() {
+	atomic.StoreInt32(&w.running, 1)
 }
 
 // stop sets the running status as 0.

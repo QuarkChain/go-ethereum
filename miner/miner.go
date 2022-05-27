@@ -138,6 +138,7 @@ func (miner *Miner) update() {
 		case addr := <-miner.startCh:
 			miner.SetEtherbase(addr)
 			if canStart {
+				miner.worker.init()
 				miner.worker.start()
 			}
 			shouldStart = true
