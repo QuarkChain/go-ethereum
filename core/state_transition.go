@@ -360,7 +360,7 @@ func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
 			version = "0.0.0"
 		}
 
-		cr := vm.CrossChainCallResult{
+		cr := vm.CrossChainCallTracesWithVersion{
 			Version: version,
 			Traces:  traces,
 		}

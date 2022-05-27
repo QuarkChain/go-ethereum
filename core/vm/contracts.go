@@ -1129,15 +1129,15 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractToCrossChainCallEnv, in
 			env.evm.Interpreter().AddTracePtr()
 		} else {
 
-			ChainId := new(big.Int).SetBytes(getData(input, 4+64, 32)).Uint64()
+			ChainId := new(big.Int).SetBytes(getData(input, 4, 32)).Uint64()
 			txHash := common.BytesToHash(getData(input, 4+32, 32))
 			logIdx := new(big.Int).SetBytes(getData(input, 4+64, 32)).Uint64()
 			maxDataLen := new(big.Int).SetBytes(getData(input, 4+96, 32)).Uint64()
 			confirms := new(big.Int).SetBytes(getData(input, 4+128, 32)).Uint64()
 
-			// todo : deal with chainId
+			// todo : add support chainId at ChainConfig
 			if ChainId != 4 {
-				return nil, 0, fmt.Errorf("CrossChainCall : ChindId %d no support")
+				return nil, 0, fmt.Errorf("CrossChainCall : ChindId %d no support", ChainId)
 			}
 
 			receipt, err := client.TransactionReceipt(ctx, txHash)
@@ -1182,26 +1182,19 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractToCrossChainCallEnv, in
 				Data:    data,
 			}
 
+			resultValuePack, err := resultValue.ABIPack()
+			if err != nil {
+				return nil, 0, err
+			}
 			trace = &CrossChainCallTrace{
-				CallRes: resultValue,
+				CallRes: resultValuePack,
 				GasUsed: uint64(actualGasUsed),
 			}
 
 			env.evm.interpreter.crossChainCallTraces = append(env.evm.interpreter.crossChainCallTraces, trace)
 		}
 
-		resultType, err := abi.NewType("tuple", "", []abi.ArgumentMarshaling{{Name: "Address", Type: "address"}, {Name: "Topics", Type: "bytes32[]"}, {Name: "Data", Type: "bytes"}})
-		if err != nil {
-			return nil, 0, err
-		}
-		arg0 := abi.Argument{Name: "callResult", Type: resultType, Indexed: false}
-		var args = abi.Arguments{arg0}
-		packResult, err := args.Pack(trace.CallRes)
-		if err != nil {
-			return nil, 0, err
-		}
-
-		return packResult, uint64(trace.GasUsed), nil
+		return trace.CallRes, uint64(trace.GasUsed), nil
 	}
 
 	return nil, 0, errors.New("unsupported method")
@@ -1217,12 +1210,26 @@ type CallResult struct {
 	Data []byte `json:"data" gencodec:"required"`
 }
 
+func (c *CallResult) ABIPack() ([]byte, error) {
+	resultType, err := abi.NewType("tuple", "", []abi.ArgumentMarshaling{{Name: "Address", Type: "address"}, {Name: "Topics", Type: "bytes32[]"}, {Name: "Data", Type: "bytes"}})
+	if err != nil {
+		return nil, err
+	}
+	arg0 := abi.Argument{Name: "callResult", Type: resultType, Indexed: false}
+	var args = abi.Arguments{arg0}
+	packResult, err := args.Pack(c)
+	if err != nil {
+		return nil, err
+	}
+	return packResult, nil
+}
+
 type CrossChainCallTrace struct {
-	CallRes *CallResult
+	CallRes []byte
 	GasUsed uint64
 }
 
-type CrossChainCallResult struct {
+type CrossChainCallTracesWithVersion struct {
 	Version string
 	Traces  []*CrossChainCallTrace
 }

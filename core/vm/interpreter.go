@@ -124,7 +124,7 @@ func (in *EVMInterpreter) CrossChainCallTraces() []*CrossChainCallTrace {
 }
 
 func (in *EVMInterpreter) SetCrossChainCallTraces(b []byte) error {
-	cr := &CrossChainCallResult{}
+	cr := &CrossChainCallTracesWithVersion{}
 	err := rlp.DecodeBytes(b, cr)
 	if err != nil {
 		return err
