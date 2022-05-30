@@ -375,13 +375,12 @@ func (w *worker) init() {
 			log.Crit("tm.Init", "err", err)
 		}
 	}
-
-	w.startCh <- struct{}{}
 }
 
 // start sets the running status as 1 and triggers new work submitting.
 func (w *worker) start() {
 	atomic.StoreInt32(&w.running, 1)
+	w.startCh <- struct{}{}
 }
 
 // stop sets the running status as 0.
