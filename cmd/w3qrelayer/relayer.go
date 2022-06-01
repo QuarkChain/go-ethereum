@@ -30,8 +30,7 @@ const (
 	SubmitHeaderFunc       = "submitHead"
 	GetNextEpochHeightFunc = "getNextEpochHeight"
 	gas                    = uint64(1000000) // uint64(math.MaxUint64 / 2)
-	comfirmCount           = 40              // 10 * 60 seconds / 15 seconds
-	blockTime              = 15              // seconds
+	comfirmCount           = 50              // 10 * 60 / 12
 )
 
 var (
@@ -201,7 +200,7 @@ func runRelay(cmd *cobra.Command, args []string) {
 
 			err = relayer.SubmitHeaderToContract(header)
 			if err == nil {
-				time.Sleep((comfirmCount + 5) * blockTime * time.Second) // wait for the tx been confirmed
+				time.Sleep(1 * time.Minute)
 				continue
 			}
 			log.Error("SubmitHeaderToContract failed", "err", err.Error())

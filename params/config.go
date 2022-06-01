@@ -279,7 +279,7 @@ var (
 		LondonBlock:         big.NewInt(0),
 		ArrowGlacierBlock:   nil,
 		Tendermint: &TendermintConfig{
-			Epoch:                  1000,
+			Epoch:                  10000,
 			ValidatorContract:      "",
 			ContractChainID:        0,
 			ValidatorChangeEpochId: 0,
