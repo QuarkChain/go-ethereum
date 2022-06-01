@@ -24,9 +24,10 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"github.com/ethereum/go-ethereum/accounts/abi"
 	"math/big"
 
+	"github.com/ethereum/go-ethereum"
+	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -48,7 +49,8 @@ type PrecompiledContract interface {
 }
 
 type PrecompiledContractToCrossChainCallEnv struct {
-	evm *EVM
+	evm             *EVM
+	perByteGasPrice uint64
 }
 
 type PrecompiledContractWithCrossChainCall interface {
@@ -1114,16 +1116,23 @@ func (c *crossChainCall) Run(input []byte) ([]byte, error) {
 }
 
 func (c *crossChainCall) RunWith(env *PrecompiledContractToCrossChainCallEnv, input []byte) ([]byte, uint64, error) {
+	// consider the type of error
+	// 1.call by EOA Account
+	// 2.call by Contract
+	// if happen err, the temp will set as 1,ret(err msg) will set at memory to accessible for Application
+	//
 	ctx := context.Background()
 	if bytes.Equal(input[0:4], getLogByTxHashId) {
 
 		client := env.evm.ExternalCallClient()
 		var trace *CrossChainCallTrace
+		var expErr *ExpectCallErr
 
 		if client == nil {
 			tracePtr := env.evm.Interpreter().TracePtr()
 			if tracePtr >= uint64(len(env.evm.Interpreter().CrossChainCallTraces())) {
 				// todo: deal with this err by unexpect err way
+				// unexpect error
 				return nil, 0, fmt.Errorf("CrossChainCall : tracePtr exceeds the bound of Interpreter.CrossChainCallTraces")
 			}
 			trace = env.evm.Interpreter().CrossChainCallTraces()[tracePtr]
@@ -1137,27 +1146,40 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractToCrossChainCallEnv, in
 			confirms := new(big.Int).SetBytes(getData(input, 4+128, 32)).Uint64()
 
 			if ChainId != env.evm.ChainConfig().ExternalCall.SupportChainId {
-				return nil, 0, fmt.Errorf("CrossChainCall : ChindId %d no support", ChainId)
+				// expect error
+				expErr = NewExpectCallErr(fmt.Sprintf("CrossChainCall: ChindId %d no support", ChainId))
 			}
 
 			receipt, err := client.TransactionReceipt(ctx, txHash)
-			//todo: if unexpectErr happen , set Evm.unexpctErr
+			//todo: if unexpectErr happen , set Evm.crossChainCallUnExoectErr
 			if err != nil {
+				if err == ethereum.NotFound {
+					// expect Error
+					if expErr == nil {
+						expErr = NewExpectCallErr(ethereum.NotFound.Error())
+					}
+				}
+				// unexpect error
 				return nil, 0, err
 			}
 
 			happenedBlockNumber := receipt.BlockNumber
 			latestBlockNumber, err := client.BlockNumber(ctx)
 			if err != nil {
+				// unexpect error
 				return nil, 0, err
 			}
 
 			if latestBlockNumber-happenedBlockNumber.Uint64() < confirms {
+				// unexpect error
 				return nil, 0, fmt.Errorf("confirms no enough")
 			}
 
 			if logIdx >= uint64(len(receipt.Logs)) {
-				return nil, 0, fmt.Errorf("CrossChainCall: logIdX exceeds the bounds of the log array")
+				// expect error
+				if expErr == nil {
+					expErr = NewExpectCallErr("CrossChainCall: logIdx exceeds the bounds of the log array")
+				}
 			}
 			log := receipt.Logs[logIdx]
 
@@ -1170,21 +1192,30 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractToCrossChainCallEnv, in
 				actualDataLen = int(maxDataLen)
 			}
 
-			// calculate actual cost of gas
-			actualGasUsed := len(log.Topics) * 32 * 3 // topics
-			actualGasUsed += actualDataLen * 3        // data
-			actualGasUsed += 32 * 3                   // address
-			actualGasUsed += len(input) * 3
+			if expErr != nil {
+				actualGasUsed := expErr.GasCost(env.perByteGasPrice) // address
+				actualGasUsed += uint64(len(input)) * env.perByteGasPrice
 
-			// return (abi.encodePack( abi.encodePack(log.Address,log.Topics,data) , gas) )
+				errPack, _ := expErr.ABIPack()
+				trace = &CrossChainCallTrace{
+					CallRes: errPack,
+					GasUsed: actualGasUsed,
+				}
+
+				env.evm.interpreter.crossChainCallTraces = append(env.evm.interpreter.crossChainCallTraces, trace)
+				return trace.CallRes, trace.GasUsed, ErrExecutionReverted
+			}
+
+			// the result will return as abi.encodePack(log.Address,log.Topics,data)
 			resultValue := &CallResult{
 				Address: log.Address,
 				Topics:  log.Topics,
 				Data:    data,
-				// todo
-				// success
-				// external call expect err msg
 			}
+
+			// calculate actual cost of gas
+			actualGasUsed := resultValue.GasCost(env.perByteGasPrice)
+			actualGasUsed += uint64(len(input)) * env.perByteGasPrice
 
 			resultValuePack, err := resultValue.ABIPack()
 			if err != nil {
@@ -1192,13 +1223,13 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractToCrossChainCallEnv, in
 			}
 			trace = &CrossChainCallTrace{
 				CallRes: resultValuePack,
-				GasUsed: uint64(actualGasUsed),
+				GasUsed: actualGasUsed,
 			}
 
 			env.evm.interpreter.crossChainCallTraces = append(env.evm.interpreter.crossChainCallTraces, trace)
 		}
 
-		return trace.CallRes, uint64(trace.GasUsed), nil
+		return trace.CallRes, trace.GasUsed, nil
 	}
 
 	return nil, 0, errors.New("unsupported method")
@@ -1228,10 +1259,42 @@ func (c *CallResult) ABIPack() ([]byte, error) {
 	return packResult, nil
 }
 
+func (c *CallResult) GasCost(perBytePrice uint64) uint64 {
+	pack, _ := c.ABIPack()
+	return uint64(len(pack)) * perBytePrice
+}
+
+type ExpectCallErr struct {
+	ErrMsg string
+}
+
+func NewExpectCallErr(errMsg string) *ExpectCallErr {
+	return &ExpectCallErr{ErrMsg: errMsg}
+}
+
+func (c *ExpectCallErr) ABIPack() ([]byte, error) {
+	strType, err := abi.NewType("string", "", nil)
+	if err != nil {
+		return nil, err
+	}
+	arg0 := abi.Argument{Name: "expectCallErr", Type: strType, Indexed: false}
+	var args = abi.Arguments{arg0}
+	packResult, err := args.Pack(c.ErrMsg)
+	if err != nil {
+		return nil, err
+	}
+	return packResult, nil
+}
+
+func (c *ExpectCallErr) GasCost(perBytePrice uint64) uint64 {
+	pack, _ := c.ABIPack()
+	return uint64(len(pack)) * perBytePrice
+}
+
 type CrossChainCallTrace struct {
 	CallRes []byte
 	// todo
-	Success bool
+	Success bool // judge by expect error or unexpect error? // false condition:
 	GasUsed uint64
 }
 
