@@ -329,7 +329,13 @@ var (
 				ConsensusSyncRequestDuration: 500 * time.Millisecond,
 			},
 		},
-		ExternalCall: &ExternalCallConfig{Version: 1, SupportChainId: 4},
+		ExternalCall: &ExternalCallConfig{
+			Enable:                                true,
+			ActiveClient:                          true,
+			VerifyExternalCallResultWhenSyncState: true,
+			Version:                               1,
+			SupportChainId:                        4,
+		},
 	}
 
 	// Web3QMainnetChainConfig contains the chain parameters to run a node on the Web3Q mainnet.
@@ -519,8 +525,11 @@ type TendermintConfig struct {
 }
 
 type ExternalCallConfig struct {
-	Version        uint64 `json:"version"`
-	SupportChainId uint64 `json:"supportChainId"`
+	Enable                                bool   `json:"enable"`
+	ActiveClient                          bool   `json:"activeClient"` // ActiveClient will set as true when consensus initialize the external client
+	VerifyExternalCallResultWhenSyncState bool   `json:"verifyExternalCallResultWhenSyncState"`
+	Version                               uint64 `json:"version"`
+	SupportChainId                        uint64 `json:"supportChainId"`
 }
 
 // String implements the stringer interface

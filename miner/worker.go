@@ -847,12 +847,25 @@ func (w *worker) updateSnapshot(env *environment) {
 func (w *worker) commitTransaction(env *environment, tx *types.Transaction) ([]*types.Log, error) {
 	snap := env.state.Snapshot()
 
-	receipt, err := core.ApplyTransaction(w.chainConfig, w.chain, &env.coinbase, env.gasPool, env.state, env.header, tx, &env.header.GasUsed, *w.chain.GetVMConfig())
+	evmConfig := *w.chain.GetVMConfig()
+	if w.chainConfig.ExternalCall.Enable {
+		if w.chainConfig.ExternalCall.ActiveClient {
+			if w.chain.Engine().ExternalCallClient() == nil {
+				return nil, fmt.Errorf("ExternalCallClient of consensus is nil")
+			}
+			evmConfig.ExternalCallClient = w.chain.Engine().ExternalCallClient()
+		} else {
+			return nil, fmt.Errorf("ExternalCallClient of consensus of proposer shouild not be nil")
+		}
+
+	}
+	receipt, crossChainCallResult, err := core.ApplyTransaction(w.chainConfig, w.chain, &env.coinbase, env.gasPool, env.state, env.header, tx, &env.header.GasUsed, evmConfig)
+
 	if err != nil {
 		env.state.RevertToSnapshot(snap)
 		return nil, err
 	}
-	env.txs = append(env.txs, tx)
+	env.txs = append(env.txs, tx.WithExternalCallResult(crossChainCallResult))
 	env.receipts = append(env.receipts, receipt)
 
 	return receipt.Logs, nil
