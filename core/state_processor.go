@@ -76,8 +76,12 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 	vmenv := vm.NewEVM(blockContext, vm.TxContext{}, statedb, p.config, cfg)
 
 	// set external client of evm
-	if p.bc.engine.ExternalCallClient() != nil {
-		vmenv.SetExternalCallClient(p.bc.engine.ExternalCallClient())
+	// If the node is a validator node, it must ensure that both ExternalCall.Enable and ExternalCall.ActiveClient are true
+	if p.config.ExternalCall.Enable && p.config.ExternalCall.ActiveClient {
+		if p.bc.engine.ExternalCallClient() == nil {
+			return nil, nil, 0, fmt.Errorf("external call client of consensus engine is nil")
+		}
+		cfg.ExternalCallClient = p.bc.engine.ExternalCallClient()
 	}
 
 	// Iterate over and process the individual transactions=
@@ -87,9 +91,16 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 			return nil, nil, 0, fmt.Errorf("could not apply tx %d [%v]: %w", i, tx.Hash().Hex(), err)
 		}
 		statedb.Prepare(tx.Hash(), i)
-		receipt, err := applyTransaction(msg, p.config, p.bc, nil, gp, statedb, blockNumber, blockHash, tx, usedGas, vmenv)
+		receipt, crossChainCallResult, err := applyTransaction(msg, p.config, p.bc, nil, gp, statedb, blockNumber, blockHash, tx, usedGas, vmenv)
 		if err != nil {
 			return nil, nil, 0, fmt.Errorf("could not apply tx %d [%v]: %w", i, tx.Hash().Hex(), err)
+		}
+
+		// If the node is a validator node, it must ensure that both ExternalCall.Enable and ExternalCall.VerifyExternalCallResultWhenSyncState are true
+		if p.config.ExternalCall.VerifyExternalCallResultWhenSyncState && p.config.ExternalCall.Enable {
+			if !bytes.Equal(crossChainCallResult, tx.ExternalCallResult()) {
+				return nil, nil, 0, fmt.Errorf("could not apply tx %d [%v]: %w", i, tx.Hash().Hex(), fmt.Errorf("crossChainCallResult no match, got [%v], want [%v]", common.Bytes2Hex(crossChainCallResult), common.Bytes2Hex(tx.ExternalCallResult())))
+			}
 		}
 		receipts = append(receipts, receipt)
 		allLogs = append(allLogs, receipt.Logs...)
@@ -100,7 +111,7 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 	return receipts, allLogs, *usedGas, nil
 }
 
-func applyTransaction(msg types.Message, config *params.ChainConfig, bc ChainContext, author *common.Address, gp *GasPool, statedb *state.StateDB, blockNumber *big.Int, blockHash common.Hash, tx *types.Transaction, usedGas *uint64, evm *vm.EVM) (*types.Receipt, error) {
+func applyTransaction(msg types.Message, config *params.ChainConfig, bc ChainContext, author *common.Address, gp *GasPool, statedb *state.StateDB, blockNumber *big.Int, blockHash common.Hash, tx *types.Transaction, usedGas *uint64, evm *vm.EVM) (*types.Receipt, []byte, error) {
 	// Create a new context to be used in the EVM environment.
 	txContext := NewEVMTxContext(msg)
 	evm.Reset(txContext, statedb)
@@ -108,26 +119,14 @@ func applyTransaction(msg types.Message, config *params.ChainConfig, bc ChainCon
 	if evm.ExternalCallClient() == nil && len(tx.ExternalCallResult()) != 0 {
 		err := evm.Interpreter().SetCrossChainCallTraces(tx.ExternalCallResult())
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 
 	// Apply the transaction to the current state (included in the env).
 	result, err := ApplyMessage(evm, msg, gp)
 	if err != nil {
-		return nil, err
-	}
-
-	// only the validators and proposer have the ExternalCallClient
-	if evm.ExternalCallClient() != nil {
-		// verify or set transaction.externalCall
-		if len(tx.ExternalCallResult()) == 0 {
-			tx.SetExternalCallResult(result.CrossChainCallResults)
-		} else {
-			if !bytes.Equal(tx.ExternalCallResult(), result.CrossChainCallResults) {
-				return nil, fmt.Errorf("validate external call result of tx with failure")
-			}
-		}
+		return nil, nil, err
 	}
 
 	// Update the state with pending changes.
@@ -161,26 +160,21 @@ func applyTransaction(msg types.Message, config *params.ChainConfig, bc ChainCon
 	receipt.BlockHash = blockHash
 	receipt.BlockNumber = blockNumber
 	receipt.TransactionIndex = uint(statedb.TxIndex())
-	return receipt, err
+	return receipt, result.CrossChainCallResults, err
 }
 
 // ApplyTransaction attempts to apply a transaction to the given state database
 // and uses the input parameters for its environment. It returns the receipt
 // for the transaction, gas used and an error if the transaction failed,
 // indicating the block was invalid.
-func ApplyTransaction(config *params.ChainConfig, bc ChainContext, author *common.Address, gp *GasPool, statedb *state.StateDB, header *types.Header, tx *types.Transaction, usedGas *uint64, cfg vm.Config) (*types.Receipt, error) {
+func ApplyTransaction(config *params.ChainConfig, bc ChainContext, author *common.Address, gp *GasPool, statedb *state.StateDB, header *types.Header, tx *types.Transaction, usedGas *uint64, cfg vm.Config) (*types.Receipt, []byte, error) {
 	msg, err := tx.AsMessage(types.MakeSigner(config, header.Number), header.BaseFee)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	// Create a new context to be used in the EVM environment
 	blockContext := NewEVMBlockContext(header, bc, author)
 	vmenv := vm.NewEVM(blockContext, vm.TxContext{}, statedb, config, cfg)
-
-	// set external client of evm
-	if bc.Engine().ExternalCallClient() != nil {
-		vmenv.SetExternalCallClient(bc.Engine().ExternalCallClient())
-	}
 
 	return applyTransaction(msg, config, bc, author, gp, statedb, header.Number, header.Hash(), tx, usedGas, vmenv)
 }

@@ -103,9 +103,6 @@ type EVM struct {
 	Context BlockContext
 	TxContext
 
-	// External Client
-	externalCallClient *ethclient.Client
-
 	// StateDB gives access to the underlying state
 	StateDB StateDB
 	// Depth is the current call stack
@@ -145,12 +142,8 @@ func NewEVM(blockCtx BlockContext, txCtx TxContext, statedb StateDB, chainConfig
 	return evm
 }
 
-func (evm *EVM) SetExternalCallClient(c *ethclient.Client) {
-	evm.externalCallClient = c
-}
-
 func (evm *EVM) ExternalCallClient() *ethclient.Client {
-	return evm.externalCallClient
+	return evm.Config.ExternalCallClient
 }
 
 // Reset resets the EVM with a new transaction context.Reset

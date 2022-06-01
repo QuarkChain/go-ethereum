@@ -409,6 +409,13 @@ func (tx *Transaction) WithSignature(signer Signer, sig []byte) (*Transaction, e
 	return &Transaction{inner: cpy, time: tx.time}, nil
 }
 
+// WithExternalCallResult returns a new transaction with the given result of external call
+func (tx *Transaction) WithExternalCallResult(res []byte) *Transaction {
+	cpy := tx.inner.copy()
+	cpy.setExternalCallResult(res)
+	return &Transaction{inner: cpy, time: tx.time}
+}
+
 // Transactions implements DerivableList for transactions.
 type Transactions []*Transaction
 

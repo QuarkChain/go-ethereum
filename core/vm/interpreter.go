@@ -17,6 +17,7 @@
 package vm
 
 import (
+	"github.com/ethereum/go-ethereum/ethclient"
 	"hash"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -35,6 +36,8 @@ type Config struct {
 	JumpTable *JumpTable // EVM instruction table, automatically populated if unset
 
 	ExtraEips []int // Additional EIPS that are to be enabled
+
+	ExternalCallClient *ethclient.Client
 }
 
 // ScopeContext contains the things that are per-call, such as stack and memory,

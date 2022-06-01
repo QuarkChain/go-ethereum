@@ -103,11 +103,24 @@ func (b *BlockGen) AddTxWithChain(bc *BlockChain, tx *types.Transaction) {
 		b.SetCoinbase(common.Address{})
 	}
 	b.statedb.Prepare(tx.Hash(), len(b.txs))
-	receipt, err := ApplyTransaction(b.config, bc, &b.header.Coinbase, b.gasPool, b.statedb, b.header, tx, &b.header.GasUsed, vm.Config{})
+
+	evmConfig := vm.Config{}
+	if bc.chainConfig.ExternalCall.Enable {
+		if bc.chainConfig.ExternalCall.ActiveClient {
+			if bc.Engine().ExternalCallClient() == nil {
+				panic(fmt.Errorf("ExternalCallClient of consensus is nil"))
+			}
+			evmConfig.ExternalCallClient = bc.Engine().ExternalCallClient()
+		} else {
+			panic(fmt.Errorf("ExternalCallClient of consensus of proposer shouild not be nil"))
+		}
+	}
+
+	receipt, crossChainCallResult, err := ApplyTransaction(b.config, bc, &b.header.Coinbase, b.gasPool, b.statedb, b.header, tx, &b.header.GasUsed, evmConfig)
 	if err != nil {
 		panic(err)
 	}
-	b.txs = append(b.txs, tx)
+	b.txs = append(b.txs, tx.WithExternalCallResult(crossChainCallResult))
 	b.receipts = append(b.receipts, receipt)
 }
 

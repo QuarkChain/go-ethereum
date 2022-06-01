@@ -1123,6 +1123,7 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractToCrossChainCallEnv, in
 		if client == nil {
 			tracePtr := env.evm.Interpreter().TracePtr()
 			if tracePtr >= uint64(len(env.evm.Interpreter().CrossChainCallTraces())) {
+				// todo: deal with this err by unexpect err way
 				return nil, 0, fmt.Errorf("CrossChainCall : tracePtr exceeds the bound of Interpreter.CrossChainCallTraces")
 			}
 			trace = env.evm.Interpreter().CrossChainCallTraces()[tracePtr]
@@ -1140,6 +1141,7 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractToCrossChainCallEnv, in
 			}
 
 			receipt, err := client.TransactionReceipt(ctx, txHash)
+			//todo: if unexpectErr happen , set Evm.unexpctErr
 			if err != nil {
 				return nil, 0, err
 			}
@@ -1179,6 +1181,9 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractToCrossChainCallEnv, in
 				Address: log.Address,
 				Topics:  log.Topics,
 				Data:    data,
+				// todo
+				// success
+				// external call expect err msg
 			}
 
 			resultValuePack, err := resultValue.ABIPack()
@@ -1225,6 +1230,8 @@ func (c *CallResult) ABIPack() ([]byte, error) {
 
 type CrossChainCallTrace struct {
 	CallRes []byte
+	// todo
+	Success bool
 	GasUsed uint64
 }
 
