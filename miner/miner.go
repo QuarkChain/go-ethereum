@@ -137,6 +137,7 @@ func (miner *Miner) update() {
 			}
 		case addr := <-miner.startCh:
 			miner.SetEtherbase(addr)
+			miner.worker.init()
 			if canStart {
 				miner.worker.start()
 			}
