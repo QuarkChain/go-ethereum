@@ -37,13 +37,14 @@ directory.
 |    Command    | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | :-----------: | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 |  **`geth`**   | Our main Ethereum CLI client. It is the entry point into the Ethereum network (main-, test- or private net), capable of running as a full node (default), archive node (retaining all historical state) or a light node (retrieving data live). It can be used by other processes as a gateway into the Ethereum network via JSON RPC endpoints exposed on top of HTTP, WebSocket and/or IPC transports. `geth --help` and the [CLI page](https://geth.ethereum.org/docs/interface/command-line-options) for command line options.          |
-|   `clef`    | Stand-alone signing tool, which can be used as a backend signer for `geth`.  |
+|   `clef`      | Stand-alone signing tool, which can be used as a backend signer for `geth`.  |
 |   `devp2p`    | Utilities to interact with nodes on the networking layer, without running a full blockchain. |
 |   `abigen`    | Source code generator to convert Ethereum contract definitions into easy to use, compile-time type-safe Go packages. It operates on plain [Ethereum contract ABIs](https://docs.soliditylang.org/en/develop/abi-spec.html) with expanded functionality if the contract bytecode is also available. However, it also accepts Solidity source files, making development much more streamlined. Please see our [Native DApps](https://geth.ethereum.org/docs/dapp/native-bindings) page for details. |
 |  `bootnode`   | Stripped down version of our Ethereum client implementation that only takes part in the network node discovery protocol, but does not run any of the higher level application protocols. It can be used as a lightweight bootstrap node to aid in finding peers in private networks.                                                                                                                                                                                                                                                                 |
 |     `evm`     | Developer utility version of the EVM (Ethereum Virtual Machine) that is capable of running bytecode snippets within a configurable environment and execution mode. Its purpose is to allow isolated, fine-grained debugging of EVM opcodes (e.g. `evm --code 60ff60ff --debug run`).                                                                                                                                                                                                                                                                     |
 |   `rlpdump`   | Developer utility tool to convert binary RLP ([Recursive Length Prefix](https://eth.wiki/en/fundamentals/rlp)) dumps (data encoding used by the Ethereum protocol both network as well as consensus wise) to user-friendlier hierarchical representation (e.g. `rlpdump --hex CE0183FFFFFFC4C304050583616263`).                                                                                                                                                                                                                                 |
 |   `puppeth`   | a CLI wizard that aids in creating a new Ethereum network.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `w3qrelayer` | Relayer service to upload web3q epoch header to mainnet. |
 
 ## Running `geth`
 
@@ -129,6 +130,24 @@ $ geth --ropsten console
 ```
 
 *Note: Older Geth configurations store the Ropsten database in the `testnet` subdirectory.*
+
+### Full node on the web3q galileo test network
+
+Go Ethereum supports connecting to web3q test network called [*web3q_galileo*](https://explorer.galileo.web3q.io/) which uses consensus Tendermint.
+
+```shell
+$ geth --web3q_galileo console
+```
+
+### Full node on the web3q testnet network
+
+Go Ethereum supports connecting to web3q test network called [*web3q_testnet*](https://explorer.galileo.web3q.io/) 
+which uses consensus Tendermint, and the validtor set can be updated through Rinkeby-base [staking UI](https://galileo.web3q.io/staking.w3q/#/).
+
+
+```shell
+$ geth --web3q_testnet console
+```
 
 ### Configuration
 
@@ -325,6 +344,19 @@ Which will start mining blocks and transactions on a single CPU thread, creditin
 proceedings to the account specified by `--miner.etherbase`. You can further tune the mining
 by changing the default gas limit blocks converge to (`--miner.targetgaslimit`) and the price
 transactions are accepted at (`--miner.gasprice`).
+
+If using tendermint as consensus (like web3q_galileo or web3q_testnet), since tendermint consensus 
+requires using p2p protocol to reach consensus among nodes, it uses 33333 as default port and can be 
+specified by `--validator.port`. Tendermint node key can also be specified by `--validator.nodekey`.
+
+If the tendermint consensus validator set need to update according to staking state, the following parameters 
+need to specify for the miner:
+
+  * `--validator.rpc` rpc for ethclient to get ValidatorSet from contract
+  * `--validator.chainid` Chain ID which Validator contract on
+  * `--validator.contract` Validator contract address
+  * `--validator.changeepochid` Epoch to enable updating ValidatorSet from the contract
+
 
 ## Contribution
 
