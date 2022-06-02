@@ -220,7 +220,7 @@ func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas 
 	}
 
 	if isPrecompile {
-		ret, gas, err = RunPrecompiledContract(&PrecompiledContractToCrossChainCallEnv{evm}, p, input, gas)
+		ret, gas, err = RunPrecompiledContract(&PrecompiledContractToCrossChainCallEnv{evm, 3}, p, input, gas)
 	} else {
 		// Initialise a new contract and set the code that is to be used by the EVM.
 		// The contract is a scoped environment for this execution context only.

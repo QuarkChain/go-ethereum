@@ -112,12 +112,12 @@ func TestCrossChainCall(t *testing.T) {
 		t.Error(err)
 	}
 
-	evm := NewEVM(BlockContext{}, TxContext{}, nil, params.Web3QGalileoChainConfig, Config{})
-	evm.SetExternalCallClient(eClient)
+	evmConfig := Config{ExternalCallClient: eClient}
+	evm := NewEVM(BlockContext{}, TxContext{}, nil, params.Web3QGalileoChainConfig, evmConfig)
 	evmInterpreter := NewEVMInterpreter(evm, evm.Config)
 	evm.interpreter = evmInterpreter
 
-	if res, _, err := RunPrecompiledContract(&PrecompiledContractToCrossChainCallEnv{evm}, p, in, gas); err != nil {
+	if res, _, err := RunPrecompiledContract(&PrecompiledContractToCrossChainCallEnv{evm, 3}, p, in, gas); err != nil {
 		t.Error(err)
 	} else {
 		if !bytes.Equal(common.Hex2Bytes(test.Want), res) {
