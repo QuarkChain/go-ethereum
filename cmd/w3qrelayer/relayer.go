@@ -201,7 +201,8 @@ func runRelay(cmd *cobra.Command, args []string) {
 
 			err = relayer.SubmitHeaderToContract(header)
 			if err == nil {
-				time.Sleep((comfirmCount + 5) * blockTime * time.Second) // wait for the tx been confirmed
+				log.Info("wait for tx been confirmed", "sleep time (seconds)", (comfirmCount+5)*blockTime)
+				time.Sleep((comfirmCount + 5) * blockTime * time.Second)
 				continue
 			}
 			log.Error("SubmitHeaderToContract failed", "err", err.Error())
