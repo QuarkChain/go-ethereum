@@ -125,6 +125,8 @@ type EVM struct {
 	// available gas is calculated in gasCall* according to the 63/64 rule and later
 	// applied in opCall*.
 	callGasTemp uint64
+
+	crossChainCallUnExpectErr error
 }
 
 // NewEVM returns a new EVM. The returned EVM is not thread safe and should
@@ -140,6 +142,16 @@ func NewEVM(blockCtx BlockContext, txCtx TxContext, statedb StateDB, chainConfig
 	}
 	evm.interpreter = NewEVMInterpreter(evm, config)
 	return evm
+}
+
+func (evm *EVM) setCrossChainCallUnExpectErr(err error) {
+	if evm.crossChainCallUnExpectErr == nil {
+		evm.crossChainCallUnExpectErr = err
+	}
+}
+
+func (evm *EVM) CrossChainCallUnExpectErr() error {
+	return evm.crossChainCallUnExpectErr
 }
 
 func (evm *EVM) ExternalCallClient() *ethclient.Client {

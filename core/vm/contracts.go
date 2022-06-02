@@ -1131,9 +1131,9 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractToCrossChainCallEnv, in
 		if client == nil {
 			tracePtr := env.evm.Interpreter().TracePtr()
 			if tracePtr >= uint64(len(env.evm.Interpreter().CrossChainCallTraces())) {
-				// todo: deal with this err by unexpect err way
 				// unexpect error
-				return nil, 0, fmt.Errorf("CrossChainCall : tracePtr exceeds the bound of Interpreter.CrossChainCallTraces")
+				env.evm.setCrossChainCallUnExpectErr(ErrOutOfBoundsTracePtr)
+				return nil, 0, ErrOutOfBoundsTracePtr
 			}
 			trace = env.evm.Interpreter().CrossChainCallTraces()[tracePtr]
 			env.evm.Interpreter().AddTracePtr()
@@ -1147,11 +1147,10 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractToCrossChainCallEnv, in
 
 			if ChainId != env.evm.ChainConfig().ExternalCall.SupportChainId {
 				// expect error
-				expErr = NewExpectCallErr(fmt.Sprintf("CrossChainCall: ChindId %d no support", ChainId))
+				expErr = NewExpectCallErr(fmt.Sprintf("CrossChainCall:ChindId %d no support", ChainId))
 			}
 
 			receipt, err := client.TransactionReceipt(ctx, txHash)
-			//todo: if unexpectErr happen , set Evm.crossChainCallUnExoectErr
 			if err != nil {
 				if err == ethereum.NotFound {
 					// expect Error
@@ -1160,6 +1159,7 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractToCrossChainCallEnv, in
 					}
 				}
 				// unexpect error
+				env.evm.setCrossChainCallUnExpectErr(err)
 				return nil, 0, err
 			}
 
@@ -1167,18 +1167,21 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractToCrossChainCallEnv, in
 			latestBlockNumber, err := client.BlockNumber(ctx)
 			if err != nil {
 				// unexpect error
+				env.evm.setCrossChainCallUnExpectErr(err)
 				return nil, 0, err
 			}
 
 			if latestBlockNumber-happenedBlockNumber.Uint64() < confirms {
-				// unexpect error
-				return nil, 0, fmt.Errorf("confirms no enough")
+				// expect error
+				if expErr == nil {
+					expErr = NewExpectCallErr("CrossChainCall:confirms no enough")
+				}
 			}
 
 			if logIdx >= uint64(len(receipt.Logs)) {
 				// expect error
 				if expErr == nil {
-					expErr = NewExpectCallErr("CrossChainCall: logIdx exceeds the bounds of the log array")
+					expErr = NewExpectCallErr("CrossChainCall:logIdx out-of-bound")
 				}
 			}
 			log := receipt.Logs[logIdx]
@@ -1219,6 +1222,7 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractToCrossChainCallEnv, in
 
 			resultValuePack, err := resultValue.ABIPack()
 			if err != nil {
+				env.evm.setCrossChainCallUnExpectErr(err)
 				return nil, 0, err
 			}
 			trace = &CrossChainCallTrace{

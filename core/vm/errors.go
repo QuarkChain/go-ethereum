@@ -38,6 +38,9 @@ var (
 	ErrNonceUintOverflow        = errors.New("nonce uint64 overflow")
 	ErrCodeInsufficientStake    = errors.New("insufficient staking for code")
 
+	// ErrOutOfBoundsTracePtr which happen when execute operation of cross chain call
+	ErrOutOfBoundsTracePtr = errors.New("CrossChainCall: tracePtr out-of-bound")
+
 	// errStopToken is an internal token indicating interpreter loop termination,
 	// never returned to outside callers.
 	errStopToken = errors.New("stop token")
