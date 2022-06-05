@@ -19,7 +19,9 @@ package core
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/ecdsa"
+	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/consensus/clique"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/state/snapshot"
@@ -28,6 +30,7 @@ import (
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/rlp"
 	"math/big"
+	"strings"
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -72,6 +75,253 @@ func (ctx *TestChainContext) Engine() consensus.Engine {
 func (ctx *TestChainContext) GetHeader(common.Hash, uint64) *types.Header {
 	return nil
 }
+
+type WrapTx struct {
+	Tx           *types.Transaction
+	Args         *CrossChainCallArgment
+	ExpectTxData func() ([]byte, error)
+	ExpectTraces []*ExpectTrace
+	UnExpectErr  error
+}
+
+func (wt *WrapTx) SetUnexpectErr(err error) {
+	wt.UnExpectErr = err
+}
+
+func NewWrapTx(tx *types.Transaction, args *CrossChainCallArgment) *WrapTx {
+	return &WrapTx{Tx: tx, Args: args}
+}
+
+func (wt *WrapTx) VerifyCallResult(crossCallResult []byte, unexpErr error, t *testing.T) {
+	if unexpErr != nil {
+		if wt.UnExpectErr == nil {
+			t.Error("happen unexpect err:", unexpErr)
+		}
+
+		if unexpErr != wt.UnExpectErr {
+			t.Error("\nexpect happen unexpect err:", wt.UnExpectErr, "\nactual happen unexpect err:", wt.UnExpectErr)
+		} else {
+			t.Log("WoW! unexpect err match:", unexpErr.Error())
+		}
+		// todo
+	}
+
+	tracesWithVersion := &vm.CrossChainCallTracesWithVersion{}
+	err := rlp.DecodeBytes(crossCallResult, tracesWithVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	actualTraces := tracesWithVersion.Traces
+
+	if len(wt.ExpectTraces) != len(actualTraces) {
+		t.Fatalf("wrapTx.ExpectTraces length [%d] no match actualTraces length [%d]", len(wt.ExpectTraces), len(actualTraces))
+	}
+
+	for i, v := range actualTraces {
+		cs := v.CallRes
+		wt.ExpectTraces[i].verifyRes(cs, t, i)
+	}
+
+}
+
+type ExpectTrace struct {
+	CallResultBytes []byte // call result
+	ExpectErrBytes  []byte
+	UnExpectErr     error
+}
+
+func NewExpectTrace(callResultBytes []byte, expectErrBytes []byte, unExpectErr error) *ExpectTrace {
+	return &ExpectTrace{CallResultBytes: callResultBytes, ExpectErrBytes: expectErrBytes, UnExpectErr: unExpectErr}
+}
+
+func (et *ExpectTrace) compareRes(cs []byte) bool {
+	if len(et.ExpectErrBytes) != 0 {
+		return bytes.Equal(et.ExpectErrBytes, cs)
+	} else {
+		return bytes.Equal(et.CallResultBytes, cs)
+	}
+}
+
+func (et *ExpectTrace) verifyRes(cs []byte, t *testing.T, traceIndex int) {
+	if len(et.ExpectErrBytes) != 0 {
+		exp := vm.NewExpectCallErr("")
+		err := exp.ABIUnpack(et.ExpectErrBytes)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		act := vm.NewExpectCallErr("")
+		err = act.ABIUnpack(cs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if bytes.Equal(et.ExpectErrBytes, cs) {
+			t.Logf("[TraceIndex %d] expect err match:%s", traceIndex, exp.Error())
+		} else {
+			t.Errorf("[TraceIndex %d] expect err no match , expect %s , actual %s", traceIndex, exp.Error(), act.Error())
+		}
+	} else {
+		if bytes.Equal(et.CallResultBytes, cs) {
+			t.Logf("[TraceIndex %d] res match!!! ", traceIndex)
+		} else {
+			t.Errorf("[TraceIndex %d] res no match ,expect : %s, actual: %s", traceIndex, common.Bytes2Hex(et.CallResultBytes), common.Bytes2Hex(cs))
+		}
+	}
+}
+
+type CrossChainCallArgment struct {
+	ChainId     uint64
+	TxHash      common.Hash
+	LogIdx      uint64
+	MaxDataLen  uint64
+	Confirms    uint64
+	contractAbi abi.ABI
+	env         *vm.PrecompiledContractToCrossChainCallEnv
+}
+
+const CrossChainCallContract = `
+[
+	{
+		"inputs": [
+			{
+				"internalType": "uint256",
+				"name": "chainId",
+				"type": "uint256"
+			},
+			{
+				"internalType": "bytes32",
+				"name": "txHash",
+				"type": "bytes32"
+			},
+			{
+				"internalType": "uint256",
+				"name": "logIdx",
+				"type": "uint256"
+			},
+			{
+				"internalType": "uint256",
+				"name": "maxDataLen",
+				"type": "uint256"
+			},
+			{
+				"internalType": "uint256",
+				"name": "confirms",
+				"type": "uint256"
+			}
+		],
+		"name": "callOnce",
+		"outputs": [
+			{
+				"internalType": "bytes",
+				"name": "",
+				"type": "bytes"
+			}
+		],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "uint256",
+				"name": "chainId",
+				"type": "uint256"
+			},
+			{
+				"internalType": "bytes32",
+				"name": "txHash",
+				"type": "bytes32"
+			},
+			{
+				"internalType": "uint256",
+				"name": "logIdx",
+				"type": "uint256"
+			},
+			{
+				"internalType": "uint256",
+				"name": "maxDataLen",
+				"type": "uint256"
+			},
+			{
+				"internalType": "uint256",
+				"name": "confirms",
+				"type": "uint256"
+			}
+		],
+		"name": "callTwice",
+		"outputs": [
+			{
+				"internalType": "bytes",
+				"name": "",
+				"type": "bytes"
+			},
+			{
+				"internalType": "bytes",
+				"name": "",
+				"type": "bytes"
+			}
+		],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [],
+		"name": "crossChainCallContract",
+		"outputs": [
+			{
+				"internalType": "address",
+				"name": "",
+				"type": "address"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	}
+]`
+
+func NewCrossChainCallArgment(chainconfig *params.ChainConfig, client *ethclient.Client, chainId uint64, txHash common.Hash, logIdx uint64, maxDataLen uint64, confirms uint64) *CrossChainCallArgment {
+	evmConfig := vm.Config{ExternalCallClient: client}
+	evm := vm.NewEVM(vm.BlockContext{}, vm.TxContext{}, nil, chainconfig, evmConfig)
+	env := vm.NewPrecompiledContractToCrossChainCallEnv(evm, 3)
+	abi, err := abi.JSON(strings.NewReader(CrossChainCallContract))
+	if err != nil {
+		panic(err)
+	}
+	return &CrossChainCallArgment{ChainId: chainId, TxHash: txHash, LogIdx: logIdx, MaxDataLen: maxDataLen, Confirms: confirms, contractAbi: abi, env: env}
+}
+
+func (c *CrossChainCallArgment) CallOncePack() ([]byte, error) {
+	return c.contractAbi.Pack("callOnce", big.NewInt(int64(c.ChainId)), c.TxHash, big.NewInt(int64(c.LogIdx)), big.NewInt(int64(c.MaxDataLen)), big.NewInt(int64(c.Confirms)))
+}
+
+func (c *CrossChainCallArgment) CallTwicePack() ([]byte, error) {
+	return c.contractAbi.Pack("callTwice", big.NewInt(int64(c.ChainId)), c.TxHash, big.NewInt(int64(c.LogIdx)), big.NewInt(int64(c.MaxDataLen)), big.NewInt(int64(c.Confirms)))
+}
+
+func (c *CrossChainCallArgment) CrossChainCallResult() (*vm.CallResult, *vm.ExpectCallErr, error) {
+	return vm.GetExternalLog(context.Background(), c.env, c.ChainId, c.TxHash, c.LogIdx, c.MaxDataLen, c.Confirms)
+}
+
+func (c *CrossChainCallArgment) CrossChainCallResultToExpectCallResult() *ExpectTrace {
+	cs, expErr, unExpErr := vm.GetExternalLog(context.Background(), c.env, c.ChainId, c.TxHash, c.LogIdx, c.MaxDataLen, c.Confirms)
+	if unExpErr != nil {
+		return NewExpectTrace(nil, nil, unExpErr)
+	} else if expErr != nil {
+		pack, err := expErr.ABIPack()
+		if err != nil {
+			panic(err)
+		}
+		return NewExpectTrace(nil, pack, nil)
+	} else {
+		pack, err := cs.ABIPack()
+		if err != nil {
+			panic(err)
+		}
+		return NewExpectTrace(pack, nil, nil)
+	}
+}
+
 func TestApplyTransaction(t *testing.T) {
 	var (
 		config = &params.ChainConfig{
@@ -91,17 +341,18 @@ func TestApplyTransaction(t *testing.T) {
 			LondonBlock:         big.NewInt(0),
 			PisaBlock:           big.NewInt(0),
 			ArrowGlacierBlock:   nil,
-			ExternalCall:        &params.ExternalCallConfig{Version: 1, SupportChainId: 4},
+			ExternalCall: &params.ExternalCallConfig{
+				Version:        1,
+				SupportChainId: 4,
+			},
 		}
-		//signer  = types.LatestSigner(config)
 		key1, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		addr1   = crypto.PubkeyToAddress(key1.PublicKey)
-		//key2, _ = crypto.HexToECDSA("0202020202020202020202020202020202020202020202020202002020202020")
 	)
 
 	var (
-		db           = rawdb.NewMemoryDatabase()
-		preAddr      = common.HexToAddress("0x0000000000000000000000000000000000033303")
+		db = rawdb.NewMemoryDatabase()
+		//preAddr      = common.HexToAddress("0x0000000000000000000000000000000000033303")
 		contractAddr = common.HexToAddress("0xa000000000000000000000000000000000000aaa")
 		gspec        = &Genesis{
 			Config: config,
@@ -123,9 +374,27 @@ func TestApplyTransaction(t *testing.T) {
 		}
 
 		globalchainId = config.ChainID
+		genesis       = gspec.MustCommit(db)
+	)
 
-		externalCallTxs = []*types.Transaction{
-			types.NewTx(&types.DynamicFeeTx{
+	externalClient, err := ethclient.Dial("https://rinkeby.infura.io/v3/4e3e18f80d8d4ad5959b7404e85e0143")
+	if err != nil {
+		t.Error(err)
+	}
+
+	const RinkebyTxHash = "0x7ba399701b823976c367686562ca9fa11ecc81341d2b0026c5615740bd164e46"
+
+	Args_CallOnce := NewCrossChainCallArgment(config, externalClient, 4, common.HexToHash(RinkebyTxHash), 0, 300, 10)
+
+	Args_ExpectErrAsLogIdxExceed := NewCrossChainCallArgment(config, externalClient, 4, common.HexToHash(RinkebyTxHash), 2, 300, 10)
+
+	Args_Twice_Trace0 := NewCrossChainCallArgment(config, externalClient, 4, common.HexToHash(RinkebyTxHash), 0, 300, 10)
+	Args_Twice_Trace1 := NewCrossChainCallArgment(config, externalClient, 4, common.HexToHash(RinkebyTxHash), 1, 300, 10)
+	Args_CallTwice := NewCrossChainCallArgment(config, externalClient, 4, common.HexToHash(RinkebyTxHash), 0, 300, 10)
+
+	_wrapTxs := []*WrapTx{
+		&WrapTx{
+			Tx: types.NewTx(&types.DynamicFeeTx{
 				ChainID:   globalchainId,
 				Nonce:     0,
 				To:        &contractAddr,
@@ -135,8 +404,14 @@ func TestApplyTransaction(t *testing.T) {
 				GasFeeCap: big.NewInt(6000000000),
 				Data:      common.FromHex("0x518a351000000000000000000000000000000000000000000000000000000000000000047ba399701b823976c367686562ca9fa11ecc81341d2b0026c5615740bd164e460000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000012c000000000000000000000000000000000000000000000000000000000000000a"),
 			}),
-
-			types.NewTx(&types.DynamicFeeTx{
+			Args:         Args_CallOnce,
+			ExpectTxData: Args_CallOnce.CallOncePack,
+			ExpectTraces: []*ExpectTrace{
+				Args_CallOnce.CrossChainCallResultToExpectCallResult(),
+			},
+		},
+		&WrapTx{
+			Tx: types.NewTx(&types.DynamicFeeTx{
 				ChainID:   globalchainId,
 				Nonce:     0,
 				To:        &contractAddr,
@@ -144,48 +419,58 @@ func TestApplyTransaction(t *testing.T) {
 				Gas:       5000000,
 				GasTipCap: big.NewInt(1000000000),
 				GasFeeCap: big.NewInt(6000000000),
-				Data:      common.FromHex("0x2061536200000000000000000000000000000000000000000000000000000000000000047ba399701b823976c367686562ca9fa11ecc81341d2b0026c5615740bd164e46000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000c8000000000000000000000000000000000000000000000000000000000000000a"),
-				//ExternalCallResult: common.FromHex("1122334455667788998877665544332211"),
+				Data:      common.FromHex("518a351000000000000000000000000000000000000000000000000000000000000000047ba399701b823976c367686562ca9fa11ecc81341d2b0026c5615740bd164e460000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000012c000000000000000000000000000000000000000000000000000000000000000a"),
 			}),
-
-			types.NewTx(&types.DynamicFeeTx{
+			Args:         Args_ExpectErrAsLogIdxExceed,
+			ExpectTxData: Args_ExpectErrAsLogIdxExceed.CallOncePack,
+			ExpectTraces: []*ExpectTrace{
+				Args_ExpectErrAsLogIdxExceed.CrossChainCallResultToExpectCallResult(),
+			},
+		},
+		&WrapTx{
+			Tx: types.NewTx(&types.DynamicFeeTx{
+				ChainID:   globalchainId,
 				Nonce:     0,
-				To:        &preAddr,
+				To:        &contractAddr,
 				Value:     big.NewInt(0),
 				Gas:       5000000,
 				GasTipCap: big.NewInt(1000000000),
 				GasFeeCap: big.NewInt(6000000000),
-				Data:      common.FromHex("0x99e20070000000000000000000000000000000000000000000000000000000000000000419c0c9b16f4e5cf388581ce71aea86641fdd877ce11af2c60d8db523cd2e02e3000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000000000000000000000000000000000000000000a"),
-				//ExternalCallResult: common.FromHex("1122334455667788998877665544332211"),
+				Data:      common.FromHex("0x2061536200000000000000000000000000000000000000000000000000000000000000047ba399701b823976c367686562ca9fa11ecc81341d2b0026c5615740bd164e460000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000012c000000000000000000000000000000000000000000000000000000000000000a"),
 			}),
-		}
-
-		expectResults = []string{
-			"f901ce01f901caf901c7b901c00000000000000000000000000000000000000000000000000000000000000020000000000000000000000000751320c36f413a6280ad54487766ae0f780b6f58000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000c00000000000000000000000000000000000000000000000000000000000000002dce721dc2d078c030530aeb5511eb76663a705797c2a4a4d41a70dddfb8efca9000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000c00000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000028bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb0000000000000000000000000000000000000000000000008082072c",
-			"f902d801f902d4f901c7b901c00000000000000000000000000000000000000000000000000000000000000020000000000000000000000000751320c36f413a6280ad54487766ae0f780b6f58000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000c00000000000000000000000000000000000000000000000000000000000000002dce721dc2d078c030530aeb5511eb76663a705797c2a4a4d41a70dddfb8efca9000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000c00000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000028bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb0000000000000000000000000000000000000000000000008082072cf90107b901000000000000000000000000000000000000000000000000000000000000000020000000000000000000000000751320c36f413a6280ad54487766ae0f780b6f58000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000c0000000000000000000000000000000000000000000000000000000000000000244166b8e7efa954701ff28cba73852e3bbb791ac94a02de05fba64d11492fe9f00000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000000808204ec",
-			"f901ae01f901aaf901a7b901a00000000000000000000000000000000000000000000000000000000000000020000000000000000000000000a1230a772e3501b09fc6dcae819889bf30d1415e000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000c00000000000000000000000000000000000000000000000000000000000000002dce721dc2d078c030530aeb5511eb76663a705797c2a4a4d41a70dddfb8efca9000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000002aaaa000000000000000000000000000000000000000000000000000000000000808206cc",
-		}
-
-		genesis = gspec.MustCommit(db)
-	)
-
-	// prepare tx
-	var signTxs []*types.Transaction
-	for _, extx := range externalCallTxs {
-		signer := types.LatestSignerForChainID(globalchainId)
-		signTx, err := types.SignTx(extx, signer, key1)
-		if err != nil {
-			t.Error(err)
-		}
-		signTxs = append(signTxs, signTx)
+			Args:         Args_CallTwice,
+			ExpectTxData: Args_CallTwice.CallTwicePack,
+			ExpectTraces: []*ExpectTrace{
+				Args_Twice_Trace0.CrossChainCallResultToExpectCallResult(),
+				Args_Twice_Trace1.CrossChainCallResultToExpectCallResult(),
+			},
+		},
 	}
 
-	for i, tx := range signTxs {
-		// prepare chainContext
-		externalClient, err := ethclient.Dial("https://rinkeby.infura.io/v3/4e3e18f80d8d4ad5959b7404e85e0143")
+	var wrapTxs []*WrapTx
+	for i, wrapTx := range _wrapTxs {
+		signer := types.LatestSignerForChainID(globalchainId)
+		signTx, err := types.SignTx(wrapTx.Tx, signer, key1)
 		if err != nil {
 			t.Error(err)
 		}
+
+		wrapTx.Tx = signTx
+
+		txData, err := wrapTx.ExpectTxData()
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if common.Bytes2Hex(txData) != common.Bytes2Hex(wrapTx.Tx.Data()) {
+			t.Fatalf("%d Tx data no match. wrapTx.ExpectTxData():%s ,", i, common.Bytes2Hex(txData))
+		}
+
+		wrapTxs = append(wrapTxs, wrapTx)
+	}
+
+	for _, wtx := range wrapTxs {
+		// prepare chainContext
 		cli := &clique.Clique{}
 		wtm := NewWrapTendermint(cli, externalClient)
 		chainContext := NewTestChainContext(wtm)
@@ -202,7 +487,10 @@ func TestApplyTransaction(t *testing.T) {
 		vmconfig := vm.Config{Debug: true, Tracer: tracer, ExternalCallClient: externalClient}
 
 		_, statedb := MakePreState(db, gspec.Alloc, false)
-		_, crossCallResult, err := ApplyTransaction(config, chainContext, &addr1, gaspool, statedb, block.Header(), tx, &usedGas, vmconfig)
+		_, crossCallResult, err := ApplyTransaction(config, chainContext, &addr1, gaspool, statedb, block.Header(), wtx.Tx, &usedGas, vmconfig)
+
+		wtx.VerifyCallResult(crossCallResult, err, t)
+
 		w.Flush()
 		if err != nil {
 			t.Log(err)
@@ -213,17 +501,7 @@ func TestApplyTransaction(t *testing.T) {
 			}
 		}
 
-		if common.Bytes2Hex(crossCallResult) != expectResults[i] {
-			t.Errorf("%d Tx ExternalCallResult no match. got:%s", i, common.Bytes2Hex(crossCallResult))
-		}
-
-		resDecode := &vm.CrossChainCallTracesWithVersion{}
-		err = rlp.DecodeBytes(crossCallResult, resDecode)
-		if err != nil {
-			t.Error(err)
-		}
 	}
-
 }
 
 // TestStateProcessorErrors tests the output from the 'core' errors
