@@ -164,12 +164,12 @@ func (s *StateDB) SstorageMaxKVSize(addr common.Address) uint64 {
 }
 
 func (s *StateDB) SstorageWrite(addr common.Address, kvIdx uint64, data []byte) error {
-	if _, ok := s.shardedStorage[addr]; !ok {
-		s.shardedStorage[addr] = make(map[uint64][]byte)
-	}
-
 	if len(data) > int(s.SstorageMaxKVSize(addr)) {
 		return fmt.Errorf("put too large")
+	}
+
+	if _, ok := s.shardedStorage[addr]; !ok {
+		s.shardedStorage[addr] = make(map[uint64][]byte)
 	}
 
 	s.journal.append(sstorageChange{
@@ -1038,7 +1038,10 @@ func (s *StateDB) Commit(deleteEmptyObjects bool) (common.Hash, error) {
 	triedb := s.db.TrieDB()
 	for addr, m := range s.shardedStorage {
 		for k, v := range m {
-			triedb.SstorageWrite(addr, k, v)
+			err := triedb.SstorageWrite(addr, k, v)
+			if err != nil {
+				log.Crit("failed to flush sstorage data", "err", err)
+			}
 		}
 	}
 	s.shardedStorage = make(map[common.Address]map[uint64][]byte)
