@@ -21,6 +21,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ecdsa"
+	"fmt"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/consensus/clique"
 	"github.com/ethereum/go-ethereum/core/state"
@@ -77,15 +78,26 @@ func (ctx *TestChainContext) GetHeader(common.Hash, uint64) *types.Header {
 }
 
 type WrapTx struct {
-	Tx           *types.Transaction
-	Args         *CrossChainCallArgment
-	ExpectTxData func() ([]byte, error)
-	ExpectTraces []*ExpectTrace
-	UnExpectErr  error
+	Tx                    *types.Transaction
+	TxWithExternalCallRes *types.Transaction
+	Args                  *CrossChainCallArgment
+	ExpectTxData          func() ([]byte, error)
+	ExpectTraces          []*ExpectTrace
+	UnExpectErr           error
+	Index                 int
+}
+
+func (wt *WrapTx) SetTxWithExternalCallRes(crossChainCallRes []byte) {
+	cpy := wt.Tx.WithExternalCallResult(crossChainCallRes)
+	wt.TxWithExternalCallRes = cpy
 }
 
 func (wt *WrapTx) SetUnexpectErr(err error) {
 	wt.UnExpectErr = err
+}
+
+func (wt *WrapTx) MarkTransitionIndex() string {
+	return fmt.Sprintf("[Transaction Index %d]", wt.Index)
 }
 
 func NewWrapTx(tx *types.Transaction, args *CrossChainCallArgment) *WrapTx {
@@ -163,7 +175,7 @@ func (et *ExpectTrace) verifyRes(cs []byte, t *testing.T, traceIndex int) {
 		}
 	} else {
 		if bytes.Equal(et.CallResultBytes, cs) {
-			t.Logf("[TraceIndex %d] res match!!! ", traceIndex)
+			t.Logf("[TraceIndex %d] res match!!! \ncall_result{%s} ", traceIndex, common.Bytes2Hex(et.CallResultBytes))
 		} else {
 			t.Errorf("[TraceIndex %d] res no match ,expect : %s, actual: %s", traceIndex, common.Bytes2Hex(et.CallResultBytes), common.Bytes2Hex(cs))
 		}
@@ -351,8 +363,8 @@ func TestApplyTransaction(t *testing.T) {
 	)
 
 	var (
-		db = rawdb.NewMemoryDatabase()
-		//preAddr      = common.HexToAddress("0x0000000000000000000000000000000000033303")
+		db           = rawdb.NewMemoryDatabase()
+		preAddr      = common.HexToAddress("0x0000000000000000000000000000000000033303")
 		contractAddr = common.HexToAddress("0xa000000000000000000000000000000000000aaa")
 		gspec        = &Genesis{
 			Config: config,
@@ -383,14 +395,19 @@ func TestApplyTransaction(t *testing.T) {
 	}
 
 	const RinkebyTxHash = "0x7ba399701b823976c367686562ca9fa11ecc81341d2b0026c5615740bd164e46"
+	const RinkebyTxHashNotFound = "0x0000000000000000000000000000000000000000000000000000000000000001"
 
 	Args_CallOnce := NewCrossChainCallArgment(config, externalClient, 4, common.HexToHash(RinkebyTxHash), 0, 300, 10)
 
 	Args_ExpectErrAsLogIdxExceed := NewCrossChainCallArgment(config, externalClient, 4, common.HexToHash(RinkebyTxHash), 2, 300, 10)
 
+	Args_ExpectErrAsNotFound := NewCrossChainCallArgment(config, externalClient, 4, common.HexToHash(RinkebyTxHashNotFound), 2, 300, 10)
+
 	Args_Twice_Trace0 := NewCrossChainCallArgment(config, externalClient, 4, common.HexToHash(RinkebyTxHash), 0, 300, 10)
 	Args_Twice_Trace1 := NewCrossChainCallArgment(config, externalClient, 4, common.HexToHash(RinkebyTxHash), 1, 300, 10)
 	Args_CallTwice := NewCrossChainCallArgment(config, externalClient, 4, common.HexToHash(RinkebyTxHash), 0, 300, 10)
+
+	Args_ExpectErrChainIdNoSupport := NewCrossChainCallArgment(config, externalClient, 5, common.HexToHash(RinkebyTxHash), 0, 300, 10)
 
 	_wrapTxs := []*WrapTx{
 		&WrapTx{
@@ -427,6 +444,43 @@ func TestApplyTransaction(t *testing.T) {
 				Args_ExpectErrAsLogIdxExceed.CrossChainCallResultToExpectCallResult(),
 			},
 		},
+		// expect err txHash not found
+		&WrapTx{
+			Tx: types.NewTx(&types.DynamicFeeTx{
+				ChainID:   globalchainId,
+				Nonce:     0,
+				To:        &contractAddr,
+				Value:     big.NewInt(0),
+				Gas:       5000000,
+				GasTipCap: big.NewInt(1000000000),
+				GasFeeCap: big.NewInt(6000000000),
+				Data:      common.FromHex("518a3510000000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000012c000000000000000000000000000000000000000000000000000000000000000a"),
+			}),
+			Args:         Args_ExpectErrAsNotFound,
+			ExpectTxData: Args_ExpectErrAsNotFound.CallOncePack,
+			ExpectTraces: []*ExpectTrace{
+				Args_ExpectErrAsNotFound.CrossChainCallResultToExpectCallResult(),
+			},
+		},
+		// expect err chainId no support
+		&WrapTx{
+			Tx: types.NewTx(&types.DynamicFeeTx{
+				ChainID:   globalchainId,
+				Nonce:     0,
+				To:        &contractAddr,
+				Value:     big.NewInt(0),
+				Gas:       5000000,
+				GasTipCap: big.NewInt(1000000000),
+				GasFeeCap: big.NewInt(6000000000),
+				Data:      common.FromHex("518a351000000000000000000000000000000000000000000000000000000000000000057ba399701b823976c367686562ca9fa11ecc81341d2b0026c5615740bd164e460000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000012c000000000000000000000000000000000000000000000000000000000000000a"),
+			}),
+			Args:         Args_ExpectErrChainIdNoSupport,
+			ExpectTxData: Args_ExpectErrChainIdNoSupport.CallOncePack,
+			ExpectTraces: []*ExpectTrace{
+				Args_ExpectErrChainIdNoSupport.CrossChainCallResultToExpectCallResult(),
+			},
+		},
+		// external call twice
 		&WrapTx{
 			Tx: types.NewTx(&types.DynamicFeeTx{
 				ChainID:   globalchainId,
@@ -445,6 +499,24 @@ func TestApplyTransaction(t *testing.T) {
 				Args_Twice_Trace1.CrossChainCallResultToExpectCallResult(),
 			},
 		},
+		// call crossChainCall precompile contract directly
+		&WrapTx{
+			Tx: types.NewTx(&types.DynamicFeeTx{
+				ChainID:   globalchainId,
+				Nonce:     0,
+				To:        &preAddr,
+				Value:     big.NewInt(0),
+				Gas:       5000000,
+				GasTipCap: big.NewInt(1000000000),
+				GasFeeCap: big.NewInt(6000000000),
+				Data:      common.FromHex("0x99e2007000000000000000000000000000000000000000000000000000000000000000047ba399701b823976c367686562ca9fa11ecc81341d2b0026c5615740bd164e460000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000012c000000000000000000000000000000000000000000000000000000000000000a"),
+			}),
+			//Args:         Args_CallTwice,
+			//ExpectTxData: Args_CallTwice.CallTwicePack,
+			ExpectTraces: []*ExpectTrace{
+				Args_CallOnce.CrossChainCallResultToExpectCallResult(),
+			},
+		},
 	}
 
 	var wrapTxs []*WrapTx
@@ -457,22 +529,24 @@ func TestApplyTransaction(t *testing.T) {
 
 		wrapTx.Tx = signTx
 
-		txData, err := wrapTx.ExpectTxData()
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		if common.Bytes2Hex(txData) != common.Bytes2Hex(wrapTx.Tx.Data()) {
-			t.Fatalf("%d Tx data no match. wrapTx.ExpectTxData():%s ,", i, common.Bytes2Hex(txData))
+		if wrapTx.ExpectTxData != nil {
+			txData, err := wrapTx.ExpectTxData()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if common.Bytes2Hex(txData) != common.Bytes2Hex(wrapTx.Tx.Data()) {
+				t.Fatalf("%d Tx data no match. wrapTx.ExpectTxData():%s ,", i, common.Bytes2Hex(txData))
+			}
 		}
 
 		wrapTxs = append(wrapTxs, wrapTx)
 	}
 
+	// evm executes a transaction while the external calling client is active
 	for _, wtx := range wrapTxs {
 		// prepare chainContext
 		cli := &clique.Clique{}
-		wtm := NewWrapTendermint(cli, externalClient)
+		wtm := NewWrapTendermint(cli, nil)
 		chainContext := NewTestChainContext(wtm)
 
 		// prepare block
@@ -491,6 +565,8 @@ func TestApplyTransaction(t *testing.T) {
 
 		wtx.VerifyCallResult(crossCallResult, err, t)
 
+		wtx.SetTxWithExternalCallRes(crossCallResult)
+
 		w.Flush()
 		if err != nil {
 			t.Log(err)
@@ -502,6 +578,43 @@ func TestApplyTransaction(t *testing.T) {
 		}
 
 	}
+
+	//evm executes a transaction while the external calling client is inactive
+	for _, wtx := range wrapTxs {
+		// prepare chainContext
+		cli := &clique.Clique{}
+		wtm := NewWrapTendermint(cli, nil)
+		chainContext := NewTestChainContext(wtm)
+
+		// prepare block
+		block := genesis
+		gaspool := new(GasPool)
+		gaspool.AddGas(8000000000)
+
+		var usedGas uint64 = 0
+		buf := new(bytes.Buffer)
+		w := bufio.NewWriter(buf)
+		tracer := logger.NewJSONLogger(&logger.Config{}, w)
+		// set the externalCallClient as nil
+		vmconfig := vm.Config{Debug: true, Tracer: tracer, ExternalCallClient: nil}
+
+		_, statedb := MakePreState(db, gspec.Alloc, false)
+		_, crossCallResult, err := ApplyTransaction(config, chainContext, &addr1, gaspool, statedb, block.Header(), wtx.TxWithExternalCallRes, &usedGas, vmconfig)
+
+		wtx.VerifyCallResult(crossCallResult, err, t)
+
+		w.Flush()
+		if err != nil {
+			t.Log(err)
+			if buf.Len() == 0 {
+				t.Log("no EVM operation logs generated")
+			} else {
+				t.Log("EVM operation log:\n" + buf.String())
+			}
+		}
+
+	}
+
 }
 
 // TestStateProcessorErrors tests the output from the 'core' errors
