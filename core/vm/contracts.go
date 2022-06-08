@@ -24,6 +24,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/ethereum/go-ethereum/log"
 	"math/big"
 
 	"github.com/ethereum/go-ethereum"
@@ -1132,6 +1133,7 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractToCrossChainCallEnv, in
 		var trace *CrossChainCallTrace
 
 		if client == nil {
+			log.Warn("这不是你该来的地方")
 			tracePtr := env.evm.Interpreter().TracePtr()
 			if tracePtr >= uint64(len(env.evm.Interpreter().CrossChainCallTraces())) {
 				// unexpect error
@@ -1140,8 +1142,9 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractToCrossChainCallEnv, in
 			}
 			trace = env.evm.Interpreter().CrossChainCallTraces()[tracePtr]
 			env.evm.Interpreter().AddTracePtr()
-		} else {
 
+			return trace.CallRes, trace.GasUsed, nil
+		} else {
 			chainId := new(big.Int).SetBytes(getData(input, 4, 32)).Uint64()
 			txHash := common.BytesToHash(getData(input, 4+32, 32))
 			logIdx := new(big.Int).SetBytes(getData(input, 4+64, 32)).Uint64()
@@ -1151,7 +1154,7 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractToCrossChainCallEnv, in
 			callres, expErr, unexpErr := GetExternalLog(ctx, env, chainId, txHash, logIdx, maxDataLen, confirms)
 
 			if unexpErr != nil {
-				env.evm.setCrossChainCallUnExpectErr(ErrOutOfBoundsTracePtr)
+				env.evm.setCrossChainCallUnExpectErr(unexpErr)
 				return nil, 0, unexpErr
 			} else if expErr != nil {
 				// calculate actual cost of gas
@@ -1181,11 +1184,12 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractToCrossChainCallEnv, in
 					GasUsed: actualGasUsed,
 				}
 				env.evm.interpreter.crossChainCallTraces = append(env.evm.interpreter.crossChainCallTraces, trace)
+
+				return trace.CallRes, trace.GasUsed, nil
 			}
 
 		}
 
-		return trace.CallRes, trace.GasUsed, nil
 	}
 
 	return nil, 0, errors.New("unsupported method")
@@ -1197,6 +1201,7 @@ func GetExternalLog(ctx context.Context, env *PrecompiledContractToCrossChainCal
 	if chainId != env.evm.ChainConfig().ExternalCall.SupportChainId {
 		// expect error
 		expErr = NewExpectCallErr(fmt.Sprintf("CrossChainCall:chainId %d no support", chainId))
+		return nil, expErr, nil
 	}
 
 	receipt, err := client.TransactionReceipt(ctx, txHash)
