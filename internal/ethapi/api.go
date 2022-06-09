@@ -935,6 +935,8 @@ func DoCall(ctx context.Context, b Backend, args TransactionArgs, blockNrOrHash 
 		return nil, err
 	}
 
+	// todo: deal with cross chain call result
+
 	// If the timer caused an abort, return an appropriate error message
 	if evm.Cancelled() {
 		return nil, fmt.Errorf("execution aborted (timeout = %v)", timeout)
@@ -1207,7 +1209,7 @@ func RPCMarshalHeader(head *types.Header) map[string]interface{} {
 		"timeMs":              head.TimeMs,
 		"nextValidators":      head.NextValidators,
 		"nextValidatorPowers": head.NextValidatorPowers,
-		"LastCommitHash":      head.LastCommitHash,
+		"lastCommitHash":      head.LastCommitHash,
 		"commit":              head.Commit,
 	}
 
@@ -1277,25 +1279,26 @@ func (s *PublicBlockChainAPI) rpcMarshalBlock(ctx context.Context, b *types.Bloc
 
 // RPCTransaction represents a transaction that will serialize to the RPC representation of a transaction
 type RPCTransaction struct {
-	BlockHash        *common.Hash      `json:"blockHash"`
-	BlockNumber      *hexutil.Big      `json:"blockNumber"`
-	From             common.Address    `json:"from"`
-	Gas              hexutil.Uint64    `json:"gas"`
-	GasPrice         *hexutil.Big      `json:"gasPrice"`
-	GasFeeCap        *hexutil.Big      `json:"maxFeePerGas,omitempty"`
-	GasTipCap        *hexutil.Big      `json:"maxPriorityFeePerGas,omitempty"`
-	Hash             common.Hash       `json:"hash"`
-	Input            hexutil.Bytes     `json:"input"`
-	Nonce            hexutil.Uint64    `json:"nonce"`
-	To               *common.Address   `json:"to"`
-	TransactionIndex *hexutil.Uint64   `json:"transactionIndex"`
-	Value            *hexutil.Big      `json:"value"`
-	Type             hexutil.Uint64    `json:"type"`
-	Accesses         *types.AccessList `json:"accessList,omitempty"`
-	ChainID          *hexutil.Big      `json:"chainId,omitempty"`
-	V                *hexutil.Big      `json:"v"`
-	R                *hexutil.Big      `json:"r"`
-	S                *hexutil.Big      `json:"s"`
+	BlockHash          *common.Hash      `json:"blockHash"`
+	BlockNumber        *hexutil.Big      `json:"blockNumber"`
+	From               common.Address    `json:"from"`
+	Gas                hexutil.Uint64    `json:"gas"`
+	GasPrice           *hexutil.Big      `json:"gasPrice"`
+	GasFeeCap          *hexutil.Big      `json:"maxFeePerGas,omitempty"`
+	GasTipCap          *hexutil.Big      `json:"maxPriorityFeePerGas,omitempty"`
+	Hash               common.Hash       `json:"hash"`
+	Input              hexutil.Bytes     `json:"input"`
+	Nonce              hexutil.Uint64    `json:"nonce"`
+	To                 *common.Address   `json:"to"`
+	TransactionIndex   *hexutil.Uint64   `json:"transactionIndex"`
+	Value              *hexutil.Big      `json:"value"`
+	Type               hexutil.Uint64    `json:"type"`
+	Accesses           *types.AccessList `json:"accessList,omitempty"`
+	ChainID            *hexutil.Big      `json:"chainId,omitempty"`
+	ExternalCallResult []byte            `json:"externalCallResult"`
+	V                  *hexutil.Big      `json:"v"`
+	R                  *hexutil.Big      `json:"r"`
+	S                  *hexutil.Big      `json:"s"`
 }
 
 // newRPCTransaction returns a transaction that will serialize to the RPC
@@ -1305,18 +1308,19 @@ func newRPCTransaction(tx *types.Transaction, blockHash common.Hash, blockNumber
 	from, _ := types.Sender(signer, tx)
 	v, r, s := tx.RawSignatureValues()
 	result := &RPCTransaction{
-		Type:     hexutil.Uint64(tx.Type()),
-		From:     from,
-		Gas:      hexutil.Uint64(tx.Gas()),
-		GasPrice: (*hexutil.Big)(tx.GasPrice()),
-		Hash:     tx.Hash(),
-		Input:    hexutil.Bytes(tx.Data()),
-		Nonce:    hexutil.Uint64(tx.Nonce()),
-		To:       tx.To(),
-		Value:    (*hexutil.Big)(tx.Value()),
-		V:        (*hexutil.Big)(v),
-		R:        (*hexutil.Big)(r),
-		S:        (*hexutil.Big)(s),
+		Type:               hexutil.Uint64(tx.Type()),
+		From:               from,
+		Gas:                hexutil.Uint64(tx.Gas()),
+		GasPrice:           (*hexutil.Big)(tx.GasPrice()),
+		Hash:               tx.Hash(),
+		Input:              hexutil.Bytes(tx.Data()),
+		Nonce:              hexutil.Uint64(tx.Nonce()),
+		To:                 tx.To(),
+		Value:              (*hexutil.Big)(tx.Value()),
+		ExternalCallResult: tx.ExternalCallResult(),
+		V:                  (*hexutil.Big)(v),
+		R:                  (*hexutil.Big)(r),
+		S:                  (*hexutil.Big)(s),
 	}
 	if blockHash != (common.Hash{}) {
 		result.BlockHash = &blockHash
@@ -1667,6 +1671,10 @@ func (s *PublicTransactionPoolAPI) GetTransactionReceipt(ctx context.Context, ha
 	// If the ContractAddress is 20 0x0 bytes, assume it is not a contract creation
 	if receipt.ContractAddress != (common.Address{}) {
 		fields["contractAddress"] = receipt.ContractAddress
+	}
+
+	if len(receipt.ExternalCallResult) != 0 {
+		fields["externalCallResult"] = common.Bytes2Hex(receipt.ExternalCallResult)
 	}
 	return fields, nil
 }
