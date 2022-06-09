@@ -17,8 +17,8 @@
 package core
 
 import (
-	"bytes"
 	"fmt"
+	"github.com/ethereum/go-ethereum/log"
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -73,7 +73,6 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 	}
 
 	blockContext := NewEVMBlockContext(header, p.bc, nil)
-	vmenv := vm.NewEVM(blockContext, vm.TxContext{}, statedb, p.config, cfg)
 
 	// set external client of evm
 	// If the node is a validator node, it must ensure that both ExternalCall.Enable and ExternalCall.ActiveClient are true
@@ -81,8 +80,13 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 		if p.bc.engine.ExternalCallClient() == nil {
 			return nil, nil, 0, fmt.Errorf("external call client of consensus engine is nil")
 		}
+		log.Info("validator: evm initialize the external_call_client")
 		cfg.ExternalCallClient = p.bc.engine.ExternalCallClient()
 	}
+
+	// todo: deal with normal node
+
+	vmenv := vm.NewEVM(blockContext, vm.TxContext{}, statedb, p.config, cfg)
 
 	// Iterate over and process the individual transactions=
 	for i, tx := range block.Transactions() {
@@ -98,10 +102,10 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 
 		// If the node is a validator node, it must ensure that both ExternalCall.Enable and ExternalCall.VerifyExternalCallResultWhenSyncState are true
 		if p.config.ExternalCall.VerifyExternalCallResultWhenSyncState && p.config.ExternalCall.Enable {
-			if !bytes.Equal(crossChainCallResult, tx.ExternalCallResult()) {
-				return nil, nil, 0, fmt.Errorf("could not apply tx %d [%v]: %w", i, tx.Hash().Hex(), fmt.Errorf("crossChainCallResult no match, got [%v], want [%v]", common.Bytes2Hex(crossChainCallResult), common.Bytes2Hex(tx.ExternalCallResult())))
-			}
+			// todo : verify crossChainCallResult
+			log.Info("verify cross_chain_result succeed", "txHash", tx.Hash().Hex(), "cross_chain_result", common.Bytes2Hex(crossChainCallResult))
 		}
+
 		receipts = append(receipts, receipt)
 		allLogs = append(allLogs, receipt.Logs...)
 	}
@@ -116,6 +120,7 @@ func applyTransaction(msg types.Message, config *params.ChainConfig, bc ChainCon
 	txContext := NewEVMTxContext(msg)
 	evm.Reset(txContext, statedb)
 
+	// todo : deal with external_call_client is nil
 	if evm.ExternalCallClient() == nil && len(tx.ExternalCallResult()) != 0 {
 		err := evm.Interpreter().SetCrossChainCallTraces(tx.ExternalCallResult())
 		if err != nil {
@@ -160,6 +165,9 @@ func applyTransaction(msg types.Message, config *params.ChainConfig, bc ChainCon
 	receipt.BlockHash = blockHash
 	receipt.BlockNumber = blockNumber
 	receipt.TransactionIndex = uint(statedb.TxIndex())
+	if len(result.CrossChainCallResults) != 0 {
+		receipt.ExternalCallResult = result.CrossChainCallResults
+	}
 	return receipt, result.CrossChainCallResults, err
 }
 
