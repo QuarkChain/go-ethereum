@@ -24,7 +24,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"github.com/ethereum/go-ethereum/log"
 	"math/big"
 
 	"github.com/ethereum/go-ethereum"
@@ -1133,7 +1132,6 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractToCrossChainCallEnv, in
 		var trace *CrossChainCallTrace
 
 		if client == nil {
-			log.Warn("这不是你该来的地方")
 			tracePtr := env.evm.Interpreter().TracePtr()
 			if tracePtr >= uint64(len(env.evm.Interpreter().CrossChainCallTraces())) {
 				// unexpect error
@@ -1195,7 +1193,7 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractToCrossChainCallEnv, in
 	return nil, 0, errors.New("unsupported method")
 }
 
-func GetExternalLog(ctx context.Context, env *PrecompiledContractToCrossChainCallEnv, chainId uint64, txHash common.Hash, logIdx uint64, maxDataLen uint64, confirms uint64) (cr *CallResult, expErr *ExpectCallErr, unExpErr error) {
+func GetExternalLog(ctx context.Context, env *PrecompiledContractToCrossChainCallEnv, chainId uint64, txHash common.Hash, logIdx uint64, maxDataLen uint64, confirms uint64) (cr *GetLogByTxHash, expErr *ExpectCallErr, unExpErr error) {
 	client := env.evm.ExternalCallClient()
 
 	if chainId != env.evm.ChainConfig().ExternalCall.SupportChainId {
@@ -1250,7 +1248,7 @@ func GetExternalLog(ctx context.Context, env *PrecompiledContractToCrossChainCal
 
 }
 
-type CallResult struct {
+type GetLogByTxHash struct {
 	// address of the contract that generated the event
 	Address common.Address `json:"address" gencodec:"required"`
 	// list of topics provided by the contract.
@@ -1262,7 +1260,7 @@ type CallResult struct {
 	Args abi.Arguments
 }
 
-func NewCallResult(address common.Address, topics []common.Hash, data []byte) (*CallResult, error) {
+func NewCallResult(address common.Address, topics []common.Hash, data []byte) (*GetLogByTxHash, error) {
 	arg1Type, err := abi.NewType("address", "", nil)
 	if err != nil {
 		return nil, err
@@ -1282,10 +1280,10 @@ func NewCallResult(address common.Address, topics []common.Hash, data []byte) (*
 
 	var args = abi.Arguments{arg1, arg2, arg3}
 
-	return &CallResult{Address: address, Topics: topics, Data: data, Args: args}, nil
+	return &GetLogByTxHash{Address: address, Topics: topics, Data: data, Args: args}, nil
 }
 
-func NewCallResultEmpty() (*CallResult, error) {
+func NewCallResultEmpty() (*GetLogByTxHash, error) {
 	arg1Type, err := abi.NewType("address", "", nil)
 	if err != nil {
 		return nil, err
@@ -1305,10 +1303,10 @@ func NewCallResultEmpty() (*CallResult, error) {
 
 	var args = abi.Arguments{arg1, arg2, arg3}
 
-	return &CallResult{Args: args}, nil
+	return &GetLogByTxHash{Args: args}, nil
 }
 
-func (c *CallResult) ABIPack() ([]byte, error) {
+func (c *GetLogByTxHash) ABIPack() ([]byte, error) {
 	packResult, err := c.Args.Pack(c.Address, c.Topics, c.Data)
 	if err != nil {
 		return nil, err
@@ -1316,7 +1314,7 @@ func (c *CallResult) ABIPack() ([]byte, error) {
 	return packResult, nil
 }
 
-func (c *CallResult) GasCost(perBytePrice uint64) uint64 {
+func (c *GetLogByTxHash) GasCost(perBytePrice uint64) uint64 {
 	pack, _ := c.ABIPack()
 	return uint64(len(pack)) * perBytePrice
 }

@@ -311,7 +311,7 @@ func (c *CrossChainCallArgment) CallTwicePack() ([]byte, error) {
 	return c.contractAbi.Pack("callTwice", big.NewInt(int64(c.ChainId)), c.TxHash, big.NewInt(int64(c.LogIdx)), big.NewInt(int64(c.MaxDataLen)), big.NewInt(int64(c.Confirms)))
 }
 
-func (c *CrossChainCallArgment) CrossChainCallResult() (*vm.CallResult, *vm.ExpectCallErr, error) {
+func (c *CrossChainCallArgment) CrossChainCallResult() (*vm.GetLogByTxHash, *vm.ExpectCallErr, error) {
 	return vm.GetExternalLog(context.Background(), c.env, c.ChainId, c.TxHash, c.LogIdx, c.MaxDataLen, c.Confirms)
 }
 
