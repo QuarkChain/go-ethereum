@@ -1132,14 +1132,14 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractToCrossChainCallEnv, in
 		var trace *CrossChainCallTrace
 
 		if client == nil {
-			traceIdx := env.evm.Interpreter().TracePtr()
+			traceIdx := env.evm.Interpreter().TraceIdx()
 			if traceIdx >= uint64(len(env.evm.Interpreter().CrossChainCallTraces())) {
 				// unexpect error
 				env.evm.setCrossChainCallUnExpectErr(ErrOutOfBoundsTracePtr)
 				return nil, 0, ErrOutOfBoundsTracePtr
 			}
 			trace = env.evm.Interpreter().CrossChainCallTraces()[traceIdx]
-			env.evm.Interpreter().AddTracePtr()
+			env.evm.Interpreter().AddTraceIdx()
 
 			return trace.CallRes, trace.GasUsed, nil
 		} else {
@@ -1240,7 +1240,7 @@ func GetExternalLog(ctx context.Context, env *PrecompiledContractToCrossChainCal
 		actualDataLen = int(maxDataLen)
 	}
 
-	callres, err := NewCallResult(log.Address, log.Topics, data)
+	callres, err := NewGetLogByTxHash(log.Address, log.Topics, data)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1261,7 +1261,7 @@ type GetLogByTxHash struct {
 	Args abi.Arguments
 }
 
-func NewCallResult(address common.Address, topics []common.Hash, data []byte) (*GetLogByTxHash, error) {
+func NewGetLogByTxHash(address common.Address, topics []common.Hash, data []byte) (*GetLogByTxHash, error) {
 	arg1Type, err := abi.NewType("address", "", nil)
 	if err != nil {
 		return nil, err
