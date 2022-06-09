@@ -34,7 +34,7 @@ var (
 	SepoliaGenesisHash      = common.HexToHash("0x25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9")
 	RinkebyGenesisHash      = common.HexToHash("0x6341fd3daf94b748c72ced5a5b26028f2474f5f00d824504e4fa37a75767e177")
 	GoerliGenesisHash       = common.HexToHash("0xbf7e331f7f7c1dd2e05159666b3bf8bc7a8a3a9eb1d518969eab529dd9b88c1a")
-	Web3QTestnetGenesisHash = common.HexToHash("0x1cf5a870ae77dcff37b14ca5ca8ba05d428e3dc722f544f958c4e19e4747953d")
+	Web3QTestnetGenesisHash = common.HexToHash("0x8e362a73300af40adecacee8ab199d33d348abb251e873412549fc5855223d40")
 	Web3QGalileoGenesisHash = common.HexToHash("0xa576a985390f3a643e2acdeaed074cc9866c99f6bdf3ca8c49ec959054703745")
 )
 
@@ -256,6 +256,11 @@ var (
 		Threshold: 2,
 	}
 
+	Web3QTestNetBootnodes = []string{
+		"/ip4/127.0.0.1/udp/33333/quic/p2p/12D3KooWEZ94qZgJgUNYiLwXahknkniYgozxw5eocijZJkew6Mj5",
+		"/ip4/127.0.0.1/udp/33334/quic/p2p/12D3KooWRAPv94qoUn8dAa3NQpZGKjaBcdiaqCETrcuyo2rT2ZvV",
+	}
+
 	// Web3QTestnetChainConfig contains the chain parameters to run a node on the Web3Q test network.
 	Web3QTestnetChainConfig = &ChainConfig{
 		ChainID:             big.NewInt(3333),
@@ -272,10 +277,40 @@ var (
 		MuirGlacierBlock:    nil,
 		BerlinBlock:         big.NewInt(0),
 		LondonBlock:         big.NewInt(0),
+		PisaBlock:           big.NewInt(0),
 		ArrowGlacierBlock:   nil,
-		Clique: &CliqueConfig{
-			Period: 6,
-			Epoch:  100800, // one week
+		Tendermint: &TendermintConfig{
+			Epoch:                  100800, // expect 6s block interval = one week
+			ValidatorContract:      "",
+			ContractChainID:        0,
+			ValidatorChangeEpochId: 0,
+			ValRpc:                 "",
+			P2pPort:                33333,
+			ProposerRepetition:     8,
+			P2pBootstrap:           strings.Join(Web3QTestNetBootnodes, ","),
+			NodeKeyPath:            "",
+			ConsensusConfig: ConsensusConfig{
+				// WalPath:                     filepath.Join(defaultDataDir, "cs.wal", "wal"),
+				TimeoutPropose:               3000 * time.Millisecond,
+				TimeoutProposeDelta:          500 * time.Millisecond,
+				TimeoutPrevote:               1000 * time.Millisecond,
+				TimeoutPrevoteDelta:          500 * time.Millisecond,
+				TimeoutPrecommit:             1000 * time.Millisecond,
+				TimeoutPrecommitDelta:        500 * time.Millisecond,
+				TimeoutCommit:                5000 * time.Millisecond,
+				SkipTimeoutCommit:            false,
+				PeerGossipSleepDuration:      100 * time.Millisecond,
+				PeerQueryMaj23SleepDuration:  2000 * time.Millisecond,
+				DoubleSignCheckHeight:        uint64(0),
+				ConsensusSyncRequestDuration: 500 * time.Millisecond,
+			},
+		},
+		ExternalCall: &ExternalCallConfig{
+			Enable:                                true,
+			ActiveClient:                          true,
+			VerifyExternalCallResultWhenSyncState: true,
+			Version:                               1,
+			SupportChainId:                        4,
 		},
 	}
 
