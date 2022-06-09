@@ -1190,7 +1190,8 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractToCrossChainCallEnv, in
 
 	}
 
-	return nil, 0, errors.New("unsupported method")
+	env.evm.setCrossChainCallUnExpectErr(ErrUnsupportMethod)
+	return nil, 0, ErrUnsupportMethod
 }
 
 func GetExternalLog(ctx context.Context, env *PrecompiledContractToCrossChainCallEnv, chainId uint64, txHash common.Hash, logIdx uint64, maxDataLen uint64, confirms uint64) (cr *GetLogByTxHash, expErr *ExpectCallErr, unExpErr error) {

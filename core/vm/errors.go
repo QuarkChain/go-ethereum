@@ -40,7 +40,7 @@ var (
 
 	// ErrOutOfBoundsTracePtr which happen when execute operation of cross chain call
 	ErrOutOfBoundsTracePtr = errors.New("CrossChainCall: tracePtr out-of-bound")
-
+	ErrUnsupportMethod     = errors.New("unsupported method")
 	// errStopToken is an internal token indicating interpreter loop termination,
 	// never returned to outside callers.
 	errStopToken = errors.New("stop token")
