@@ -917,7 +917,21 @@ func DoCall(ctx context.Context, b Backend, args TransactionArgs, blockNrOrHash 
 	if err != nil {
 		return nil, err
 	}
-	evm, vmError, err := b.GetEVM(ctx, msg, state, header, &vm.Config{NoBaseFee: true})
+	chainCfg := b.ChainConfig()
+
+	vmCfg := &vm.Config{NoBaseFee: true}
+	if chainCfg.ExternalCall.Enable && chainCfg.ExternalCall.ActiveClient {
+		// In this case node is a full node with externalCallClient
+		if b.Engine().ExternalCallClient() != nil {
+			vmCfg.ExternalCallClient = b.Engine().ExternalCallClient()
+		} else {
+			return nil, errors.New("when ExternalCall.Enable Enable is true, b.Engine().ExternalCallClient() should not be nil")
+		}
+	} else if chainCfg.ExternalCall.Enable && !chainCfg.ExternalCall.ActiveClient {
+		// In this case node is a normal node without externalCallClient
+		// todo : deal with this case
+	}
+	evm, vmError, err := b.GetEVM(ctx, msg, state, header, vmCfg)
 	if err != nil {
 		return nil, err
 	}
