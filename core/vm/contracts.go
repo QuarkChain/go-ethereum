@@ -1132,13 +1132,13 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractToCrossChainCallEnv, in
 		var trace *CrossChainCallTrace
 
 		if client == nil {
-			tracePtr := env.evm.Interpreter().TracePtr()
-			if tracePtr >= uint64(len(env.evm.Interpreter().CrossChainCallTraces())) {
+			traceIdx := env.evm.Interpreter().TracePtr()
+			if traceIdx >= uint64(len(env.evm.Interpreter().CrossChainCallTraces())) {
 				// unexpect error
 				env.evm.setCrossChainCallUnExpectErr(ErrOutOfBoundsTracePtr)
 				return nil, 0, ErrOutOfBoundsTracePtr
 			}
-			trace = env.evm.Interpreter().CrossChainCallTraces()[tracePtr]
+			trace = env.evm.Interpreter().CrossChainCallTraces()[traceIdx]
 			env.evm.Interpreter().AddTracePtr()
 
 			return trace.CallRes, trace.GasUsed, nil
