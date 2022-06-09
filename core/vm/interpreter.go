@@ -68,7 +68,7 @@ type EVMInterpreter struct {
 	returnData []byte // Last CALL's return data for subsequent reuse
 
 	crossChainCallTraces []*CrossChainCallTrace
-	tracePtr             uint64
+	traceIdx             uint64
 }
 
 // NewEVMInterpreter returns a new instance of the Interpreter.
@@ -114,12 +114,12 @@ func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 	}
 }
 
-func (in *EVMInterpreter) TracePtr() uint64 {
-	return in.tracePtr
+func (in *EVMInterpreter) TraceIdx() uint64 {
+	return in.traceIdx
 }
 
-func (in *EVMInterpreter) AddTracePtr() {
-	in.tracePtr++
+func (in *EVMInterpreter) AddTraceIdx() {
+	in.traceIdx++
 }
 
 func (in *EVMInterpreter) CrossChainCallTraces() []*CrossChainCallTrace {
@@ -134,6 +134,11 @@ func (in *EVMInterpreter) SetCrossChainCallTraces(b []byte) error {
 	}
 	in.crossChainCallTraces = cr.Traces
 	return nil
+}
+
+func (in *EVMInterpreter) resetCrossChainCallTracesAndTraceIdx() {
+	in.crossChainCallTraces = nil
+	in.traceIdx = 0
 }
 
 // Run loops and evaluates the contract's code with the given input data and returns
