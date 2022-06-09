@@ -116,11 +116,11 @@ func (b *BlockGen) AddTxWithChain(bc *BlockChain, tx *types.Transaction) {
 		}
 	}
 
-	receipt, crossChainCallResult, err := ApplyTransaction(b.config, bc, &b.header.Coinbase, b.gasPool, b.statedb, b.header, tx, &b.header.GasUsed, evmConfig)
+	receipt, _, err := ApplyTransaction(b.config, bc, &b.header.Coinbase, b.gasPool, b.statedb, b.header, tx, &b.header.GasUsed, evmConfig)
 	if err != nil {
 		panic(err)
 	}
-	b.txs = append(b.txs, tx.WithExternalCallResult(crossChainCallResult))
+	b.txs = append(b.txs, tx)
 	b.receipts = append(b.receipts, receipt)
 }
 
