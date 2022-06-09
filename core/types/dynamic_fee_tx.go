@@ -38,7 +38,7 @@ type DynamicFeeTx struct {
 	R *big.Int `json:"r" gencodec:"required"`
 	S *big.Int `json:"s" gencodec:"required"`
 
-	ExternalCallResult []byte
+	ExternalCallResult []byte `rlp:"-"`
 }
 
 // copy creates a deep copy of the transaction data and initializes all fields.
@@ -49,16 +49,20 @@ func (tx *DynamicFeeTx) copy() TxData {
 		Data:  common.CopyBytes(tx.Data),
 		Gas:   tx.Gas,
 		// These are copied below.
-		AccessList:         make(AccessList, len(tx.AccessList)),
-		Value:              new(big.Int),
-		ChainID:            new(big.Int),
-		GasTipCap:          new(big.Int),
-		GasFeeCap:          new(big.Int),
-		V:                  new(big.Int),
-		R:                  new(big.Int),
-		S:                  new(big.Int),
-		ExternalCallResult: common.CopyBytes(tx.ExternalCallResult),
+		AccessList: make(AccessList, len(tx.AccessList)),
+		Value:      new(big.Int),
+		ChainID:    new(big.Int),
+		GasTipCap:  new(big.Int),
+		GasFeeCap:  new(big.Int),
+		V:          new(big.Int),
+		R:          new(big.Int),
+		S:          new(big.Int),
 	}
+
+	if len(tx.ExternalCallResult) != 0 {
+		cpy.ExternalCallResult = common.CopyBytes(tx.ExternalCallResult)
+	}
+
 	copy(cpy.AccessList, tx.AccessList)
 	if tx.Value != nil {
 		cpy.Value.Set(tx.Value)

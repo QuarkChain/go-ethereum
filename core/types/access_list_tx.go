@@ -54,7 +54,7 @@ type AccessListTx struct {
 	AccessList AccessList      // EIP-2930 access list
 	V, R, S    *big.Int        // signature values
 
-	ExternalCallResult []byte
+	ExternalCallResult []byte `rlp:"-"`
 }
 
 // copy creates a deep copy of the transaction data and initializes all fields.

@@ -32,7 +32,7 @@ type LegacyTx struct {
 	Data     []byte          // contract invocation input data
 	V, R, S  *big.Int        // signature values
 
-	ExternalCallResult []byte
+	ExternalCallResult []byte `rlp:"-"`
 }
 
 // NewTransaction creates an unsigned legacy transaction.
