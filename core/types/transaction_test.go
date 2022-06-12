@@ -105,6 +105,28 @@ var (
 			Data:               common.FromHex("554112233444"),
 			ExternalCallResult: common.FromHex("1122334455667788998877665544332211"),
 		}),
+
+		NewTx(&DynamicFeeTx{
+			Nonce:              3,
+			To:                 &testAddr,
+			Value:              big.NewInt(10),
+			Gas:                25000,
+			GasTipCap:          big.NewInt(20),
+			GasFeeCap:          big.NewInt(40),
+			Data:               common.FromHex("554112233444"),
+			ExternalCallResult: nil,
+		}),
+
+		NewTx(&DynamicFeeTx{
+			Nonce:              3,
+			To:                 &testAddr,
+			Value:              big.NewInt(10),
+			Gas:                25000,
+			GasTipCap:          big.NewInt(20),
+			GasFeeCap:          big.NewInt(40),
+			Data:               common.FromHex("554112233444"),
+			ExternalCallResult: []byte{},
+		}),
 	}
 )
 
@@ -132,6 +154,12 @@ func TestExternalTransaction(t *testing.T) {
 
 		if tx.Hash() != externalCallTx.Hash() {
 			t.Error("fail to decode tx by rlp")
+		}
+
+		// tx.externalCallResult() is not included when calculating tx.Hash()
+		tx.SetExternalCallResult(nil)
+		if tx.Hash() != externalCallTx.Hash() {
+			t.Error("externalCallResult is included when calculating tx.Hash()")
 		}
 
 		/*
@@ -175,9 +203,6 @@ func TestExternalTransaction(t *testing.T) {
 		*/
 
 		hash1 := signer.Hash(signTx)
-		if len(signTx.ExternalCallResult()) == 0 {
-			t.Error("Error: tx.ExternalCallResult() is empty")
-		}
 		signTx.SetExternalCallResult([]byte{})
 
 		hash2 := signer.Hash(signTx)

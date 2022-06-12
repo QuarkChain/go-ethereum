@@ -375,11 +375,16 @@ func (tx *Transaction) Hash() common.Hash {
 		return hash.(common.Hash)
 	}
 
+	cpy := tx.inner.copy()
+	if cpy.externalCallResult() != nil {
+		cpy.setExternalCallResult(nil)
+	}
+
 	var h common.Hash
 	if tx.Type() == LegacyTxType {
-		h = rlpHash(tx.inner)
+		h = rlpHash(cpy)
 	} else {
-		h = prefixedRlpHash(tx.Type(), tx.inner)
+		h = prefixedRlpHash(tx.Type(), cpy)
 	}
 	tx.hash.Store(h)
 	return h
