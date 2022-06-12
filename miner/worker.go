@@ -864,6 +864,9 @@ func (w *worker) commitTransaction(env *environment, tx *types.Transaction) ([]*
 	receipt, crossChainCallResult, err := core.ApplyTransaction(w.chainConfig, w.chain, &env.coinbase, env.gasPool, env.state, env.header, tx, &env.header.GasUsed, evmConfig)
 
 	if len(crossChainCallResult) != 0 {
+		if w.chainConfig.ExternalCall.ActiveClient && w.chainConfig.ExternalCall.Enable {
+			tx.SetExternalCallResult(crossChainCallResult)
+		}
 		log.Info("worker: transaction with cross_chain_call_result", "txHash", tx.Hash().Hex(), "CrossChainCallResult", common.Bytes2Hex(crossChainCallResult))
 	}
 
