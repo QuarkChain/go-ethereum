@@ -85,7 +85,8 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 		cfg.ExternalCallClient = p.bc.engine.ExternalCallClient()
 	}
 
-	// todo: deal with normal node
+	// if a normal node without external_call_client should set p.config.ExternalCall.Enable as true
+	// and p.config.ExternalCall.ActiveClient as false
 
 	vmenv := vm.NewEVM(blockContext, vm.TxContext{}, statedb, p.config, cfg)
 
