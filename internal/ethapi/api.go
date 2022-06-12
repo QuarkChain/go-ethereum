@@ -1309,7 +1309,7 @@ type RPCTransaction struct {
 	Type               hexutil.Uint64    `json:"type"`
 	Accesses           *types.AccessList `json:"accessList,omitempty"`
 	ChainID            *hexutil.Big      `json:"chainId,omitempty"`
-	ExternalCallResult []byte            `json:"externalCallResult"`
+	ExternalCallResult hexutil.Bytes     `json:"externalCallResult"`
 	V                  *hexutil.Big      `json:"v"`
 	R                  *hexutil.Big      `json:"r"`
 	S                  *hexutil.Big      `json:"s"`
@@ -1331,10 +1331,13 @@ func newRPCTransaction(tx *types.Transaction, blockHash common.Hash, blockNumber
 		Nonce:              hexutil.Uint64(tx.Nonce()),
 		To:                 tx.To(),
 		Value:              (*hexutil.Big)(tx.Value()),
-		ExternalCallResult: tx.ExternalCallResult(),
+		ExternalCallResult: hexutil.Bytes(tx.ExternalCallResult()),
 		V:                  (*hexutil.Big)(v),
 		R:                  (*hexutil.Big)(r),
 		S:                  (*hexutil.Big)(s),
+	}
+	if len(tx.ExternalCallResult()) != 0 {
+		result.ExternalCallResult = tx.ExternalCallResult()
 	}
 	if blockHash != (common.Hash{}) {
 		result.BlockHash = &blockHash
