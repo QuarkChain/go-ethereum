@@ -17,6 +17,7 @@
 package core
 
 import (
+	"bytes"
 	"fmt"
 	"github.com/ethereum/go-ethereum/log"
 	"math/big"
@@ -100,10 +101,15 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 			return nil, nil, 0, fmt.Errorf("could not apply tx %d [%v]: %w", i, tx.Hash().Hex(), err)
 		}
 
-		// If the node is a validator node, it must ensure that both ExternalCall.Enable and ExternalCall.VerifyExternalCallResultWhenSyncState are true
-		if p.config.ExternalCall.VerifyExternalCallResultWhenSyncState && p.config.ExternalCall.Enable {
-			// todo : verify crossChainCallResult
-			log.Info("verify cross_chain_result succeed", "txHash", tx.Hash().Hex(), "cross_chain_result", common.Bytes2Hex(crossChainCallResult))
+		if len(crossChainCallResult) > 0 || len(tx.ExternalCallResult()) > 0 {
+			// If the node is a validator node, it must ensure that both ExternalCall.Enable and ExternalCall.VerifyExternalCallResultWhenSyncState are true
+			if p.config.ExternalCall.VerifyExternalCallResultWhenSyncState && p.config.ExternalCall.Enable {
+				if !bytes.Equal(tx.ExternalCallResult(), crossChainCallResult) {
+					log.Warn("failed to verify cross_chain_result", "txHash", tx.Hash().Hex(), "cross_chain_result", common.Bytes2Hex(crossChainCallResult))
+					tx.SetExternalCallResult(crossChainCallResult)
+				}
+				log.Info("verify cross_chain_result succeed", "txHash", tx.Hash().Hex(), "cross_chain_result", common.Bytes2Hex(crossChainCallResult))
+			}
 		}
 
 		receipts = append(receipts, receipt)
