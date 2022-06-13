@@ -19,7 +19,7 @@ type ShardInfo struct {
 
 // TODO: move to chain specific config?
 var ShardInfos = []*ShardInfo{
-	{common.HexToAddress("0x1234"), 4 * 1024, 32 * 1024 * 1024},
+	{common.HexToAddress("0x0000000000000000000000000000000003330001"), 4 * 1024, 256 * 1024},
 }
 
 func InitializeConfig() {
@@ -38,7 +38,7 @@ func findShardManaager(kvSize uint64) *ShardManager {
 }
 
 func parseKvSize(s string) (uint64, error) {
-	if s[len(s)] == 'k' || s[len(s)] == 'K' {
+	if s[len(s)-1] == 'k' || s[len(s)-1] == 'K' {
 		if v, err := strconv.Atoi(s[0 : len(s)-1]); err != nil {
 			return 0, err
 		} else {

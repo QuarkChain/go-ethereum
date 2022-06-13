@@ -34,6 +34,7 @@ type Config struct {
 	JumpTable *JumpTable // EVM instruction table, automatically populated if unset
 
 	ExtraEips []int // Additional EIPS that are to be enabled
+	IsJsonRpc bool  // Whether the call is in context of JsonRpc
 }
 
 // ScopeContext contains the things that are per-call, such as stack and memory,

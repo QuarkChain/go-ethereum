@@ -14,8 +14,8 @@ import (
 )
 
 var (
-	chunkIdxLen *uint64
-	filenames   *[]string
+	chunkLen  *uint64
+	filenames *[]string
 
 	verbosity *int
 
@@ -60,7 +60,7 @@ var ShardWriteCmd = &cobra.Command{
 }
 
 func init() {
-	chunkIdxLen = CreateCmd.Flags().Uint64("len", 0, "Chunk idx len to create")
+	chunkLen = CreateCmd.Flags().Uint64("len", 0, "Chunk idx len to create")
 
 	filenames = rootCmd.PersistentFlags().StringArray("filename", []string{}, "Data filename")
 	verbosity = rootCmd.PersistentFlags().Int("verbosity", 3, "Logging verbosity: 0=silent, 1=error, 2=warn, 3=info, 4=debug, 5=detail")
@@ -100,7 +100,9 @@ func runCreate(cmd *cobra.Command, args []string) {
 		log.Crit("must provide single filename")
 	}
 
-	_, err := sstorage.Create((*filenames)[0], *chunkIdx, *chunkIdxLen, sstorage.MASK_KECCAK_256)
+	log.Info("Creating data file", "chunkIdx", *chunkIdx, "chunkLen", *chunkLen)
+
+	_, err := sstorage.Create((*filenames)[0], *chunkIdx, *chunkLen, sstorage.MASK_KECCAK_256)
 	if err != nil {
 		log.Crit("create failed", "error", err)
 	}

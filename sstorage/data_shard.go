@@ -70,6 +70,9 @@ func (ds *DataShard) ReadUnmasked(kvIdx uint64, readLen int) ([]byte, error) {
 	if !ds.Contains(kvIdx) {
 		return nil, fmt.Errorf("kv not found")
 	}
+	if readLen > int(ds.kvSize) {
+		return nil, fmt.Errorf("read len too large")
+	}
 	var data []byte
 	for i := uint64(0); i < ds.chunksPerKv; i++ {
 		if readLen == 0 {

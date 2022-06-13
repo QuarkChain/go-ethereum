@@ -131,6 +131,8 @@ var (
 		utils.MinerExtraDataFlag,
 		utils.MinerRecommitIntervalFlag,
 		utils.MinerNoVerifyFlag,
+		utils.SstorageShardFlag,
+		utils.SstorageFileFlag,
 		utils.NATFlag,
 		utils.NoDiscoverFlag,
 		utils.DiscoveryV5Flag,
