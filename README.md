@@ -349,13 +349,15 @@ If using tendermint as consensus (like web3q_galileo or web3q_testnet), since te
 requires using p2p protocol to reach consensus among nodes, it uses 33333 as default port and can be 
 specified by `--validator.port`. Tendermint node key can also be specified by `--validator.nodekey`.
 
-If the tendermint consensus validator set need to update according to staking state, the following parameters 
-need to specify for the miner:
+If the Tendermint consensus validator set is updated according to the staking state on Mainchain, the following 
+parameters need to be specified for the validators:
 
   * `--validator.rpc` rpc for ethclient to get ValidatorSet from contract
   * `--validator.chainid` Chain ID which Validator contract on
   * `--validator.contract` Validator contract address
   * `--validator.changeepochid` Epoch to enable updating ValidatorSet from the contract
+
+Note: only the tendermint validator needs to set validator.* parameters. 
 
 
 ## Contribution
