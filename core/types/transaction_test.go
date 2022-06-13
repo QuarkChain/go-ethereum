@@ -162,6 +162,12 @@ func TestExternalTransaction(t *testing.T) {
 			t.Error("externalCallResult is included when calculating tx.Hash()")
 		}
 
+		// test tx.WithExternalCall()
+		txWithECR := externalCallTx.WithExternalCallResult(externalCallTx.ExternalCallResult())
+		if txWithECR.Hash() != externalCallTx.Hash() || !bytes.Equal(txWithECR.ExternalCallResult(), externalCallTx.ExternalCallResult()) {
+			t.Error("tx.WithExternalCallResult() err")
+		}
+
 		/*
 			rlp encode the transaction with signature
 		*/
