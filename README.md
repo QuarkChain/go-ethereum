@@ -345,7 +345,7 @@ proceedings to the account specified by `--miner.etherbase`. You can further tun
 by changing the default gas limit blocks converge to (`--miner.targetgaslimit`) and the price
 transactions are accepted at (`--miner.gasprice`).
 
-If using tendermint as consensus (like web3q_galileo or web3q_testnet), since tendermint consensus 
+If using Tendermint as consensus (like web3q_galileo or web3q_testnet), since Tendermint consensus 
 requires using p2p protocol to reach consensus among nodes, it uses 33333 as default port and can be 
 specified by `--validator.port`. Tendermint node key can also be specified by `--validator.nodekey`.
 
@@ -357,7 +357,7 @@ parameters need to be specified for the validators:
   * `--validator.contract` Validator contract address
   * `--validator.changeepochid` Epoch to enable updating ValidatorSet from the contract
 
-Note: only the tendermint validator needs to set validator.* parameters. 
+Note: only the Tendermint validator needs to set validator.* parameters. 
 
 
 ## Contribution
