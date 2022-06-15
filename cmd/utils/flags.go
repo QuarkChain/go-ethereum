@@ -197,6 +197,18 @@ var (
 		Name:  "validator.rpc",
 		Usage: "rpc for Validator to update validator set",
 	}
+	ExternalCallRoleFlag = cli.Uint64Flag{
+		Name:  "externalcall.role",
+		Usage: "Button to enable externalcall function",
+	}
+	ExternalCallRpcFlag = cli.StringFlag{
+		Name:  "externalcall.rpc",
+		Usage: "rpc to launch independent external call client",
+	}
+	ExternalCallSupportChainId = cli.Uint64Flag{
+		Name:  "externalcall.supportchainid",
+		Usage: "chainId of the target chain of the external call",
+	}
 	DeveloperFlag = cli.BoolFlag{
 		Name:  "dev",
 		Usage: "Ephemeral proof-of-authority network with a pre-funded developer account, mining enabled",
@@ -1456,6 +1468,20 @@ func setTendermint(ctx *cli.Context, cfg *ethconfig.Config) {
 		cfg.ValContract = ctx.GlobalString(ValContractFlag.Name)
 	}
 }
+func setExternalCall(ctx *cli.Context, cfg *ethconfig.Config) {
+	if ctx.GlobalIsSet(ExternalCallRoleFlag.Name) {
+		cfg.ExternalCallRole = ctx.GlobalUint64(ExternalCallRoleFlag.Name)
+	}
+
+	if ctx.GlobalIsSet(ExternalCallRpcFlag.Name) {
+		cfg.ExternalCallRpc = ctx.GlobalString(ExternalCallRpcFlag.Name)
+	}
+
+	if ctx.GlobalIsSet(ExternalCallSupportChainId.Name) {
+		cfg.ExternalCallSupportChainId = ctx.GlobalUint64(ExternalCallSupportChainId.Name)
+	}
+
+}
 
 func setMiner(ctx *cli.Context, cfg *miner.Config) {
 	if ctx.GlobalIsSet(MinerNotifyFlag.Name) {
@@ -1568,6 +1594,7 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	setTxPool(ctx, &cfg.TxPool)
 	setEthash(ctx, cfg)
 	setTendermint(ctx, cfg)
+	setExternalCall(ctx, cfg)
 	setMiner(ctx, &cfg.Miner)
 	setWhitelist(ctx, cfg)
 	setLes(ctx, cfg)
