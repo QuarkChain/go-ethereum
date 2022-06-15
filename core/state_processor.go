@@ -19,6 +19,7 @@ package core
 import (
 	"bytes"
 	"fmt"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/log"
 	"math/big"
 
@@ -77,7 +78,7 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 
 	// set external client of evm
 	// If the node is a validator node, it must ensure that both ExternalCall.Enable and ExternalCall.ActiveClient are true
-	if p.config.ExternalCall.Enable && p.config.ExternalCall.ActiveClient {
+	if p.config.ExternalCall.Role == 1 {
 		if p.bc.engine.ExternalCallClient() == nil {
 			return nil, nil, 0, fmt.Errorf("external call client of consensus engine is nil")
 		}
@@ -85,6 +86,14 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 		cfg.ExternalCallClient = p.bc.engine.ExternalCallClient()
 	}
 
+	if p.config.ExternalCall.Role == 3 {
+		independentClient, err := ethclient.Dial(p.config.ExternalCall.CallRpc)
+		defer independentClient.Close()
+		if err != nil {
+			return nil, nil, 0, err
+		}
+		cfg.ExternalCallClient = independentClient
+	}
 	// if a normal node without external_call_client should set p.config.ExternalCall.Enable as true
 	// and p.config.ExternalCall.ActiveClient as false
 
@@ -104,12 +113,13 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 
 		if len(crossChainCallResult) > 0 || len(tx.ExternalCallResult()) > 0 {
 			// If the node is a validator node, it must ensure that both ExternalCall.Enable and ExternalCall.VerifyExternalCallResultWhenSyncState are true
-			if p.config.ExternalCall.VerifyExternalCallResultWhenSyncState && p.config.ExternalCall.Enable {
+			if p.config.ExternalCall.VerifyExternalCallResultWhenSyncState {
 				if !bytes.Equal(tx.ExternalCallResult(), crossChainCallResult) {
-					log.Warn("failed to verify cross_chain_result", "txHash", tx.Hash().Hex(), "cross_chain_result", common.Bytes2Hex(crossChainCallResult))
+					log.Warn("failed to verify cross_chain_result and override the transaction.externalCallResult()", "txHash", tx.Hash().Hex(), "cross_chain_result", common.Bytes2Hex(crossChainCallResult))
 					tx.SetExternalCallResult(crossChainCallResult)
+				} else {
+					log.Info("verify cross_chain_result succeed", "txHash", tx.Hash().Hex(), "cross_chain_result", common.Bytes2Hex(crossChainCallResult))
 				}
-				log.Info("verify cross_chain_result succeed", "txHash", tx.Hash().Hex(), "cross_chain_result", common.Bytes2Hex(crossChainCallResult))
 			}
 		}
 
