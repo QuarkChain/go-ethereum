@@ -217,6 +217,14 @@ type Config struct {
 	ValContract            string
 	ValChainId             uint64
 	ValidatorChangeEpochId uint64
+
+	// ExternalCall config
+	ExternalCallRole            uint64
+	ExternalCallEnable          bool
+	ExternalCallActiveClient    bool
+	ExternalCallVerifyResInSync bool
+	ExternalCallSupportChainId  uint64
+	ExternalCallRpc             string
 }
 
 // CreateConsensusEngine creates a consensus engine for the given chain configuration.
