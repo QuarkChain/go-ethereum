@@ -220,9 +220,7 @@ type Config struct {
 
 	// ExternalCall config
 	ExternalCallRole            uint64
-	ExternalCallEnable          bool
-	ExternalCallActiveClient    bool
-	ExternalCallVerifyResInSync bool
+	ExternalCallVerifyResInSync uint
 	ExternalCallSupportChainId  uint64
 	ExternalCallRpc             string
 }
