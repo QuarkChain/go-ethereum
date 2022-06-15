@@ -169,6 +169,51 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		}
 	}
 
+	if chainConfig.ExternalCall != nil {
+		log.Warn("Config", "value:", *config)
+		if config.ExternalCallRole != 0 {
+			chainConfig.ExternalCall.Role = config.ExternalCallRole
+			if config.ExternalCallSupportChainId != 0 {
+				chainConfig.ExternalCall.SupportChainId = config.ExternalCallSupportChainId
+			}
+		}
+		// node with active client & verify external call result when syncing state
+		if config.ExternalCallRole == 1 {
+			chainConfig.ExternalCall.Enable = true
+			chainConfig.ExternalCall.ActiveClient = true
+			chainConfig.ExternalCall.VerifyExternalCallResultWhenSyncState = true
+		}
+		// node with active client & no verify external call result when syncing state
+		if config.ExternalCallRole == 2 {
+			chainConfig.ExternalCall.Enable = true
+			chainConfig.ExternalCall.ActiveClient = true
+			chainConfig.ExternalCall.VerifyExternalCallResultWhenSyncState = false
+		}
+		// node without active client
+		if config.ExternalCallRole == 3 {
+			chainConfig.ExternalCall.Enable = true
+			chainConfig.ExternalCall.ActiveClient = false
+			chainConfig.ExternalCall.VerifyExternalCallResultWhenSyncState = false
+		}
+
+		// node with independent active client
+		if config.ExternalCallRole == 4 {
+			chainConfig.ExternalCall.Enable = true
+			chainConfig.ExternalCall.ActiveClient = true
+			chainConfig.ExternalCall.VerifyExternalCallResultWhenSyncState = true
+			chainConfig.ExternalCall.CallRpc = config.ExternalCallRpc
+		}
+
+		// node without external call
+		if config.ExternalCallRole == 5 {
+			chainConfig.ExternalCall.Enable = false
+			chainConfig.ExternalCall.ActiveClient = false
+			chainConfig.ExternalCall.VerifyExternalCallResultWhenSyncState = false
+		}
+
+		log.Warn("External Config", "value:", *chainConfig.ExternalCall)
+	}
+
 	log.Info("Initialised chain configuration", "config", chainConfig)
 
 	if err := pruner.RecoverPruning(stack.ResolvePath(""), chainDb, stack.ResolvePath(config.TrieCleanCacheJournal)); err != nil {
