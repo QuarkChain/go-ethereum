@@ -19,6 +19,7 @@ package miner
 import (
 	"errors"
 	"fmt"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"math/big"
 	"sync"
 	"sync/atomic"
@@ -848,28 +849,30 @@ func (w *worker) commitTransaction(env *environment, tx *types.Transaction) ([]*
 	snap := env.state.Snapshot()
 
 	evmConfig := *w.chain.GetVMConfig()
-	if w.chainConfig.ExternalCall.Enable {
-		if w.chainConfig.ExternalCall.ActiveClient {
+	if w.chainConfig.ExternalCall.Role != 0 {
+		if w.chainConfig.ExternalCall.Role == 1 {
 			if w.chain.Engine().ExternalCallClient() == nil {
-				return nil, fmt.Errorf("external_call_client of consensus is nil")
+				return nil, fmt.Errorf("worker:external_call_client of consensus is nil")
 			}
-			log.Info("worker:evm initialize external_call_client")
+			log.Info("worker:evm initialize external_call_client succeed")
 			evmConfig.ExternalCallClient = w.chain.Engine().ExternalCallClient()
-
+		} else if w.chainConfig.ExternalCall.Role == 3 {
+			independentClient, err := ethclient.Dial(w.chainConfig.ExternalCall.CallRpc)
+			defer independentClient.Close()
+			if err != nil {
+				return nil, err
+			}
+			evmConfig.ExternalCallClient = independentClient
 		} else {
-			return nil, fmt.Errorf("active_client of external_call of proposer shouild not be false")
+			return nil, fmt.Errorf("worker:the value role of external_call of proposer must be [1] or [3], but got [%d]", w.chainConfig.ExternalCall.Role)
 		}
-
 	}
+
 	receipt, crossChainCallResult, err := core.ApplyTransaction(w.chainConfig, w.chain, &env.coinbase, env.gasPool, env.state, env.header, tx, &env.header.GasUsed, evmConfig)
 
 	var txExecuted *types.Transaction
 	if len(crossChainCallResult) != 0 {
-		if w.chainConfig.ExternalCall.ActiveClient && w.chainConfig.ExternalCall.Enable {
-			txExecuted = tx.WithExternalCallResult(crossChainCallResult)
-		} else {
-			return nil, fmt.Errorf("active_client or enable of external_call of proposer shouild not be false")
-		}
+		txExecuted = tx.WithExternalCallResult(crossChainCallResult)
 		log.Info("worker: transaction with cross_chain_call_result", "txHash", txExecuted.Hash().Hex(), "CrossChainCallResult", common.Bytes2Hex(txExecuted.ExternalCallResult()))
 	} else {
 		txExecuted = tx
