@@ -306,8 +306,7 @@ var (
 			},
 		},
 		ExternalCall: &ExternalCallConfig{
-			Enable:                                true,
-			ActiveClient:                          true,
+			Role:                                  1,
 			VerifyExternalCallResultWhenSyncState: true,
 			Version:                               1,
 			SupportChainId:                        4,
@@ -365,8 +364,7 @@ var (
 			},
 		},
 		ExternalCall: &ExternalCallConfig{
-			Enable:                                true,
-			ActiveClient:                          true,
+			Role:                                  1,
 			VerifyExternalCallResultWhenSyncState: true,
 			Version:                               1,
 			SupportChainId:                        4,
@@ -439,7 +437,7 @@ var (
 
 // TrustedCheckpoint represents a set of post-processed trie roots (CHT and
 // BloomTrie) associated with the appropriate section index and head hash. It is
-// used to start light syncing from this checkpoint and avoid downloading the
+// used to start light syncing from this checkpoint and avoiwd downloading the
 // entire header chain while still being able to securely access old headers/logs.
 type TrustedCheckpoint struct {
 	SectionIndex uint64      `json:"sectionIndex"`
@@ -560,11 +558,15 @@ type TendermintConfig struct {
 }
 
 type ExternalCallConfig struct {
-	Enable                                bool   `json:"enable"`
-	ActiveClient                          bool   `json:"activeClient"` // ActiveClient will set as true when consensus initialize the external client
+	//Role 0 : ExternalCall disable
+	//Role 1 : Node reuses the consensus client as externalCallClient
+	//Role 2 : Node without externalCallClient
+	//Role 3 : Node with independent externalCallClient (the callRpc is not empty)
+	Role                                  uint64 `json:"role"`
 	VerifyExternalCallResultWhenSyncState bool   `json:"verifyExternalCallResultWhenSyncState"`
 	Version                               uint64 `json:"version"`
 	SupportChainId                        uint64 `json:"supportChainId"`
+	CallRpc                               string `json:"callRpc"`
 }
 
 // String implements the stringer interface
