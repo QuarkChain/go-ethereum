@@ -442,6 +442,7 @@ func DefaultWeb3QTestnetGenesisBlock() *Genesis {
 			common.HexToAddress("0x96f22a48DcD4dFb99A11560b24bee02F374cA77D"): {Balance: new(big.Int).Mul(big.NewInt(1000000000000000000), big.NewInt(1000000000))}, // 1e9 Ether
 			common.HexToAddress("0x560CD6c5054847c2AFCAae0dd9E34E22E6f47100"): {Balance: new(big.Int).Mul(big.NewInt(1000000000000000000), big.NewInt(1000000000))}, // 1e9 Ether
 			common.HexToAddress("0x3d2Bf29BaB6ec95422Eb143e856df3B0E775e50c"): {Balance: new(big.Int).Mul(big.NewInt(1000000000000000000), big.NewInt(1000000000))}, // 1e9 Ether
+			common.HexToAddress("0xb71af880FC87F2aA099251A2224ef3f38BE7f451"): {Balance: new(big.Int).Mul(big.NewInt(1000000000000000000), big.NewInt(1000000000))}, // 1e9 Ether
 		},
 		NextValidators: []common.Address{
 			common.HexToAddress("0x96f22a48DcD4dFb99A11560b24bee02F374cA77D"),
