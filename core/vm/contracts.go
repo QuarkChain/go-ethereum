@@ -1102,14 +1102,32 @@ func (c *crossChainCall) RequiredGas(input []byte) uint64 {
 
 	maxDataLen := new(big.Int).SetBytes(getData(input, 4+3*32, 32)).Uint64()
 	inputGas := uint64(len(input)) * 3
-	var returnGas uint64 = 32 + 32*4 // pay address and topics
-	returnGas += maxDataLen * 3
-	gasUsed := returnGas + inputGas
+
+	var callResultGas uint64 = (32 + 32*7) * 3 // pay address and topics
+	if maxDataLen%32 != 0 {
+		maxDataLen = maxDataLen + (32 - maxDataLen%32)
+	}
+	callResultGas += maxDataLen * 3
+	gasUsed := callResultGas + inputGas
 	/*
-		call result size:
-			address size = 32byte
-			topics size = 32byte * 4
-			data size = maxDataLen
+		// address:32
+		000000000000000000000000751320c36f413a6280ad54487766ae0f780b6f58
+
+		// topics:3 *32 + 32 * 4(consider that the max number of topics is 4)
+		0000000000000000000000000000000000000000000000000000000000000060
+		00000000000000000000000000000000000000000000000000000000000000c0
+		0000000000000000000000000000000000000000000000000000000000000002
+		dce721dc2d078c030530aeb5511eb76663a705797c2a4a4d41a70dddfb8efca9
+		0000000000000000000000000000000000000000000000000000000000000001
+
+		// data:32 + (32 - maxDataLen % 32) + maxDatalen
+		00000000000000000000000000000000000000000000000000000000000000c0
+		0000000000000000000000000000000000000000000000000000000000000002
+		0000000000000000000000000000000000000000000000000000000000000001
+		0000000000000000000000000000000000000000000000000000000000000060
+		0000000000000000000000000000000000000000000000000000000000000028
+		bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+		bbbbbbbbbbbbbbbb000000000000000000000000000000000000000000000000
 	*/
 
 	return gasUsed
@@ -1120,11 +1138,6 @@ func (c *crossChainCall) Run(input []byte) ([]byte, error) {
 }
 
 func (c *crossChainCall) RunWith(env *PrecompiledContractToCrossChainCallEnv, input []byte) ([]byte, uint64, error) {
-	// consider the type of error
-	// 1.call by EOA Account
-	// 2.call by Contract
-	// if happen err, the temp will set as 1,ret(err msg) will set at memory to accessible for Application
-	//
 	ctx := context.Background()
 	if bytes.Equal(input[0:4], getLogByTxHashId) {
 
@@ -1140,6 +1153,10 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractToCrossChainCallEnv, in
 			}
 			trace = env.evm.Interpreter().CrossChainCallTraces()[traceIdx]
 			env.evm.Interpreter().AddTraceIdx()
+
+			if !trace.Success {
+				return trace.CallRes, trace.GasUsed, ErrExecutionReverted
+			}
 
 			return trace.CallRes, trace.GasUsed, nil
 		} else {
@@ -1162,6 +1179,7 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractToCrossChainCallEnv, in
 				errPack, _ := expErr.ABIPack()
 				trace = &CrossChainCallTrace{
 					CallRes: errPack,
+					Success: false,
 					GasUsed: actualGasUsed,
 				}
 
@@ -1179,6 +1197,7 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractToCrossChainCallEnv, in
 				}
 				trace = &CrossChainCallTrace{
 					CallRes: resultValuePack,
+					Success: true,
 					GasUsed: actualGasUsed,
 				}
 				env.evm.interpreter.crossChainCallTraces = append(env.evm.interpreter.crossChainCallTraces, trace)
@@ -1232,12 +1251,12 @@ func GetExternalLog(ctx context.Context, env *PrecompiledContractToCrossChainCal
 	log := receipt.Logs[logIdx]
 
 	var data []byte
-	var actualDataLen = len(log.Data)
-	if uint64(actualDataLen) < maxDataLen {
+	var actualDataLen = uint64(len(log.Data))
+	if actualDataLen <= maxDataLen {
 		data = log.Data
 	} else {
 		data = getData(log.Data, 0, maxDataLen)
-		actualDataLen = int(maxDataLen)
+		actualDataLen = maxDataLen
 	}
 
 	callres, err := NewGetLogByTxHash(log.Address, log.Topics, data)

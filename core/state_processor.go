@@ -105,6 +105,10 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 		if err != nil {
 			return nil, nil, 0, fmt.Errorf("could not apply tx %d [%v]: %w", i, tx.Hash().Hex(), err)
 		}
+
+		if len(tx.ExternalCallResult()) != 0 {
+			log.Warn("Tx With ExternalCallResult", "txHash", tx.Hash().Hex(), "external_call_result", common.Bytes2Hex(tx.ExternalCallResult()))
+		}
 		statedb.Prepare(tx.Hash(), i)
 		receipt, crossChainCallResult, err := applyTransaction(msg, p.config, p.bc, nil, gp, statedb, blockNumber, blockHash, tx, usedGas, vmenv)
 		if err != nil {

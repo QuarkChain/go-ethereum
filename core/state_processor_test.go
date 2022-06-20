@@ -79,6 +79,7 @@ func (ctx *TestChainContext) GetHeader(common.Hash, uint64) *types.Header {
 
 type WrapTx struct {
 	Tx                    *types.Transaction
+	GasUsed               uint64
 	TxWithExternalCallRes *types.Transaction
 	Args                  *CrossChainCallArgment
 	ExpectTxData          func() ([]byte, error)
@@ -132,7 +133,7 @@ func (wt *WrapTx) VerifyCallResult(crossCallResult []byte, unexpErr error, t *te
 
 	for i, v := range actualTraces {
 		cs := v.CallRes
-		wt.ExpectTraces[i].verifyRes(cs, t, i)
+		wt.ExpectTraces[i].verifyRes(cs, t, i, v.Success)
 	}
 
 }
@@ -140,6 +141,7 @@ func (wt *WrapTx) VerifyCallResult(crossCallResult []byte, unexpErr error, t *te
 type ExpectTrace struct {
 	CallResultBytes []byte // call result
 	ExpectErrBytes  []byte
+	success         bool
 	UnExpectErr     error
 }
 
@@ -155,8 +157,11 @@ func (et *ExpectTrace) compareRes(cs []byte) bool {
 	}
 }
 
-func (et *ExpectTrace) verifyRes(cs []byte, t *testing.T, traceIndex int) {
+func (et *ExpectTrace) verifyRes(cs []byte, t *testing.T, traceIndex int, success bool) {
 	if len(et.ExpectErrBytes) != 0 {
+		if success != false {
+			t.Error("the trace.Success should be false when happen Expect Err")
+		}
 		exp := vm.NewExpectCallErr("")
 		err := exp.ABIUnpack(et.ExpectErrBytes)
 		if err != nil {
@@ -174,6 +179,9 @@ func (et *ExpectTrace) verifyRes(cs []byte, t *testing.T, traceIndex int) {
 			t.Errorf("[TraceIndex %d] expect err no match , expect %s , actual %s", traceIndex, exp.Error(), act.Error())
 		}
 	} else {
+		if success != true {
+			t.Error("the trace.Success should be true when execute succeed")
+		}
 		if bytes.Equal(et.CallResultBytes, cs) {
 			t.Logf("[TraceIndex %d] res match!!! \ncall_result{%s} ", traceIndex, common.Bytes2Hex(et.CallResultBytes))
 		} else {
@@ -427,6 +435,7 @@ func TestApplyTransaction(t *testing.T) {
 				Args_CallOnce.CrossChainCallResultToExpectCallResult(),
 			},
 		},
+		// expect err match:CrossChainCall:logIdx out-of-bound
 		&WrapTx{
 			Tx: types.NewTx(&types.DynamicFeeTx{
 				ChainID:   globalchainId,
@@ -554,17 +563,15 @@ func TestApplyTransaction(t *testing.T) {
 		gaspool := new(GasPool)
 		gaspool.AddGas(8000000000)
 
-		var usedGas uint64 = 0
 		buf := new(bytes.Buffer)
 		w := bufio.NewWriter(buf)
 		tracer := logger.NewJSONLogger(&logger.Config{}, w)
 		vmconfig := vm.Config{Debug: true, Tracer: tracer, ExternalCallClient: externalClient}
 
 		_, statedb := MakePreState(db, gspec.Alloc, false)
-		_, crossCallResult, err := ApplyTransaction(config, chainContext, &addr1, gaspool, statedb, block.Header(), wtx.Tx, &usedGas, vmconfig)
+		_, crossCallResult, err := ApplyTransaction(config, chainContext, &addr1, gaspool, statedb, block.Header(), wtx.Tx, &wtx.GasUsed, vmconfig)
 
 		wtx.VerifyCallResult(crossCallResult, err, t)
-
 		wtx.SetTxWithExternalCallRes(crossCallResult)
 
 		w.Flush()
@@ -580,7 +587,7 @@ func TestApplyTransaction(t *testing.T) {
 	}
 
 	//evm executes a transaction while the external calling client is inactive
-	for _, wtx := range wrapTxs {
+	for index, wtx := range wrapTxs {
 		// prepare chainContext
 		cli := &clique.Clique{}
 		wtm := NewWrapTendermint(cli, nil)
@@ -591,7 +598,7 @@ func TestApplyTransaction(t *testing.T) {
 		gaspool := new(GasPool)
 		gaspool.AddGas(8000000000)
 
-		var usedGas uint64 = 0
+		var actualUsedGas uint64 = 0
 		buf := new(bytes.Buffer)
 		w := bufio.NewWriter(buf)
 		tracer := logger.NewJSONLogger(&logger.Config{}, w)
@@ -599,9 +606,13 @@ func TestApplyTransaction(t *testing.T) {
 		vmconfig := vm.Config{Debug: true, Tracer: tracer, ExternalCallClient: nil}
 
 		_, statedb := MakePreState(db, gspec.Alloc, false)
-		_, crossCallResult, err := ApplyTransaction(config, chainContext, &addr1, gaspool, statedb, block.Header(), wtx.TxWithExternalCallRes, &usedGas, vmconfig)
-
+		_, crossCallResult, err := ApplyTransaction(config, chainContext, &addr1, gaspool, statedb, block.Header(), wtx.TxWithExternalCallRes, &actualUsedGas, vmconfig)
 		wtx.VerifyCallResult(crossCallResult, err, t)
+
+		// compare gas use
+		if actualUsedGas != wtx.GasUsed {
+			t.Errorf("The gas consumption is different when the client is nil and not nil, txIndex=[%d] , nil gas used (%d) , no nil gas used (%d) ", index, actualUsedGas, wtx.GasUsed)
+		}
 
 		w.Flush()
 		if err != nil {
