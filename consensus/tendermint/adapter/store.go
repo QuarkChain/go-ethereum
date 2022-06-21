@@ -137,7 +137,7 @@ func (s *Store) ValidateBlock(state pbft.ChainState, block *types.FullBlock, com
 			validators, powers = header.NextValidators, header.NextValidatorPowers
 		}
 
-		state, err := s.getEpochState(height-s.config.Epoch, height-1)
+		state, err := s.getEpochState(height-s.config.Epoch, header)
 		if err != nil {
 			return err
 		}
@@ -304,7 +304,7 @@ func (s *Store) MakeBlock(
 	if height%s.config.Epoch == 0 && height > 0 {
 		// header Extra format will be prefix + remote block height + remote block hash +
 		// state bytes + header Extra
-		state, err := s.getEpochState(height-s.config.Epoch, height-1)
+		state, err := s.getEpochState(height-s.config.Epoch, header)
 		if err != nil {
 			log.Error(err.Error())
 			return nil
@@ -344,26 +344,20 @@ func (s *Store) MakeBlock(
 	return &types.FullBlock{Block: block, LastCommit: commit}
 }
 
-type epochState struct {
-	proposalCount uint32 // number of blocks proposal by a validator in one epoch
-	slash         uint64 // number of token need to be slashed for a validator in one epoch
-}
-
-func (s *Store) getEpochState(from, end uint64) ([]byte, error) {
-	m := make(map[common.Address]epochState)
-	header := s.chain.GetHeaderByNumber(end)
-	for header.Number.Uint64() >= from {
-		if _, ok := m[header.Coinbase]; ok {
-			m[header.Coinbase] = epochState{0, 0}
-		}
-		t := m[header.Coinbase]
-		t.proposalCount = t.proposalCount + 1
-
+func (s *Store) getEpochState(lastEpochHeight uint64, startHeader *types.Header) ([]byte, error) {
+	m := make(map[common.Address]uint32)
+	header := startHeader
+	for header.Number.Uint64() > lastEpochHeight {
 		header = s.chain.GetHeaderByHash(header.ParentHash)
+		if _, ok := m[header.Coinbase]; !ok {
+			m[header.Coinbase] = uint32(0)
+		}
+
+		m[header.Coinbase] = m[header.Coinbase] + 1
 	}
 
 	// use the Nextvalidators order in epoch header which using the same order in the mainnet contract.
-	state := make([]epochState, len(header.NextValidators))
+	state := make([]uint32, len(header.NextValidators))
 	for i, addr := range header.NextValidators {
 		state[i] = m[addr]
 	}
