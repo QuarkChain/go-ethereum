@@ -34,8 +34,9 @@ var (
 	SepoliaGenesisHash      = common.HexToHash("0x25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9")
 	RinkebyGenesisHash      = common.HexToHash("0x6341fd3daf94b748c72ced5a5b26028f2474f5f00d824504e4fa37a75767e177")
 	GoerliGenesisHash       = common.HexToHash("0xbf7e331f7f7c1dd2e05159666b3bf8bc7a8a3a9eb1d518969eab529dd9b88c1a")
-	Web3QTestnetGenesisHash = common.HexToHash("0x8e362a73300af40adecacee8ab199d33d348abb251e873412549fc5855223d40")
+	Web3QTestnetGenesisHash = common.HexToHash("0xe1b551a47236ea806a1a9f6a9082ab989cffd999a44caa6015edc27136e0aab5")
 	Web3QGalileoGenesisHash = common.HexToHash("0xa576a985390f3a643e2acdeaed074cc9866c99f6bdf3ca8c49ec959054703745")
+	Web3QRinkebyGenesisHash = common.HexToHash("0x36f9ea166c6c89eb8af0a49c345731f13c5c2b26ff901fb0177b959f1242d7dd")
 )
 
 // TrustedCheckpoints associates each known checkpoint with the genesis hash of
@@ -256,13 +257,13 @@ var (
 		Threshold: 2,
 	}
 
-	Web3QTestNetBootnodes = []string{
+	Web3QRinkebyBootnodes = []string{
 		"/ip4/127.0.0.1/udp/33333/quic/p2p/12D3KooWEZ94qZgJgUNYiLwXahknkniYgozxw5eocijZJkew6Mj5",
 		"/ip4/127.0.0.1/udp/33334/quic/p2p/12D3KooWRAPv94qoUn8dAa3NQpZGKjaBcdiaqCETrcuyo2rT2ZvV",
 	}
 
 	// Web3QTestnetChainConfig contains the chain parameters to run a node on the Web3Q test network.
-	Web3QTestnetChainConfig = &ChainConfig{
+	Web3QRinkebyChainConfig = &ChainConfig{
 		ChainID:             big.NewInt(3333),
 		HomesteadBlock:      big.NewInt(0),
 		DAOForkBlock:        nil,
@@ -287,7 +288,7 @@ var (
 			ValRpc:                 "",
 			P2pPort:                33333,
 			ProposerRepetition:     8,
-			P2pBootstrap:           strings.Join(Web3QTestNetBootnodes, ","),
+			P2pBootstrap:           strings.Join(Web3QRinkebyBootnodes, ","),
 			NodeKeyPath:            "",
 			ConsensusConfig: ConsensusConfig{
 				// WalPath:                     filepath.Join(defaultDataDir, "cs.wal", "wal"),
@@ -310,6 +311,56 @@ var (
 			VerifyExternalCallResultWhenSyncState: true,
 			Version:                               1,
 			SupportChainId:                        4,
+		},
+	}
+
+	Web3QTestnetValBootnodes = []string{
+		"/ip4/68.183.157.114/udp/33333/quic/p2p/12D3KooWEZ94qZgJgUNYiLwXahknkniYgozxw5eocijZJkew6Mj5",
+		"/ip4/128.199.102.174/udp/33333/quic/p2p/12D3KooWNjKALie7Cdpb4KG8axgABA4VCCsKoBQdvYvRhVZhbtPk",
+	}
+
+	// Web3QTestnetChainConfig contains the chain parameters to run a node on the Web3Q test network.
+	Web3QTestnetChainConfig = &ChainConfig{
+		ChainID:             big.NewInt(3333),
+		HomesteadBlock:      big.NewInt(0),
+		DAOForkBlock:        nil,
+		DAOForkSupport:      true,
+		EIP150Block:         big.NewInt(0),
+		EIP155Block:         big.NewInt(0),
+		EIP158Block:         big.NewInt(0),
+		ByzantiumBlock:      big.NewInt(0),
+		ConstantinopleBlock: big.NewInt(0),
+		PetersburgBlock:     big.NewInt(0),
+		IstanbulBlock:       big.NewInt(0),
+		MuirGlacierBlock:    nil,
+		BerlinBlock:         big.NewInt(0),
+		LondonBlock:         big.NewInt(0),
+		ArrowGlacierBlock:   nil,
+		Tendermint: &TendermintConfig{
+			Epoch:                  1000,
+			ValidatorContract:      "",
+			ContractChainID:        0,
+			ValidatorChangeEpochId: 0,
+			ValRpc:                 "",
+			P2pPort:                33333,
+			ProposerRepetition:     8,
+			P2pBootstrap:           strings.Join(Web3QTestnetValBootnodes, ","),
+			NodeKeyPath:            "",
+			ConsensusConfig: ConsensusConfig{
+				// WalPath:                     filepath.Join(defaultDataDir, "cs.wal", "wal"),
+				TimeoutPropose:               3000 * time.Millisecond,
+				TimeoutProposeDelta:          500 * time.Millisecond,
+				TimeoutPrevote:               1000 * time.Millisecond,
+				TimeoutPrevoteDelta:          500 * time.Millisecond,
+				TimeoutPrecommit:             1000 * time.Millisecond,
+				TimeoutPrecommitDelta:        500 * time.Millisecond,
+				TimeoutCommit:                5000 * time.Millisecond,
+				SkipTimeoutCommit:            false,
+				PeerGossipSleepDuration:      100 * time.Millisecond,
+				PeerQueryMaj23SleepDuration:  2000 * time.Millisecond,
+				DoubleSignCheckHeight:        uint64(0),
+				ConsensusSyncRequestDuration: 500 * time.Millisecond,
+			},
 		},
 	}
 
@@ -362,12 +413,6 @@ var (
 				DoubleSignCheckHeight:        uint64(0),
 				ConsensusSyncRequestDuration: 500 * time.Millisecond,
 			},
-		},
-		ExternalCall: &ExternalCallConfig{
-			Role:                                  1,
-			VerifyExternalCallResultWhenSyncState: true,
-			Version:                               1,
-			SupportChainId:                        4,
 		},
 	}
 
@@ -543,10 +588,10 @@ type CliqueConfig struct {
 }
 
 type TendermintConfig struct {
-	Epoch                  uint64 `json:"epoch"`             // Epoch lengh to vote new validator
-	ValidatorContract      string `json:"validatorContract"` // Validator set contract
+	Epoch                  uint64 `json:"epoch"`             // Epoch length to vote new validator
+	ValidatorContract      string `json:"validatorContract"` // Validator contract address
 	ContractChainID        uint64 `json:"contractChainId"`   // Chain ID which Validator contract on
-	ValidatorChangeEpochId uint64 `json:"valChangeEpochId"`  // Epoch to enable update ValidatorSet from contract
+	ValidatorChangeEpochId uint64 `json:"valChangeEpochId"`  // Epoch to enable updating ValidatorSet from contract
 	ValRpc                 string `json:"valRpc"`            // rpc for ethclient to get ValidatorSet from contract
 	NodeKeyPath            string
 	P2pPort                uint

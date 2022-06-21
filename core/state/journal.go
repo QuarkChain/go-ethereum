@@ -138,6 +138,12 @@ type (
 		address *common.Address
 		slot    *common.Hash
 	}
+	// Sstorage change
+	sstorageChange struct {
+		prevBytes []byte // nil means not exist in StateDB (but may exist in underlying DB)
+		address   *common.Address
+		kvIdx     uint64
+	}
 )
 
 func (ch createObjectChange) revert(s *StateDB) {
@@ -266,4 +272,17 @@ func (ch accessListAddSlotChange) revert(s *StateDB) {
 
 func (ch accessListAddSlotChange) dirtied() *common.Address {
 	return nil
+}
+
+func (ch sstorageChange) dirtied() *common.Address {
+	// the account structure is not touched.
+	return nil
+}
+
+func (ch sstorageChange) revert(s *StateDB) {
+	if ch.prevBytes == nil {
+		delete(s.shardedStorage[*ch.address], ch.kvIdx)
+	} else {
+		s.shardedStorage[*ch.address][ch.kvIdx] = ch.prevBytes
+	}
 }

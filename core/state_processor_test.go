@@ -198,7 +198,7 @@ type CrossChainCallArgment struct {
 	MaxDataLen  uint64
 	Confirms    uint64
 	contractAbi abi.ABI
-	env         *vm.PrecompiledContractToCrossChainCallEnv
+	env         *vm.PrecompiledContractCallEnv
 }
 
 const CrossChainCallContract = `
@@ -304,7 +304,7 @@ const CrossChainCallContract = `
 func NewCrossChainCallArgment(chainconfig *params.ChainConfig, client *ethclient.Client, chainId uint64, txHash common.Hash, logIdx uint64, maxDataLen uint64, confirms uint64) *CrossChainCallArgment {
 	evmConfig := vm.Config{ExternalCallClient: client}
 	evm := vm.NewEVM(vm.BlockContext{}, vm.TxContext{}, nil, chainconfig, evmConfig)
-	env := vm.NewPrecompiledContractToCrossChainCallEnv(evm, 3)
+	env := vm.NewPrecompiledContractCallEnv(evm, nil)
 	abi, err := abi.JSON(strings.NewReader(CrossChainCallContract))
 	if err != nil {
 		panic(err)

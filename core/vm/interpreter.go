@@ -38,6 +38,8 @@ type Config struct {
 	ExtraEips []int // Additional EIPS that are to be enabled
 
 	ExternalCallClient *ethclient.Client
+
+	IsJsonRpc bool // Whether the call is in context of JsonRpc
 }
 
 // ScopeContext contains the things that are per-call, such as stack and memory,

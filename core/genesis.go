@@ -259,6 +259,8 @@ func (g *Genesis) configOrDefault(ghash common.Hash) *params.ChainConfig {
 		return params.Web3QTestnetChainConfig
 	case ghash == params.Web3QGalileoGenesisHash:
 		return params.Web3QGalileoChainConfig
+	case ghash == params.Web3QRinkebyGenesisHash:
+		return params.Web3QRinkebyChainConfig
 	default:
 		return params.AllEthashProtocolChanges
 	}
@@ -427,8 +429,8 @@ func DefaultSepoliaGenesisBlock() *Genesis {
 	}
 }
 
-// DefaultWeb3QTestnetGenesisBlock returns the Web3Q test network genesis block.
-func DefaultWeb3QTestnetGenesisBlock() *Genesis {
+// DefaultWeb3QRinkebyGenesisBlock returns the Web3Q test network genesis block.
+func DefaultWeb3QRinkebyGenesisBlock() *Genesis {
 	return &Genesis{
 		Config:     params.Web3QTestnetChainConfig,
 		Nonce:      0,
@@ -450,6 +452,29 @@ func DefaultWeb3QTestnetGenesisBlock() *Genesis {
 			common.HexToAddress("0x3d2Bf29BaB6ec95422Eb143e856df3B0E775e50c"),
 		},
 		NextValidatorPowers: []uint64{1, 1, 1},
+	}
+}
+
+// DefaultWeb3QTestnetGenesisBlock returns the Web3Q test network genesis block.
+func DefaultWeb3QTestnetGenesisBlock() *Genesis {
+	return &Genesis{
+		Config:     params.Web3QTestnetChainConfig,
+		Nonce:      0,
+		ExtraData:  hexutil.MustDecode("0x57656c636f6d6520746f20746865206272617665206e65772057656233512121dc0c84b6e563e7a4cc54d2b0aa99cf18a372f76edcfa418856cfb2695734ce7535bf79b2eb4261bd0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
+		GasLimit:   30000000,
+		Difficulty: big.NewInt(0x1),
+		Timestamp:  1644537097,
+		Alloc: map[common.Address]GenesisAccount{
+			common.HexToAddress("0x0E961a6A6235eFDB9a0F0BC753E395211B77cc28"): {Balance: new(big.Int).Mul(big.NewInt(1000000000000000000), big.NewInt(1000000000))}, // 1e9 Ether
+			common.HexToAddress("0x5C935469C5592Aeeac3372e922d9bCEabDF8830d"): {Balance: new(big.Int).Mul(big.NewInt(1000000000000000000), big.NewInt(1000000000))}, // 1e9 Ether
+		},
+		NextValidators: []common.Address{
+			common.HexToAddress("0x2cff0b8e36522eba76f6f5c328d58581243882e4"),
+			common.HexToAddress("0x959994471dee37411f579dd2820a8743cba20f46"),
+			common.HexToAddress("0x977cfc676bb06daed7ddfa7711bcfe8d50c93081"),
+			common.HexToAddress("0xcd21538af6e33ff6fcf1e2ca20f771413004cfd3"),
+		},
+		NextValidatorPowers: []uint64{1, 1, 1, 1},
 	}
 }
 
