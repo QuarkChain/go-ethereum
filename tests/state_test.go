@@ -20,6 +20,7 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -28,8 +29,6 @@ import (
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/ethclient"
-
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/state"
@@ -324,12 +323,14 @@ func TestWeb3QState(t *testing.T) {
 					context := core.NewEVMBlockContext(block.Header(), nil, &test.json.Env.Coinbase)
 					context.GetHash = vmTestBlockHash
 					context.BaseFee = baseFee
-					evm := vm.NewEVM(context, txContext, statedb, config, vmconfig)
+
 					eClient, err := ethclient.Dial("https://rinkeby.infura.io/v3/4e3e18f80d8d4ad5959b7404e85e0143")
 					if err != nil {
 						panic(err)
 					}
-					evm.SetExternalCallClient(eClient)
+
+					vmconfig.ExternalCallClient = eClient
+					evm := vm.NewEVM(context, txContext, statedb, config, vmconfig)
 
 					// Execute the message.
 					snapshot := statedb.Snapshot()
@@ -342,17 +343,6 @@ func TestWeb3QState(t *testing.T) {
 						statedb.RevertToSnapshot(snapshot)
 						printStateTrie(statedb, test, t)
 					}
-
-					//if res.Err != nil {
-					//	t.Error("EVM ERROR:", res.Err)
-					//	printStateTrie(statedb, test, t)
-					//}
-					//t.Log("cross call result:", common.Bytes2Hex(res.CrossChainCallResults))
-					//call_result := &vm.CrossChainCallResult{}
-					//err = rlp.DecodeBytes(res.CrossChainCallResults, call_result)
-					//if err != nil {
-					//	t.Error("rlp decode err:", err)
-					//}
 					//t.Log("evm call result:", common.Bytes2Hex(res.ReturnData))
 					// Commit block
 					statedb.Commit(config.IsEIP158(block.Number()))
