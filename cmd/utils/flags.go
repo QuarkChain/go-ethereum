@@ -170,6 +170,10 @@ var (
 		Name:  "web3q_galileo",
 		Usage: "Web3Q network: pre-configured proof-of-authority BFT test network",
 	}
+	Web3QRinkebyFlag = cli.BoolFlag{
+		Name:  "web3q_rinkeby",
+		Usage: "Web3Q network: pre-configured proof-of-authority BFT test network",
+	}
 	Web3QMainnetFlag = cli.BoolFlag{
 		Name:  "web3q_mainnet",
 		Usage: "Web3Q mainnet",
@@ -1510,6 +1514,7 @@ func setTendermint(ctx *cli.Context, cfg *ethconfig.Config) {
 		cfg.ValContract = ctx.GlobalString(ValContractFlag.Name)
 	}
 }
+
 func setExternalCall(ctx *cli.Context, cfg *ethconfig.Config) {
 	if ctx.GlobalIsSet(ExternalCallRoleFlag.Name) {
 		log.Warn("ExternalCallRoleFlag", "value", ctx.GlobalUint64(ExternalCallRoleFlag.Name))
@@ -1799,6 +1804,12 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 			cfg.NetworkId = 3334
 		}
 		cfg.Genesis = core.DefaultWeb3QGalileoGenesisBlock()
+		SetDNSDiscoveryDefaults(cfg, cfg.Genesis.ToBlock(nil).Hash())
+	case ctx.GlobalBool(Web3QRinkebyFlag.Name):
+		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
+			cfg.NetworkId = 3335
+		}
+		cfg.Genesis = core.DefaultWeb3QRinkebyGenesisBlock()
 		SetDNSDiscoveryDefaults(cfg, cfg.Genesis.ToBlock(nil).Hash())
 	case ctx.GlobalBool(Web3QMainnetFlag.Name):
 		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
