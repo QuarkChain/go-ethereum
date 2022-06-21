@@ -885,6 +885,9 @@ func MakeDataDir(ctx *cli.Context) string {
 		if ctx.GlobalBool(Web3QGalileoFlag.Name) {
 			return filepath.Join(path, "web3q_galileo")
 		}
+		if ctx.GlobalBool(Web3QRinkebyFlag.Name) {
+			return filepath.Join(path, "web3q_rinkeby")
+		}
 		if ctx.GlobalBool(Web3QMainnetFlag.Name) {
 			return filepath.Join(path, "web3q_mainnet")
 		}
@@ -946,6 +949,8 @@ func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
 		urls = params.Web3QTestnetBootnodes
 	case ctx.GlobalBool(Web3QGalileoFlag.Name):
 		urls = params.Web3QGalileoBootnodes
+	case ctx.GlobalBool(Web3QRinkebyFlag.Name):
+		urls = params.Web3QRinkebyBootnodes
 	case ctx.GlobalBool(Web3QMainnetFlag.Name):
 		urls = params.Web3QMainnetBootnodes
 	case cfg.BootstrapNodes != nil:
@@ -1399,6 +1404,8 @@ func setDataDir(ctx *cli.Context, cfg *node.Config) {
 		cfg.DataDir = filepath.Join(node.DefaultDataDir(), "web3q_testnet")
 	case ctx.GlobalBool(Web3QGalileoFlag.Name) && cfg.DataDir == node.DefaultDataDir():
 		cfg.DataDir = filepath.Join(node.DefaultDataDir(), "web3q_galileo")
+	case ctx.GlobalBool(Web3QRinkebyFlag.Name) && cfg.DataDir == node.DefaultDataDir():
+		cfg.DataDir = filepath.Join(node.DefaultDataDir(), "web3q_rinkeby")
 	case ctx.GlobalBool(Web3QMainnetFlag.Name) && cfg.DataDir == node.DefaultDataDir():
 		cfg.DataDir = filepath.Join(node.DefaultDataDir(), "web3q_mainnet")
 	}
@@ -1628,7 +1635,7 @@ func CheckExclusive(ctx *cli.Context, args ...interface{}) {
 // SetEthConfig applies eth-related command line flags to the config.
 func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	// Avoid conflicting network flags
-	CheckExclusive(ctx, MainnetFlag, DeveloperFlag, RopstenFlag, RinkebyFlag, GoerliFlag, SepoliaFlag, Web3QTestnetFlag, Web3QGalileoFlag, Web3QMainnetFlag)
+	CheckExclusive(ctx, MainnetFlag, DeveloperFlag, RopstenFlag, RinkebyFlag, GoerliFlag, SepoliaFlag, Web3QTestnetFlag, Web3QGalileoFlag, Web3QRinkebyFlag, Web3QMainnetFlag)
 	CheckExclusive(ctx, LightServeFlag, SyncModeFlag, "light")
 	CheckExclusive(ctx, DeveloperFlag, ExternalSignerFlag) // Can't use both ephemeral unlocked and external signer
 	if ctx.GlobalString(GCModeFlag.Name) == "archive" && ctx.GlobalUint64(TxLookupLimitFlag.Name) != 0 {

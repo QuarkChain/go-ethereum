@@ -257,7 +257,7 @@ var (
 		Threshold: 2,
 	}
 
-	Web3QRinkebyBootnodes = []string{
+	Web3QRinkebyValBootnodes = []string{
 		"/ip4/127.0.0.1/udp/33333/quic/p2p/12D3KooWEZ94qZgJgUNYiLwXahknkniYgozxw5eocijZJkew6Mj5",
 		"/ip4/127.0.0.1/udp/33334/quic/p2p/12D3KooWRAPv94qoUn8dAa3NQpZGKjaBcdiaqCETrcuyo2rT2ZvV",
 	}
@@ -288,7 +288,7 @@ var (
 			ValRpc:                 "",
 			P2pPort:                33333,
 			ProposerRepetition:     8,
-			P2pBootstrap:           strings.Join(Web3QRinkebyBootnodes, ","),
+			P2pBootstrap:           strings.Join(Web3QRinkebyValBootnodes, ","),
 			NodeKeyPath:            "",
 			ConsensusConfig: ConsensusConfig{
 				// WalPath:                     filepath.Join(defaultDataDir, "cs.wal", "wal"),
