@@ -432,7 +432,7 @@ func DefaultSepoliaGenesisBlock() *Genesis {
 // DefaultWeb3QRinkebyGenesisBlock returns the Web3Q test network genesis block.
 func DefaultWeb3QRinkebyGenesisBlock() *Genesis {
 	return &Genesis{
-		Config:     params.Web3QTestnetChainConfig,
+		Config:     params.Web3QRinkebyChainConfig,
 		Nonce:      0,
 		ExtraData:  hexutil.MustDecode("0x57656c636f6d6520746f20746865206272617665206e65772057656233512121dc0c84b6e563e7a4cc54d2b0aa99cf18a372f76edcfa418856cfb2695734ce7535bf79b2eb4261bd0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
 		GasLimit:   30000000,
