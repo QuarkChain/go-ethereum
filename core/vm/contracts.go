@@ -1095,7 +1095,7 @@ func (c *bls12381Pairing) Run(input []byte) ([]byte, error) {
 		off := 384 * i
 		t0, t1, t2 := off, off+128, off+384
 
-		// Decode G1 point
+		// Decode G1 pointF
 		p1, err := g1.DecodePoint(input[t0:t1])
 		if err != nil {
 			return nil, err
@@ -1320,7 +1320,7 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractCallEnv, input []byte) 
 					GasUsed: actualGasUsed,
 				}
 
-				env.evm.interpreter.crossChainCallTraces = append(env.evm.interpreter.crossChainCallTraces, trace)
+				env.evm.Interpreter().AppendCrossChainCallTrace(trace)
 				return trace.CallRes, trace.GasUsed, ErrExecutionReverted
 			} else {
 				// calculate actual cost of gas
@@ -1338,7 +1338,7 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractCallEnv, input []byte) 
 					Success: true,
 					GasUsed: actualGasUsed,
 				}
-				env.evm.interpreter.crossChainCallTraces = append(env.evm.interpreter.crossChainCallTraces, trace)
+				env.evm.Interpreter().AppendCrossChainCallTrace(trace)
 
 				return trace.CallRes, trace.GasUsed, nil
 			}
