@@ -20,9 +20,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/ethereum/go-ethereum/core/rawdb"
+	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/params"
 	"io/ioutil"
+	"math/big"
 	"testing"
 	"time"
 
@@ -100,6 +103,31 @@ var crossChainCallTest = []precompiledTest{
 	},
 }
 
+var chainConfig = &params.ChainConfig{
+	ChainID:             big.NewInt(3335),
+	HomesteadBlock:      big.NewInt(0),
+	DAOForkBlock:        nil,
+	DAOForkSupport:      true,
+	EIP150Block:         big.NewInt(0),
+	EIP155Block:         big.NewInt(0),
+	EIP158Block:         big.NewInt(0),
+	ByzantiumBlock:      big.NewInt(0),
+	ConstantinopleBlock: big.NewInt(0),
+	PetersburgBlock:     big.NewInt(0),
+	IstanbulBlock:       big.NewInt(0),
+	MuirGlacierBlock:    nil,
+	BerlinBlock:         big.NewInt(0),
+	LondonBlock:         big.NewInt(0),
+	PisaBlock:           big.NewInt(0),
+	ArrowGlacierBlock:   nil,
+	ExternalCall: &params.ExternalCallConfig{
+		Role:                                  1,
+		VerifyExternalCallResultWhenSyncState: true,
+		Version:                               1,
+		SupportChainId:                        4,
+	},
+}
+
 func TestCrossChainCall(t *testing.T) {
 	var test precompiledTest = crossChainCallTest[0]
 	p := &crossChainCall{}
@@ -113,7 +141,7 @@ func TestCrossChainCall(t *testing.T) {
 	}
 
 	evmConfig := Config{ExternalCallClient: eClient}
-	evm := NewEVM(BlockContext{}, TxContext{}, nil, params.Web3QGalileoChainConfig, evmConfig)
+	evm := NewEVM(BlockContext{}, TxContext{}, nil, chainConfig, evmConfig)
 	evmInterpreter := NewEVMInterpreter(evm, evm.Config)
 	evm.interpreter = evmInterpreter
 
@@ -123,6 +151,45 @@ func TestCrossChainCall(t *testing.T) {
 		if !bytes.Equal(common.Hex2Bytes(test.Want), res) {
 			t.Error("\ngot: ", common.Bytes2Hex(res), "\nwant:", test.Want)
 		}
+	}
+}
+
+func TestMintNativeToken(t *testing.T) {
+	input0 := common.FromHex("0000000000000000000000000000000000000000000000000000000003330002")
+	p0 := &systemContractDeployer{}
+	gas0 := p0.RequiredGas(input0)
+
+	to := common.HexToAddress("0x96f22a48DcD4dFb99A11560b24bee02F374cA77D")
+	amount, _ := new(big.Int).SetString("123400000000000000000000000000000000", 16)
+
+	input1 := common.FromHex("62aaa16000000000000000000000000096f22a48DcD4dFb99A11560b24bee02F374cA77D0000000000000000000000000000123400000000000000000000000000000000")
+	p1 := &nativeToken{}
+	gas1 := p1.RequiredGas(input1)
+
+	sdb := state.NewDatabase(rawdb.NewMemoryDatabase())
+	statedb, _ := state.New(common.Hash{}, sdb, nil)
+
+	evmConfig := Config{}
+	evm := NewEVM(BlockContext{}, TxContext{}, statedb, chainConfig, evmConfig)
+	evmInterpreter := NewEVMInterpreter(evm, evm.Config)
+	evm.interpreter = evmInterpreter
+
+	if _, _, err := RunPrecompiledContract(&PrecompiledContractCallEnv{evm: evm}, p0, input0, gas0); err != nil {
+		t.Error(err)
+	} else {
+		statedb.Commit(false)
+	}
+
+	caller := AccountRef(common.HexToAddress("0x0000000000000000000000000000000003330002"))
+	if _, _, err := RunPrecompiledContract(&PrecompiledContractCallEnv{evm: evm, caller: caller}, p1, input1, gas1); err != nil {
+		t.Error(err)
+	} else {
+		statedb.Commit(false)
+	}
+
+	resAmount := statedb.GetBalance(to)
+	if amount.Cmp(resAmount) != 0 {
+		t.Errorf("balance no match expect %s  got %s", amount.String(), resAmount.String())
 	}
 }
 
