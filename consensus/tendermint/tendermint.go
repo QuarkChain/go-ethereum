@@ -529,7 +529,3 @@ func (c *Tendermint) Close() error {
 func (c *Tendermint) APIs(chain consensus.ChainHeaderReader) []rpc.API {
 	return []rpc.API{}
 }
-
-func (c *Tendermint) ExternalCallClient() *ethclient.Client {
-	return c.client
-}

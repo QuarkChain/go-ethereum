@@ -35,7 +35,6 @@ import (
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
@@ -696,10 +695,6 @@ func (c *Clique) APIs(chain consensus.ChainHeaderReader) []rpc.API {
 		Service:   &API{chain: chain, clique: c},
 		Public:    false,
 	}}
-}
-
-func (c *Clique) ExternalCallClient() *ethclient.Client {
-	return nil
 }
 
 // SealHash returns the hash of a block prior to it being sealed.

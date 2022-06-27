@@ -20,7 +20,6 @@ package ethash
 import (
 	"errors"
 	"fmt"
-	"github.com/ethereum/go-ethereum/ethclient"
 	"math"
 	"math/big"
 	"math/rand"
@@ -685,10 +684,6 @@ func (ethash *Ethash) APIs(chain consensus.ChainHeaderReader) []rpc.API {
 			Public:    true,
 		},
 	}
-}
-
-func (c *Ethash) ExternalCallClient() *ethclient.Client {
-	return nil
 }
 
 // SeedHash is the seed to use for generating a verification cache and the mining
