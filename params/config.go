@@ -19,7 +19,6 @@ package params
 import (
 	"encoding/binary"
 	"fmt"
-	"github.com/ethereum/go-ethereum/ethclient"
 	"math/big"
 	"strings"
 	"time"
@@ -619,7 +618,6 @@ type ExternalCallConfig struct {
 	Version                               uint64 `json:"version"`
 	SupportChainId                        uint64 `json:"supportChainId"`
 	CallRpc                               string `json:"callRpc"`
-	Client                                *ethclient.Client
 }
 
 // String implements the stringer interface
