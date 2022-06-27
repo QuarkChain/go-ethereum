@@ -57,10 +57,6 @@ func NewWrapTendermint(cli *clique.Clique, client *ethclient.Client) *WrapTender
 	return &WrapTendermint{Clique: cli, Client: client}
 }
 
-func (t *WrapTendermint) ExternalCallClient() *ethclient.Client {
-	return t.Client
-}
-
 type TestChainContext struct {
 	tm consensus.Engine
 }

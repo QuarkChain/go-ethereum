@@ -18,6 +18,7 @@ package core
 
 import (
 	"fmt"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -25,7 +26,6 @@ import (
 	"github.com/ethereum/go-ethereum/consensus/misc"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/params"
 )
@@ -104,19 +104,25 @@ func (b *BlockGen) AddTxWithChain(bc *BlockChain, tx *types.Transaction) {
 	}
 	b.statedb.Prepare(tx.Hash(), len(b.txs))
 
-	evmConfig := vm.Config{}
+	evmConfig := bc.GetVMConfig()
 	if bc.chainConfig.ExternalCall.Role != params.DisableExternalCall {
 		if bc.chainConfig.ExternalCall.Role == params.NodeWithExternalCallClient {
-			if bc.chainConfig.ExternalCall.Client == nil {
-				panic("worker:external_call_client of consensus is nil")
+			// the evmConfig is the pointer of blockchain.evmConfig, so the externalCallClient maintains one instance of externalCallClient.
+			if evmConfig.ExternalCallClient == nil {
+				externalCallClient, err := ethclient.Dial(bc.chainConfig.ExternalCall.CallRpc)
+				if err != nil {
+					panic(fmt.Errorf("Failed to dial rpc %s %s", "error:", err.Error()))
+				}
+				defer externalCallClient.Close()
+				// set up externalCallClient
+				evmConfig.ExternalCallClient = externalCallClient
 			}
-			evmConfig.ExternalCallClient = bc.chainConfig.ExternalCall.Client
 		} else {
 			panic(fmt.Errorf("worker:the value role of external_call of proposer must be [1], but got [%d]", bc.chainConfig.ExternalCall.Role))
 		}
 	}
 
-	receipt, _, err := ApplyTransaction(b.config, bc, &b.header.Coinbase, b.gasPool, b.statedb, b.header, tx, &b.header.GasUsed, evmConfig)
+	receipt, _, err := ApplyTransaction(b.config, bc, &b.header.Coinbase, b.gasPool, b.statedb, b.header, tx, &b.header.GasUsed, *evmConfig)
 	if err != nil {
 		panic(err)
 	}
