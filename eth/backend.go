@@ -20,6 +20,7 @@ package eth
 import (
 	"errors"
 	"fmt"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"math/big"
 	"runtime"
 	"sync"
@@ -170,8 +171,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	}
 
 	if chainConfig.ExternalCall != nil {
-		log.Warn("Config", "value:", *config)
-		if config.ExternalCallRole != 0 {
+		if config.ExternalCallRole != params.DisableExternalCall {
 			chainConfig.ExternalCall.Role = config.ExternalCallRole
 			if config.ExternalCallVerifyResInSync == 1 {
 				chainConfig.ExternalCall.VerifyExternalCallResultWhenSyncState = true
@@ -186,9 +186,21 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			if config.ExternalCallRpc != "" {
 				chainConfig.ExternalCall.CallRpc = config.ExternalCallRpc
 			}
+
+			log.Info("External Config Info ", "config", *chainConfig.ExternalCall)
+
+			// initialize external call client
+			if chainConfig.ExternalCall.Role == params.NodeWithExternalCallClient {
+				eclient, err := ethclient.Dial(chainConfig.ExternalCall.CallRpc)
+				if err != nil {
+					log.Error("Fail to dial externalCall.callRpc", "error", err)
+				} else {
+					chainConfig.ExternalCall.Client = eclient
+					defer eclient.Close()
+				}
+			}
 		}
 
-		log.Warn("External Config", "value:", *chainConfig.ExternalCall)
 	}
 
 	log.Info("Initialised chain configuration", "config", chainConfig)

@@ -219,7 +219,7 @@ type Config struct {
 	ValidatorChangeEpochId uint64
 
 	// ExternalCall config
-	ExternalCallRole            uint64
+	ExternalCallRole            int
 	ExternalCallVerifyResInSync uint
 	ExternalCallSupportChainId  uint64
 	ExternalCallRpc             string
