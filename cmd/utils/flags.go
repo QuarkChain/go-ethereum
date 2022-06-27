@@ -202,7 +202,7 @@ var (
 		Name:  "validator.rpc",
 		Usage: "rpc for Validator to update validator set",
 	}
-	ExternalCallRoleFlag = cli.Uint64Flag{
+	ExternalCallRoleFlag = cli.IntFlag{
 		Name:  "externalcall.role",
 		Usage: "different role to support externalCall( \n role 0: disable external call \n role 1: node reuses client of consensus as external call client \n role 2: node without client of external call \n role 3: node with independent client of external call(callRpc is not empty))",
 	}
@@ -1524,8 +1524,7 @@ func setTendermint(ctx *cli.Context, cfg *ethconfig.Config) {
 
 func setExternalCall(ctx *cli.Context, cfg *ethconfig.Config) {
 	if ctx.GlobalIsSet(ExternalCallRoleFlag.Name) {
-		log.Warn("ExternalCallRoleFlag", "value", ctx.GlobalUint64(ExternalCallRoleFlag.Name))
-		cfg.ExternalCallRole = ctx.GlobalUint64(ExternalCallRoleFlag.Name)
+		cfg.ExternalCallRole = ctx.GlobalInt(ExternalCallRoleFlag.Name)
 	}
 
 	if ctx.GlobalIsSet(ExternalCallVerifyResInSyncFlag.Name) {
@@ -1537,7 +1536,6 @@ func setExternalCall(ctx *cli.Context, cfg *ethconfig.Config) {
 	}
 
 	if ctx.GlobalIsSet(ExternalCallSupportChainId.Name) {
-		log.Warn("SupportChainId", "value", ctx.GlobalUint64(ExternalCallSupportChainId.Name))
 		cfg.ExternalCallSupportChainId = ctx.GlobalUint64(ExternalCallSupportChainId.Name)
 	}
 

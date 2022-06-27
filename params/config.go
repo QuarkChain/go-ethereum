@@ -19,6 +19,7 @@ package params
 import (
 	"encoding/binary"
 	"fmt"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"math/big"
 	"strings"
 	"time"
@@ -264,7 +265,7 @@ var (
 
 	// Web3QTestnetChainConfig contains the chain parameters to run a node on the Web3Q test network.
 	Web3QRinkebyChainConfig = &ChainConfig{
-		ChainID:             big.NewInt(3333),
+		ChainID:             big.NewInt(3335),
 		HomesteadBlock:      big.NewInt(0),
 		DAOForkBlock:        nil,
 		DAOForkSupport:      true,
@@ -307,7 +308,7 @@ var (
 			},
 		},
 		ExternalCall: &ExternalCallConfig{
-			Role:                                  1,
+			Role:                                  NodeWithExternalCallClient,
 			VerifyExternalCallResultWhenSyncState: true,
 			Version:                               1,
 			SupportChainId:                        4,
@@ -602,16 +603,23 @@ type TendermintConfig struct {
 	ConsensusConfig        ConsensusConfig
 }
 
+const (
+	DisableExternalCall = iota
+	NodeWithExternalCallClient
+	NodeWithoutExternalClient
+)
+
 type ExternalCallConfig struct {
 	//Role 0 : ExternalCall disable
 	//Role 1 : Node reuses the consensus client as externalCallClient
 	//Role 2 : Node without externalCallClient
 	//Role 3 : Node with independent externalCallClient (the callRpc is not empty)
-	Role                                  uint64 `json:"role"`
+	Role                                  int    `json:"role"`
 	VerifyExternalCallResultWhenSyncState bool   `json:"verifyExternalCallResultWhenSyncState"`
 	Version                               uint64 `json:"version"`
 	SupportChainId                        uint64 `json:"supportChainId"`
 	CallRpc                               string `json:"callRpc"`
+	Client                                *ethclient.Client
 }
 
 // String implements the stringer interface
