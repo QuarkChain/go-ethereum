@@ -19,7 +19,6 @@ package miner
 import (
 	"errors"
 	"fmt"
-	"github.com/ethereum/go-ethereum/ethclient"
 	"math/big"
 	"sync"
 	"sync/atomic"
@@ -850,22 +849,15 @@ func (w *worker) commitTransaction(env *environment, tx *types.Transaction) ([]*
 	snap := env.state.Snapshot()
 
 	evmConfig := *w.chain.GetVMConfig()
-	if w.chainConfig.ExternalCall.Role != 0 {
-		if w.chainConfig.ExternalCall.Role == 1 {
-			if w.chain.Engine().ExternalCallClient() == nil {
+	if w.chainConfig.ExternalCall.Role != params.DisableExternalCall {
+		if w.chainConfig.ExternalCall.Role == params.NodeWithExternalCallClient {
+			if w.chain.Config().ExternalCall.Client == nil {
 				return nil, fmt.Errorf("worker:external_call_client of consensus is nil")
 			}
 			log.Info("worker:evm initialize external_call_client succeed")
-			evmConfig.ExternalCallClient = w.chain.Engine().ExternalCallClient()
-		} else if w.chainConfig.ExternalCall.Role == 3 {
-			independentClient, err := ethclient.Dial(w.chainConfig.ExternalCall.CallRpc)
-			defer independentClient.Close()
-			if err != nil {
-				return nil, err
-			}
-			evmConfig.ExternalCallClient = independentClient
+			evmConfig.ExternalCallClient = w.chain.Config().ExternalCall.Client
 		} else {
-			return nil, fmt.Errorf("worker:the value role of external_call of proposer must be [1] or [3], but got [%d]", w.chainConfig.ExternalCall.Role)
+			return nil, fmt.Errorf("worker:the value role of external_call of proposer must be [1], but got [%d]", w.chainConfig.ExternalCall.Role)
 		}
 	}
 

@@ -19,7 +19,6 @@ package core
 import (
 	"bytes"
 	"fmt"
-	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/log"
 	"math/big"
 
@@ -77,25 +76,17 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 	blockContext := NewEVMBlockContext(header, p.bc, nil)
 
 	// set external client of evm
-	// If the node is a validator node, it must ensure that both ExternalCall.Enable and ExternalCall.ActiveClient are true
-	if p.config.ExternalCall.Role == 1 {
-		if p.bc.engine.ExternalCallClient() == nil {
-			return nil, nil, 0, fmt.Errorf("external call client of consensus engine is nil")
-		}
+	if p.config.ExternalCall.Role == params.NodeWithExternalCallClient {
 		log.Info("validator: evm initialize the external_call_client")
-		cfg.ExternalCallClient = p.bc.engine.ExternalCallClient()
+		if p.bc.chainConfig.ExternalCall.Client == nil {
+			return nil, nil, *usedGas, fmt.Errorf("the client of NodeWithExternalClient is nil")
+		}
+		cfg.ExternalCallClient = p.bc.chainConfig.ExternalCall.Client
+	} else {
+		return nil, nil, *usedGas, fmt.Errorf("validator:the value role of external_call of validator must be [1], but got [%d]", p.bc.chainConfig.ExternalCall.Role)
 	}
 
-	if p.config.ExternalCall.Role == 3 {
-		independentClient, err := ethclient.Dial(p.config.ExternalCall.CallRpc)
-		defer independentClient.Close()
-		if err != nil {
-			return nil, nil, 0, err
-		}
-		cfg.ExternalCallClient = independentClient
-	}
-	// if a normal node without external_call_client should set p.config.ExternalCall.Enable as true
-	// and p.config.ExternalCall.ActiveClient as false
+	// a normal node without external_call_client no need to do anything here
 
 	vmenv := vm.NewEVM(blockContext, vm.TxContext{}, statedb, p.config, cfg)
 
@@ -116,13 +107,13 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 		}
 
 		if len(crossChainCallResult) > 0 || len(tx.ExternalCallResult()) > 0 {
-			// If the node is a validator node, it must ensure that both ExternalCall.Enable and ExternalCall.VerifyExternalCallResultWhenSyncState are true
 			if p.config.ExternalCall.VerifyExternalCallResultWhenSyncState {
 				if !bytes.Equal(tx.ExternalCallResult(), crossChainCallResult) {
-					log.Warn("failed to verify cross_chain_result and override the transaction.externalCallResult()", "txHash", tx.Hash().Hex(), "cross_chain_result", common.Bytes2Hex(crossChainCallResult))
+					log.Warn("Failed to verify cross_chain_result and override the transaction.externalCallResult()", "txHash", tx.Hash().Hex(), "cross_chain_result", common.Bytes2Hex(crossChainCallResult))
+					// reset the correct result
 					tx.SetExternalCallResult(crossChainCallResult)
 				} else {
-					log.Info("verify cross_chain_result succeed", "txHash", tx.Hash().Hex(), "cross_chain_result", common.Bytes2Hex(crossChainCallResult))
+					log.Info("Verify cross_chain_result succeed", "txHash", tx.Hash().Hex(), "cross_chain_result", common.Bytes2Hex(crossChainCallResult))
 				}
 			}
 		}
