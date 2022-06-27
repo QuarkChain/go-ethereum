@@ -170,6 +170,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		}
 	}
 
+	var externalCallClient *ethclient.Client
 	if chainConfig.ExternalCall != nil {
 		if config.ExternalCallRole != params.DisableExternalCall {
 			chainConfig.ExternalCall.Role = config.ExternalCallRole
@@ -189,15 +190,14 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 
 			log.Info("External Config Info ", "config", *chainConfig.ExternalCall)
 
-			// initialize external call client
 			if chainConfig.ExternalCall.Role == params.NodeWithExternalCallClient {
-				eclient, err := ethclient.Dial(chainConfig.ExternalCall.CallRpc)
+				// initialize external call client
+				externalCallClient, err = ethclient.Dial(chainConfig.ExternalCall.CallRpc)
 				if err != nil {
-					log.Error("Fail to dial externalCall.callRpc", "error", err)
-				} else {
-					chainConfig.ExternalCall.Client = eclient
-					defer eclient.Close()
+					log.Error("Failed to initialize externalCallClient", "error", err)
+					return nil, err
 				}
+				defer externalCallClient.Close()
 			}
 		}
 
@@ -246,6 +246,8 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	var (
 		vmConfig = vm.Config{
 			EnablePreimageRecording: config.EnablePreimageRecording,
+			// set up the externalCallClient
+			ExternalCallClient: externalCallClient,
 		}
 		cacheConfig = &core.CacheConfig{
 			TrieCleanLimit:      config.TrieCleanCache,
