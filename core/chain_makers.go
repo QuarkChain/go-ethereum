@@ -18,7 +18,6 @@ package core
 
 import (
 	"fmt"
-	"github.com/ethereum/go-ethereum/ethclient"
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -106,19 +105,14 @@ func (b *BlockGen) AddTxWithChain(bc *BlockChain, tx *types.Transaction) {
 	b.statedb.Prepare(tx.Hash(), len(b.txs))
 
 	evmConfig := vm.Config{}
-	if bc.chainConfig.ExternalCall.Role != 0 {
-		if bc.chainConfig.ExternalCall.Role == 1 {
-			if bc.Engine().ExternalCallClient() == nil {
-				panic(fmt.Errorf("ExternalCallClient of consensus is nil"))
+	if bc.chainConfig.ExternalCall.Role != params.DisableExternalCall {
+		if bc.chainConfig.ExternalCall.Role == params.NodeWithExternalCallClient {
+			if bc.chainConfig.ExternalCall.Client == nil {
+				panic("worker:external_call_client of consensus is nil")
 			}
-			evmConfig.ExternalCallClient = bc.Engine().ExternalCallClient()
-		} else if bc.chainConfig.ExternalCall.Role == 3 {
-			independentClient, err := ethclient.Dial(bc.chainConfig.ExternalCall.CallRpc)
-			defer independentClient.Close()
-			if err != nil {
-				panic(err)
-			}
-			evmConfig.ExternalCallClient = independentClient
+			evmConfig.ExternalCallClient = bc.chainConfig.ExternalCall.Client
+		} else {
+			panic(fmt.Errorf("worker:the value role of external_call of proposer must be [1], but got [%d]", bc.chainConfig.ExternalCall.Role))
 		}
 	}
 
