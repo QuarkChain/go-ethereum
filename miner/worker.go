@@ -19,6 +19,7 @@ package miner
 import (
 	"errors"
 	"fmt"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"math/big"
 	"sync"
 	"sync/atomic"
@@ -851,11 +852,17 @@ func (w *worker) commitTransaction(env *environment, tx *types.Transaction) ([]*
 	evmConfig := *w.chain.GetVMConfig()
 	if w.chainConfig.ExternalCall.Role != params.DisableExternalCall {
 		if w.chainConfig.ExternalCall.Role == params.NodeWithExternalCallClient {
-			if w.chain.Config().ExternalCall.Client == nil {
-				return nil, fmt.Errorf("worker:external_call_client of consensus is nil")
+			// the evmConfig is the pointer of blockchain.evmConfig, so the externalCallClient maintains one instance of externalCallClient.
+			if evmConfig.ExternalCallClient == nil {
+				externalCallClient, err := ethclient.Dial(w.chain.Config().ExternalCall.CallRpc)
+				if err != nil {
+					log.Error("Failed to dial rpc", "error", err)
+					return nil, err
+				}
+				defer externalCallClient.Close()
+				// set up externalCallClient
+				evmConfig.ExternalCallClient = externalCallClient
 			}
-			log.Info("worker:evm initialize external_call_client succeed")
-			evmConfig.ExternalCallClient = w.chain.Config().ExternalCall.Client
 		} else {
 			return nil, fmt.Errorf("worker:the value role of external_call of proposer must be [1], but got [%d]", w.chainConfig.ExternalCall.Role)
 		}
