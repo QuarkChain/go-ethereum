@@ -189,16 +189,16 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			}
 
 			log.Info("External Config Info ", "config", *chainConfig.ExternalCall)
+		}
 
-			if chainConfig.ExternalCall.Role == params.NodeWithExternalCallClient {
-				// initialize external call client
-				externalCallClient, err = ethclient.Dial(chainConfig.ExternalCall.CallRpc)
-				if err != nil {
-					log.Error("Failed to initialize externalCallClient", "error", err)
-					return nil, err
-				}
-				defer externalCallClient.Close()
+		if chainConfig.ExternalCall.Role == params.NodeWithExternalCallClient {
+			// initialize external call client
+			externalCallClient, err = ethclient.Dial(chainConfig.ExternalCall.CallRpc)
+			if err != nil {
+				log.Error("Failed to initialize externalCallClient", "error", err)
+				return nil, err
 			}
+			defer externalCallClient.Close()
 		}
 
 	}
@@ -244,7 +244,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		}
 	}
 	var (
-		vmConfig = vm.Config{
+		vmConfig = &vm.Config{
 			EnablePreimageRecording: config.EnablePreimageRecording,
 			// set up the externalCallClient
 			ExternalCallClient: externalCallClient,
@@ -261,10 +261,11 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			Preimages:           config.Preimages,
 		}
 	)
-	eth.blockchain, err = core.NewBlockChain(chainDb, cacheConfig, chainConfig, eth.engine, vmConfig, eth.shouldPreserve, &config.TxLookupLimit)
+	eth.blockchain, err = core.NewBlockChain(chainDb, cacheConfig, chainConfig, eth.engine, *vmConfig, eth.shouldPreserve, &config.TxLookupLimit)
 	if err != nil {
 		return nil, err
 	}
+
 	// Rewind the chain in case of an incompatible config upgrade.
 	if compat, ok := genesisErr.(*params.ConfigCompatError); ok {
 		log.Warn("Rewinding chain to upgrade configuration", "err", compat)
