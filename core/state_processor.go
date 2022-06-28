@@ -19,6 +19,7 @@ package core
 import (
 	"bytes"
 	"fmt"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -28,7 +29,6 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 )
@@ -79,15 +79,19 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 	if p.config.ExternalCall.Role != params.DisableExternalCall {
 		if p.config.ExternalCall.Role == params.NodeWithExternalCallClient {
 			if cfg.ExternalCallClient == nil {
-				log.Warn("the vmConfig.ExternalCallClient, the instance passed from the blockchain, is nil when syncing block")
-				externalCallClient, err := ethclient.Dial(p.config.ExternalCall.CallRpc)
-				if err != nil {
-					log.Error("Failed to dial rpc", "error", err)
-					return nil, nil, *usedGas, err
+				if p.bc.vmConfig.ExternalCallClient == nil {
+					log.Warn("the vmConfig.ExternalCallClient, the instance passed from the blockchain, is nil when syncing block")
+					externalCallClient, err := ethclient.Dial(p.config.ExternalCall.CallRpc)
+					if err != nil {
+						log.Error("Failed to dial rpc", "error", err)
+						return nil, nil, *usedGas, err
+					}
+					defer externalCallClient.Close()
+					// set up externalCallClient
+					p.bc.vmConfig.ExternalCallClient = externalCallClient
 				}
-				defer externalCallClient.Close()
 				// set up externalCallClient
-				cfg.ExternalCallClient = externalCallClient
+				cfg.ExternalCallClient = p.bc.vmConfig.ExternalCallClient
 			}
 		} else {
 			return nil, nil, *usedGas, fmt.Errorf("validator:the role of external_call of validator must be [1], but got [%d]", p.bc.chainConfig.ExternalCall.Role)
