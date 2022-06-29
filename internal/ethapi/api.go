@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/ethereum/go-ethereum/ethclient"
 	"math/big"
 	"strings"
 	"time"
@@ -917,27 +916,10 @@ func DoCall(ctx context.Context, b Backend, args TransactionArgs, blockNrOrHash 
 	if err != nil {
 		return nil, err
 	}
-	chainCfg := b.ChainConfig()
 
-	vmCfg := &vm.Config{NoBaseFee: true, IsJsonRpc: true}
-	if chainCfg.ExternalCall.Role == 1 {
-		// In this case node is a full node with externalCallClient
-		if b.Engine().ExternalCallClient() != nil {
-			vmCfg.ExternalCallClient = b.Engine().ExternalCallClient()
-		} else {
-			return nil, errors.New("when ExternalCall.Enable Enable is true, b.Engine().ExternalCallClient() should not be nil")
-		}
-	} else if chainCfg.ExternalCall.Role == 3 {
-		// In this case node is a jsonRpc node with independent externalCallClient
-		independentClient, err := ethclient.Dial(chainCfg.ExternalCall.CallRpc)
-		defer independentClient.Close()
-		if err != nil {
-			return nil, err
-		}
-		vmCfg.ExternalCallClient = independentClient
-	}
-
-	evm, vmError, err := b.GetEVM(ctx, msg, state, header, vmCfg)
+	evm, vmError, err := b.GetEVM(ctx, msg, state, header, nil)
+	evm.Config.NoBaseFee = true
+	evm.Config.IsJsonRpc = true
 	if err != nil {
 		return nil, err
 	}
