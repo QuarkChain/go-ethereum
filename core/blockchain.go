@@ -408,6 +408,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *par
 }
 
 func (bc *BlockChain) getEpochState(lastEpochHeight uint64, startHeader *types.Header) {
+	log.Warn("=======start getEpochState=======")
 	t := time.Now()
 	m := make(map[common.Address]uint32)
 	header := startHeader
