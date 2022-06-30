@@ -279,7 +279,7 @@ var (
 		LondonBlock:         big.NewInt(0),
 		ArrowGlacierBlock:   nil,
 		Tendermint: &TendermintConfig{
-			Epoch:                  10000,
+			Epoch:                  1000,
 			ValidatorContract:      "",
 			ContractChainID:        0,
 			ValidatorChangeEpochId: 0,
@@ -527,10 +527,10 @@ type CliqueConfig struct {
 }
 
 type TendermintConfig struct {
-	Epoch                  uint64 `json:"epoch"`             // Epoch lengh to vote new validator
-	ValidatorContract      string `json:"validatorContract"` // Validator set contract
+	Epoch                  uint64 `json:"epoch"`             // Epoch length to vote new validator
+	ValidatorContract      string `json:"validatorContract"` // Validator contract address
 	ContractChainID        uint64 `json:"contractChainId"`   // Chain ID which Validator contract on
-	ValidatorChangeEpochId uint64 `json:"valChangeEpochId"`  // Epoch to enable update ValidatorSet from contract
+	ValidatorChangeEpochId uint64 `json:"valChangeEpochId"`  // Epoch to enable updating ValidatorSet from contract
 	ValRpc                 string `json:"valRpc"`            // rpc for ethclient to get ValidatorSet from contract
 	NodeKeyPath            string
 	P2pPort                uint

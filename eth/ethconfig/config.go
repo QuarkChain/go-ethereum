@@ -217,6 +217,10 @@ type Config struct {
 	ValContract            string
 	ValChainId             uint64
 	ValidatorChangeEpochId uint64
+
+	// Sstorage config
+	SstorageFiles  []string `toml:",omitempty"`
+	SstorageShards []string `toml:",omitempty"`
 }
 
 // CreateConsensusEngine creates a consensus engine for the given chain configuration.

@@ -18,6 +18,7 @@
 package state
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"math/big"
@@ -78,6 +79,9 @@ type StateDB struct {
 	stateObjects        map[common.Address]*stateObject
 	stateObjectsPending map[common.Address]struct{} // State objects finalized but not yet written to the trie
 	stateObjectsDirty   map[common.Address]struct{} // State objects modified in the current execution
+
+	// This map holds sharded KV puts
+	shardedStorage map[common.Address]map[uint64][]byte
 
 	// DB error.
 	// State objects are used by the consensus core and VM which are
@@ -143,6 +147,7 @@ func New(root common.Hash, db Database, snaps *snapshot.Tree) (*StateDB, error) 
 		journal:             newJournal(),
 		accessList:          newAccessList(),
 		hasher:              crypto.NewKeccakState(),
+		shardedStorage:      make(map[common.Address]map[uint64][]byte),
 	}
 	if sdb.snaps != nil {
 		if sdb.snap = sdb.snaps.Snapshot(root); sdb.snap != nil {
@@ -152,6 +157,46 @@ func New(root common.Hash, db Database, snaps *snapshot.Tree) (*StateDB, error) 
 		}
 	}
 	return sdb, nil
+}
+
+func (s *StateDB) SstorageMaxKVSize(addr common.Address) uint64 {
+	return s.db.TrieDB().SstorageMaxKVSize(addr)
+}
+
+func (s *StateDB) SstorageWrite(addr common.Address, kvIdx uint64, data []byte) error {
+	if len(data) > int(s.SstorageMaxKVSize(addr)) {
+		return fmt.Errorf("put too large")
+	}
+
+	if _, ok := s.shardedStorage[addr]; !ok {
+		s.shardedStorage[addr] = make(map[uint64][]byte)
+	}
+
+	s.journal.append(sstorageChange{
+		address:   &addr,
+		prevBytes: s.shardedStorage[addr][kvIdx],
+		kvIdx:     kvIdx,
+	})
+	// Assume data is immutable
+	s.shardedStorage[addr][kvIdx] = data
+	return nil
+}
+
+func (s *StateDB) SstorageRead(addr common.Address, kvIdx uint64, readLen int) ([]byte, bool, error) {
+	if readLen > int(s.SstorageMaxKVSize(addr)) {
+		return nil, false, fmt.Errorf("readLen too large")
+	}
+
+	if m, ok0 := s.shardedStorage[addr]; ok0 {
+		if b, ok1 := m[kvIdx]; ok1 {
+			if readLen > len(b) {
+				return append(b, bytes.Repeat([]byte{0}, readLen-len(b))...), true, nil
+			}
+			return b[0:readLen], true, nil
+		}
+	}
+
+	return s.db.TrieDB().SstorageRead(addr, kvIdx, readLen)
 }
 
 // StartPrefetcher initializes a new trie prefetcher to pull in nodes from the
@@ -657,6 +702,7 @@ func (s *StateDB) Copy() *StateDB {
 		preimages:           make(map[common.Hash][]byte, len(s.preimages)),
 		journal:             newJournal(),
 		hasher:              crypto.NewKeccakState(),
+		shardedStorage:      make(map[common.Address]map[uint64][]byte),
 	}
 	// Copy the dirty states, logs, and preimages
 	for addr := range s.journal.dirties {
@@ -736,6 +782,12 @@ func (s *StateDB) Copy() *StateDB {
 				temp[kk] = vv
 			}
 			state.snapStorage[k] = temp
+		}
+	}
+	for addr, m := range s.shardedStorage {
+		state.shardedStorage[addr] = make(map[uint64][]byte)
+		for k, v := range m {
+			state.shardedStorage[addr][k] = v
 		}
 	}
 	return state
@@ -981,6 +1033,18 @@ func (s *StateDB) Commit(deleteEmptyObjects bool) (common.Hash, error) {
 		}
 		s.snap, s.snapDestructs, s.snapAccounts, s.snapStorage = nil, nil, nil, nil
 	}
+	// Write the sharded storage changes to the underlying trie db
+	// This assumes no fork (with instant finality consensus)
+	triedb := s.db.TrieDB()
+	for addr, m := range s.shardedStorage {
+		for k, v := range m {
+			err := triedb.SstorageWrite(addr, k, v)
+			if err != nil {
+				log.Crit("failed to flush sstorage data", "err", err)
+			}
+		}
+	}
+	s.shardedStorage = make(map[common.Address]map[uint64][]byte)
 	return root, err
 }
 

@@ -74,6 +74,10 @@ type StateDB interface {
 	AddPreimage(common.Hash, []byte)
 
 	ForEachStorage(common.Address, func(common.Hash, common.Hash) bool) error
+
+	SstorageMaxKVSize(common.Address) uint64                        // 0 means not exist
+	SstorageWrite(common.Address, uint64, []byte) error             // following the same interface as ShardManager.TryWrite()
+	SstorageRead(common.Address, uint64, int) ([]byte, bool, error) // following the same interface as ShardManager.TryRead()
 }
 
 // CallContext provides a basic interface for the EVM calling conventions. The EVM

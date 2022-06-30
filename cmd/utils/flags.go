@@ -68,6 +68,7 @@ import (
 	"github.com/ethereum/go-ethereum/p2p/nat"
 	"github.com/ethereum/go-ethereum/p2p/netutil"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/ethereum/go-ethereum/sstorage"
 	pcsclite "github.com/gballet/go-libpcsclite"
 	gopsutil "github.com/shirou/gopsutil/mem"
 	"gopkg.in/urfave/cli.v1"
@@ -553,6 +554,17 @@ var (
 		Name:  "rpc.txfeecap",
 		Usage: "Sets a cap on transaction fee (in ether) that can be sent via the RPC APIs (0 = no cap)",
 		Value: ethconfig.Defaults.RPCTxFeeCap,
+	}
+	// Sharded Storage settings
+	SstorageShardFlag = cli.StringSliceFlag{
+		Name:  "sstorage.shard",
+		Usage: "Add perferred storage shard",
+		Value: nil,
+	}
+	SstorageFileFlag = cli.StringSliceFlag{
+		Name:  "sstorage.file",
+		Usage: "Add sharded storage data file",
+		Value: nil,
 	}
 	// Logging and debug settings
 	EthStatsURLFlag = cli.StringFlag{
@@ -1106,6 +1118,32 @@ func setLes(ctx *cli.Context, cfg *ethconfig.Config) {
 	}
 }
 
+func setSstorage(ctx *cli.Context, cfg *ethconfig.Config) {
+	if ctx.GlobalIsSet(SstorageShardFlag.Name) {
+		cfg.SstorageShards = ctx.GlobalStringSlice(SstorageShardFlag.Name)
+	}
+	if ctx.GlobalIsSet(SstorageFileFlag.Name) {
+		cfg.SstorageFiles = ctx.GlobalStringSlice(SstorageFileFlag.Name)
+	}
+
+	sstorage.InitializeConfig()
+	for _, s := range cfg.SstorageShards {
+		if err := sstorage.AddDataShardFromConfig(s); err != nil {
+			Fatalf("Failed to add data shard: %s, %v", s, err)
+		}
+	}
+
+	for _, s := range cfg.SstorageFiles {
+		if err := sstorage.AddDataFileFromConfig(s); err != nil {
+			Fatalf("Failed to add data file: %s, %v", s, err)
+		}
+	}
+
+	if err := sstorage.IsComplete(); err != nil {
+		Fatalf("Shard is not complete: %v", err)
+	}
+}
+
 // MakeDatabaseHandles raises out the number of allowed file handles per process
 // for Geth and returns half of the allowance to assign to the database.
 func MakeDatabaseHandles() int {
@@ -1571,6 +1609,7 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	setMiner(ctx, &cfg.Miner)
 	setWhitelist(ctx, cfg)
 	setLes(ctx, cfg)
+	setSstorage(ctx, cfg)
 
 	// Cap the cache allowance and tune the garbage collector
 	mem, err := gopsutil.VirtualMemory()
