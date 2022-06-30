@@ -361,13 +361,6 @@ func (s *Store) getEpochState(lastEpochHeight uint64, startHeader *types.Header)
 	for i, addr := range header.NextValidators {
 		state[i] = m[addr]
 	}
-	bs, err := rlp.EncodeToBytes(state)
-	if err != nil {
-		return nil, err
-	}
-	b := make([]byte, 4)
-	binary.BigEndian.PutUint32(b, uint32(len(bs)))
-	data := append(b, bs...)
 
-	return data, nil
+	return rlp.EncodeToBytes(state)
 }
