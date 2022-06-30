@@ -381,6 +381,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *par
 	// Start future block processor.
 	bc.wg.Add(1)
 	go bc.updateFutureBlocks()
+	go bc.getEpochState(100800, bc.CurrentBlock().Header())
 
 	// Start tx indexer/unindexer.
 	if txLookupLimit != nil {
@@ -404,6 +405,22 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *par
 		}()
 	}
 	return bc, nil
+}
+
+func (bc *BlockChain) getEpochState(lastEpochHeight uint64, startHeader *types.Header) {
+	t := time.Now()
+	m := make(map[common.Address]uint32)
+	header := startHeader
+	for header.Number.Uint64() > lastEpochHeight {
+		header = bc.GetHeaderByHash(header.ParentHash)
+		if _, ok := m[header.Coinbase]; !ok {
+			m[header.Coinbase] = uint32(0)
+		}
+
+		m[header.Coinbase] = m[header.Coinbase] + 1
+	}
+
+	log.Warn("=======getEpochState result=======", "time used", time.Now().Sub(t).Milliseconds())
 }
 
 // empty returns an indicator whether the blockchain is empty.
