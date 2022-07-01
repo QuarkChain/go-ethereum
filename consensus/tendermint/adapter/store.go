@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus"
@@ -51,13 +52,14 @@ func NewStore(
 		state:            make(map[common.Address]uint32),
 	}
 
+	t := time.Now()
 	header := chain.CurrentHeader()
 	lastEpochHeight := header.Number.Uint64() - header.Number.Uint64()%config.Epoch
 	for header.Number.Uint64() >= lastEpochHeight {
 		store.updateState(header.Coinbase)
 		header = chain.GetHeaderByHash(header.ParentHash)
 	}
-
+	log.Info("Init state", "time", time.Now().Sub(t).Milliseconds())
 	return &store
 }
 
@@ -380,6 +382,7 @@ func (s *Store) getEpochState(epochHeader *types.Header) ([]byte, error) {
 	state := make([]uint32, len(epochHeader.NextValidators))
 	for i, addr := range epochHeader.NextValidators {
 		state[i] = s.state[addr]
+		log.Info("Epoch state", "address", addr, "count", state[i])
 	}
 
 	return rlp.EncodeToBytes(state)
