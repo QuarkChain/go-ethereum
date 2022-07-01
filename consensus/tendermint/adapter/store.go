@@ -55,7 +55,7 @@ func NewStore(
 	t := time.Now()
 	header := chain.CurrentHeader()
 	lastEpochHeight := header.Number.Uint64() - header.Number.Uint64()%config.Epoch
-	for header.Number.Uint64() >= lastEpochHeight {
+	for header != nil && header.Number.Uint64() >= lastEpochHeight {
 		store.updateState(header.Coinbase)
 		header = chain.GetHeaderByHash(header.ParentHash)
 	}
