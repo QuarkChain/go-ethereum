@@ -172,6 +172,7 @@ const (
 	ExternalCallGas         = 10000
 
 	MintNativeTokenGas = 2000
+	BurnNativeTokenGas = 2000
 )
 
 // Gas discount table for BLS12-381 G1 and G2 multi exponentiation operations
