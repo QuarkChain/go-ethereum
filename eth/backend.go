@@ -174,9 +174,9 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	if chainConfig.ExternalCall != nil {
 		if config.ExternalCallRole != params.DisableExternalCall {
 			chainConfig.ExternalCall.Role = config.ExternalCallRole
-			if config.ExternalCallVerifyResInSync == 1 {
+			if config.ExternalCallVerifyResInSync == ethconfig.EnableExternalCallVerifyResInSync {
 				chainConfig.ExternalCall.VerifyExternalCallResultWhenSyncState = true
-			} else if config.ExternalCallVerifyResInSync == 2 {
+			} else if config.ExternalCallVerifyResInSync == ethconfig.DisableExternalCallVerifyResInSync {
 				chainConfig.ExternalCall.VerifyExternalCallResultWhenSyncState = false
 			}
 

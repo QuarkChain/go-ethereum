@@ -229,6 +229,11 @@ type Config struct {
 	SstorageShards []string `toml:",omitempty"`
 }
 
+const (
+	EnableExternalCallVerifyResInSync  = 1
+	DisableExternalCallVerifyResInSync = 2
+)
+
 // CreateConsensusEngine creates a consensus engine for the given chain configuration.
 func CreateConsensusEngine(
 	stack *node.Node,
