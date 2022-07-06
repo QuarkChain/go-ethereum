@@ -128,9 +128,9 @@ var PrecompiledContractsPisa = map[common.Address]PrecompiledContract{
 	common.BytesToAddress([]byte{7}):          &bn256ScalarMulIstanbul{},
 	common.BytesToAddress([]byte{8}):          &bn256PairingIstanbul{},
 	common.BytesToAddress([]byte{9}):          &blake2F{},
-	common.BytesToAddress([]byte{3, 0x33, 3}): &crossChainCall{},
 	common.BytesToAddress([]byte{3, 0x33, 1}): &systemContractDeployer{},
 	common.BytesToAddress([]byte{3, 0x33, 2}): &sstoragePisa{},
+	common.BytesToAddress([]byte{3, 0x33, 3}): &crossChainCall{},
 }
 
 // PrecompiledContractsBLS contains the set of pre-compiled Ethereum
