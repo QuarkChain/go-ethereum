@@ -28,20 +28,22 @@ type Peer struct {
 	*p2p.Peer                   // The embedded P2P package peer
 	rw        p2p.MsgReadWriter // Input/output streams for snap
 	version   uint              // Protocol version negotiated
+	shardList []uint64
 
 	logger log.Logger // Contextual logger with the peer id injected
 }
 
 // NewPeer create a wrapper for a network connection and negotiated  protocol
 // version.
-func NewPeer(version uint, p *p2p.Peer, rw p2p.MsgReadWriter) *Peer {
+func NewPeer(version uint, shardList []uint64, p *p2p.Peer, rw p2p.MsgReadWriter) *Peer {
 	id := p.ID().String()
 	return &Peer{
-		id:      id,
-		Peer:    p,
-		rw:      rw,
-		version: version,
-		logger:  log.New("peer", id[:8]),
+		id:        id,
+		Peer:      p,
+		rw:        rw,
+		version:   version,
+		shardList: shardList,
+		logger:    log.New("peer", id[:8]),
 	}
 }
 
@@ -53,6 +55,11 @@ func (p *Peer) ID() string {
 // Version retrieves the peer's negoatiated `snap` protocol version.
 func (p *Peer) Version() uint {
 	return p.version
+}
+
+// Version retrieves the peer's negoatiated `snap` protocol version.
+func (p *Peer) ShardList() []uint64 {
+	return p.shardList
 }
 
 // Log overrides the P2P logget with the higher level one containing only the id.
