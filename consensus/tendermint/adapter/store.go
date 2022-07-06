@@ -162,6 +162,7 @@ func (s *Store) ValidateBlock(state pbft.ChainState, block *types.FullBlock, com
 			return err
 		}
 
+		log.Info("ValidateBlock", "extraData", common.Bytes2Hex(extraData), "state", common.Bytes2Hex(state))
 		if len(extraData) < len(state) || bytes.Compare(state, extraData[:len(state)]) != 0 {
 			return errors.New("EpochState is incorrect")
 		}
@@ -330,6 +331,7 @@ func (s *Store) MakeBlock(
 		// header Extra format will be prefix + remote block height + remote block hash +
 		// state bytes + header Extra
 		state, err := s.getEpochState(s.chain.GetHeaderByNumber(height - s.config.Epoch))
+		log.Info("Epoch state", "bytes", common.Bytes2Hex(state))
 		if err != nil {
 			log.Error(err.Error())
 			return nil

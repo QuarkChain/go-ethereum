@@ -162,6 +162,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			chainConfig.Tendermint.ContractChainID = config.ValChainId
 		}
 		if config.ValidatorChangeEpochId != 0 {
+			log.Info("update Tendermint config", "ValidatorChangeEpochId", config.ValidatorChangeEpochId)
 			chainConfig.Tendermint.ValidatorChangeEpochId = config.ValidatorChangeEpochId
 		}
 		if config.ValRpc != "" {
