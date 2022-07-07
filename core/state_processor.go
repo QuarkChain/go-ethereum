@@ -19,7 +19,6 @@ package core
 import (
 	"bytes"
 	"fmt"
-	"github.com/ethereum/go-ethereum/ethclient"
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -80,15 +79,7 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 		if p.config.ExternalCall.Role == params.NodeWithExternalCallClient {
 			if cfg.ExternalCallClient == nil {
 				if p.bc.vmConfig.ExternalCallClient == nil {
-					log.Warn("the vmConfig.ExternalCallClient, the instance passed from the blockchain, is nil when syncing block")
-					externalCallClient, err := ethclient.Dial(p.config.ExternalCall.CallRpc)
-					if err != nil {
-						log.Error("Failed to dial rpc", "error", err)
-						return nil, nil, *usedGas, err
-					}
-					defer externalCallClient.Close()
-					// set up externalCallClient
-					p.bc.vmConfig.ExternalCallClient = externalCallClient
+					return nil, nil, 0, fmt.Errorf("validator: the external_call_client from blockchain.evmConfig is nil")
 				}
 				// set up externalCallClient
 				cfg.ExternalCallClient = p.bc.vmConfig.ExternalCallClient
