@@ -65,6 +65,11 @@ func (v *BlockValidator) ValidateBody(block *types.Block) error {
 	if hash := types.DeriveSha(block.Transactions(), trie.NewStackTrie(nil)); hash != header.TxHash {
 		return fmt.Errorf("transaction root hash mismatch: have %x, want %x", hash, header.TxHash)
 	}
+	// verify the root of trie of external call result
+	if hash := types.DeriveSha(types.ExternalCallResults(block.Transactions().GetExternalCallResultList()), trie.NewStackTrie(nil)); hash != header.MixDigest {
+		return fmt.Errorf("external_call_result root hash mismatch: have %x, want %x", hash, header.MixDigest)
+	}
+
 	if !v.bc.HasBlockAndState(block.ParentHash(), block.NumberU64()-1) {
 		if !v.bc.HasBlock(block.ParentHash(), block.NumberU64()-1) {
 			return consensus.ErrUnknownAncestor
