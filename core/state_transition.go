@@ -354,8 +354,8 @@ func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
 	st.state.AddBalance(st.evm.Context.Coinbase, new(big.Int).Mul(new(big.Int).SetUint64(st.gasUsed()), effectiveTip))
 
 	// deal with the result of cross chain call
-	if len(st.evm.Interpreter().CrossChainCallTraces()) != 0 {
-		traces := st.evm.Interpreter().CrossChainCallTraces()
+	if len(st.evm.Interpreter().CrossChainCallResultList()) != 0 {
+		traces := st.evm.Interpreter().CrossChainCallResultList()
 
 		var version uint64
 		if st.evm.ChainConfig().ExternalCall.Version != 0 {
@@ -366,7 +366,7 @@ func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
 
 		cr := vm.CrossChainCallTracesWithVersion{
 			Version: version,
-			Traces:  traces,
+			List:    traces,
 		}
 
 		cb, err := rlp.EncodeToBytes(cr)

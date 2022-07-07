@@ -122,7 +122,7 @@ func (wt *WrapTx) VerifyCallResult(crossCallResult []byte, unexpErr error, t *te
 		t.Fatal(err)
 	}
 
-	actualTraces := tracesWithVersion.Traces
+	actualTraces := tracesWithVersion.List
 
 	if len(wt.ExpectTraces) != len(actualTraces) {
 		t.Fatalf("wrapTx.ExpectTraces length [%d] no match actualTraces length [%d]", len(wt.ExpectTraces), len(actualTraces))

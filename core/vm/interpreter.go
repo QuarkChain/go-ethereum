@@ -69,8 +69,10 @@ type EVMInterpreter struct {
 	readOnly   bool   // Whether to throw on stateful modifications
 	returnData []byte // Last CALL's return data for subsequent reuse
 
-	crossChainCallTraces []*CrossChainCallTrace
-	traceIdx             uint64
+	// crossChainCallResultList will store the return value of each cross-chain call,
+	// and the callResultIdx will increase by 1 for each cross-chain call.
+	crossChainCallResultList []*CrossChainCallResultList
+	callResultIdx            uint64
 }
 
 // NewEVMInterpreter returns a new instance of the Interpreter.
@@ -116,36 +118,36 @@ func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 	}
 }
 
-func (in *EVMInterpreter) TraceIdx() uint64 {
-	return in.traceIdx
+func (in *EVMInterpreter) CallResultIdx() uint64 {
+	return in.callResultIdx
 }
 
-func (in *EVMInterpreter) AddTraceIdx() {
-	in.traceIdx++
+func (in *EVMInterpreter) AddCallResultIdx() {
+	in.callResultIdx++
 }
 
-func (in *EVMInterpreter) CrossChainCallTraces() []*CrossChainCallTrace {
-	return in.crossChainCallTraces
+func (in *EVMInterpreter) CrossChainCallResultList() []*CrossChainCallResultList {
+	return in.crossChainCallResultList
 }
 
-func (in *EVMInterpreter) AppendCrossChainCallTrace(trace *CrossChainCallTrace) []*CrossChainCallTrace {
-	in.crossChainCallTraces = append(in.crossChainCallTraces, trace)
-	return in.crossChainCallTraces
+func (in *EVMInterpreter) AppendCrossChainCallResultList(trace *CrossChainCallResultList) []*CrossChainCallResultList {
+	in.crossChainCallResultList = append(in.crossChainCallResultList, trace)
+	return in.crossChainCallResultList
 }
 
-func (in *EVMInterpreter) SetCrossChainCallTraces(b []byte) error {
+func (in *EVMInterpreter) SetCrossChainCallResultList(b []byte) error {
 	cr := &CrossChainCallTracesWithVersion{}
 	err := rlp.DecodeBytes(b, cr)
 	if err != nil {
 		return err
 	}
-	in.crossChainCallTraces = cr.Traces
+	in.crossChainCallResultList = cr.List
 	return nil
 }
 
-func (in *EVMInterpreter) resetCrossChainCallTracesAndTraceIdx() {
-	in.crossChainCallTraces = nil
-	in.traceIdx = 0
+func (in *EVMInterpreter) resetCrossChainCallResultListAndTraceIdx() {
+	in.crossChainCallResultList = nil
+	in.callResultIdx = 0
 }
 
 // Run loops and evaluates the contract's code with the given input data and returns

@@ -168,7 +168,7 @@ func (evm *EVM) ExternalCallClient() *ethclient.Client {
 func (evm *EVM) Reset(txCtx TxContext, statedb StateDB) {
 	evm.TxContext = txCtx
 	evm.StateDB = statedb
-	evm.interpreter.resetCrossChainCallTracesAndTraceIdx()
+	evm.interpreter.resetCrossChainCallResultListAndTraceIdx()
 }
 
 // Cancel cancels any running EVM operation. This may be called concurrently and

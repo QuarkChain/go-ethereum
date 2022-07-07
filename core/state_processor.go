@@ -135,7 +135,7 @@ func applyTransaction(msg types.Message, config *params.ChainConfig, bc ChainCon
 
 	// todo : deal with external_call_client is nil
 	if evm.ExternalCallClient() == nil && len(tx.ExternalCallResult()) != 0 {
-		err := evm.Interpreter().SetCrossChainCallTraces(tx.ExternalCallResult())
+		err := evm.Interpreter().SetCrossChainCallResultList(tx.ExternalCallResult())
 		if err != nil {
 			return nil, nil, err
 		}
