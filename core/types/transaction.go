@@ -421,29 +421,8 @@ func (tx *Transaction) WithExternalCallResult(res []byte) *Transaction {
 	return &Transaction{inner: cpy, time: tx.time}
 }
 
-type ExternalCallResults [][]byte
-
-func (s ExternalCallResults) Len() int {
-	return len(s)
-}
-
-func (s ExternalCallResults) EncodeIndex(i int, w *bytes.Buffer) {
-	res := s[i]
-	rlp.Encode(w, res)
-}
-
 // Transactions implements DerivableList for transactions.
 type Transactions []*Transaction
-
-func (s Transactions) GetExternalCallResultList() [][]byte {
-	list := make([][]byte, 0)
-	for _, tx := range s {
-		if len(tx.ExternalCallResult()) != 0 {
-			list = append(list, tx.ExternalCallResult())
-		}
-	}
-	return list
-}
 
 // Len returns the length of s.
 func (s Transactions) Len() int { return len(s) }

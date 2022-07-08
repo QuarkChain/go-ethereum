@@ -233,13 +233,6 @@ func NewBlock(header *Header, txs []*Transaction, uncles []*Header, receipts []*
 		b.header.Bloom = CreateBloom(receipts)
 	}
 
-	etclist := Transactions(txs).GetExternalCallResultList()
-	if len(etclist) == 0 {
-		b.header.MixDigest = EmptyRootHash
-	} else {
-		b.header.MixDigest = DeriveSha(ExternalCallResults(etclist), hasher)
-	}
-
 	if len(uncles) == 0 {
 		b.header.UncleHash = EmptyUncleHash
 	} else {
