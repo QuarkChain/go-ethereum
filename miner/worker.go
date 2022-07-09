@@ -91,10 +91,11 @@ type environment struct {
 	gasPool       *core.GasPool  // available gas used to pack transactions
 	coinbase      common.Address
 
-	header   *types.Header
-	txs      []*types.Transaction
-	receipts []*types.Receipt
-	uncles   map[common.Hash]*types.Header
+	header     *types.Header
+	txs        []*types.Transaction
+	receipts   []*types.Receipt
+	uncles     map[common.Hash]*types.Header
+	sortUncles []common.Hash
 }
 
 // copy creates a deep copy of environment.
@@ -122,15 +123,20 @@ func (env *environment) copy() *environment {
 	for hash, uncle := range env.uncles {
 		cpy.uncles[hash] = uncle
 	}
+	cpy.sortUncles = make([]common.Hash, len(env.sortUncles))
+	copy(cpy.sortUncles, env.sortUncles)
+
 	return cpy
 }
 
 // unclelist returns the contained uncles as the list format.
 func (env *environment) unclelist() []*types.Header {
 	var uncles []*types.Header
-	for _, uncle := range env.uncles {
-		uncles = append(uncles, uncle)
+
+	for _, uncleHash := range env.sortUncles {
+		uncles = append(uncles, env.uncles[uncleHash])
 	}
+
 	return uncles
 }
 
@@ -826,6 +832,7 @@ func (w *worker) commitUncle(env *environment, uncle *types.Header) error {
 		return errors.New("uncle already included")
 	}
 	env.uncles[hash] = uncle
+	env.sortUncles = append(env.sortUncles, hash)
 	return nil
 }
 
@@ -861,20 +868,22 @@ func (w *worker) commitTransaction(env *environment, tx *types.Transaction) ([]*
 	}
 
 	receipt, crossChainCallResult, err := core.ApplyTransaction(w.chainConfig, w.chain, &env.coinbase, env.gasPool, env.state, env.header, tx, &env.header.GasUsed, evmConfig)
-
-	var txExecuted *types.Transaction
-	if len(crossChainCallResult) != 0 {
-		txExecuted = tx.WithExternalCallResult(crossChainCallResult)
-		log.Info("worker: transaction with cross_chain_call_result", "txHash", txExecuted.Hash().Hex(), "CrossChainCallResult", common.Bytes2Hex(txExecuted.ExternalCallResult()))
-	} else {
-		txExecuted = tx
-	}
-
 	if err != nil {
 		env.state.RevertToSnapshot(snap)
 		return nil, err
 	}
-	env.txs = append(env.txs, txExecuted)
+
+	if len(crossChainCallResult) != 0 {
+		uncle := &types.Header{
+			Number: big.NewInt(int64(len(env.txs))),
+			TxHash: tx.Hash(),
+			Extra:  crossChainCallResult,
+		}
+		w.commitUncle(env, uncle)
+		log.Info("worker: transaction with cross_chain_call_result", "txHash", tx.Hash().Hex(), "CrossChainCallResult", common.Bytes2Hex(crossChainCallResult))
+	}
+
+	env.txs = append(env.txs, tx)
 	env.receipts = append(env.receipts, receipt)
 
 	return receipt.Logs, nil

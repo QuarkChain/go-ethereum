@@ -173,6 +173,14 @@ func (h *Header) EmptyReceipts() bool {
 	return h.ReceiptHash == EmptyRootHash
 }
 
+func (h *Header) GetTxExternalCallResult(tx *Transaction) []byte {
+	if h.TxHash == tx.Hash() {
+		return h.Extra
+	}
+
+	return nil
+}
+
 // Body is a simple (mutable, non-safe) data container for storing and moving
 // a block's data contents (transactions and uncles) together.
 type Body struct {

@@ -92,6 +92,7 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 	vmenv := vm.NewEVM(blockContext, vm.TxContext{}, statedb, p.config, cfg)
 
 	// Iterate over and process the individual transactions
+	var uncleIndex int
 	for i, tx := range block.Transactions() {
 		msg, err := tx.AsMessage(types.MakeSigner(p.config, header.Number), header.BaseFee)
 		if err != nil {
@@ -102,20 +103,23 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 			log.Warn("Tx With ExternalCallResult", "txHash", tx.Hash().Hex(), "external_call_result", common.Bytes2Hex(tx.ExternalCallResult()))
 		}
 		statedb.Prepare(tx.Hash(), i)
-		receipt, crossChainCallResult, err := applyTransaction(msg, p.config, p.bc, nil, gp, statedb, blockNumber, blockHash, tx, usedGas, vmenv)
+		// get the externalCallResult from uncle
+		expectResult := block.Uncles()[uncleIndex].GetTxExternalCallResult(tx)
+		if expectResult != nil {
+			uncleIndex++
+		}
+
+		receipt, crossChainCallResult, err := applyTransaction(msg, p.config, p.bc, nil, gp, statedb, blockNumber, blockHash, tx, usedGas, vmenv, expectResult)
 		if err != nil {
 			return nil, nil, 0, fmt.Errorf("could not apply tx %d [%v]: %w", i, tx.Hash().Hex(), err)
 		}
 
 		if len(crossChainCallResult) > 0 || len(tx.ExternalCallResult()) > 0 {
-			if p.config.ExternalCall.VerifyExternalCallResultWhenSyncState {
-				if !bytes.Equal(tx.ExternalCallResult(), crossChainCallResult) {
-					log.Warn("Failed to verify cross_chain_result and override the transaction.externalCallResult()", "txHash", tx.Hash().Hex(), "cross_chain_result", common.Bytes2Hex(crossChainCallResult))
-					// reset the correct result
-					tx.SetExternalCallResult(crossChainCallResult)
-				} else {
-					log.Info("Verify cross_chain_result succeed", "txHash", tx.Hash().Hex(), "cross_chain_result", common.Bytes2Hex(crossChainCallResult))
-				}
+			if !bytes.Equal(expectResult, crossChainCallResult) {
+				log.Error("Failed to verify cross_chain_result and override the transaction.externalCallResult()", "txHash", tx.Hash().Hex(), "cross_chain_result", common.Bytes2Hex(crossChainCallResult))
+				return nil, nil, 0, fmt.Errorf("failed to verify cross_chain_result, tx: %s", tx.Hash().Hex())
+			} else {
+				log.Info("Verify cross_chain_result succeed", "txHash", tx.Hash().Hex(), "cross_chain_result", common.Bytes2Hex(crossChainCallResult))
 			}
 		}
 
@@ -128,14 +132,14 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 	return receipts, allLogs, *usedGas, nil
 }
 
-func applyTransaction(msg types.Message, config *params.ChainConfig, bc ChainContext, author *common.Address, gp *GasPool, statedb *state.StateDB, blockNumber *big.Int, blockHash common.Hash, tx *types.Transaction, usedGas *uint64, evm *vm.EVM) (*types.Receipt, []byte, error) {
+func applyTransaction(msg types.Message, config *params.ChainConfig, bc ChainContext, author *common.Address, gp *GasPool, statedb *state.StateDB, blockNumber *big.Int, blockHash common.Hash, tx *types.Transaction, usedGas *uint64, evm *vm.EVM, expectExternalCallResult []byte) (*types.Receipt, []byte, error) {
 	// Create a new context to be used in the EVM environment.
 	txContext := NewEVMTxContext(msg)
 	evm.Reset(txContext, statedb)
 
 	// todo : deal with external_call_client is nil
-	if evm.ExternalCallClient() == nil && len(tx.ExternalCallResult()) != 0 {
-		err := evm.Interpreter().SetCrossChainCallResultList(tx.ExternalCallResult())
+	if evm.ExternalCallClient() == nil && len(expectExternalCallResult) != 0 {
+		err := evm.Interpreter().SetCrossChainCallResultList(expectExternalCallResult)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -197,5 +201,5 @@ func ApplyTransaction(config *params.ChainConfig, bc ChainContext, author *commo
 	blockContext := NewEVMBlockContext(header, bc, author)
 	vmenv := vm.NewEVM(blockContext, vm.TxContext{}, statedb, config, cfg)
 
-	return applyTransaction(msg, config, bc, author, gp, statedb, header.Number, header.Hash(), tx, usedGas, vmenv)
+	return applyTransaction(msg, config, bc, author, gp, statedb, header.Number, header.Hash(), tx, usedGas, vmenv, nil)
 }

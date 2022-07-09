@@ -482,7 +482,7 @@ func (c *Tendermint) Prepare(chain consensus.ChainHeaderReader, header *types.He
 func (c *Tendermint) Finalize(chain consensus.ChainHeaderReader, header *types.Header, state *state.StateDB, txs []*types.Transaction, uncles []*types.Header) {
 	// No block rewards at the moment, so the state remains as is and uncles are dropped
 	header.Root = state.IntermediateRoot(chain.Config().IsEIP158(header.Number))
-	header.UncleHash = types.CalcUncleHash(nil)
+	header.UncleHash = types.CalcUncleHash(uncles)
 }
 
 // FinalizeAndAssemble implements consensus.Engine, ensuring no uncles are set,
@@ -492,7 +492,7 @@ func (c *Tendermint) FinalizeAndAssemble(chain consensus.ChainHeaderReader, head
 	c.Finalize(chain, header, state, txs, uncles)
 
 	// Assemble and return the final block for sealing
-	return types.NewBlock(header, txs, nil, receipts, trie.NewStackTrie(nil)), nil
+	return types.NewBlock(header, txs, uncles, receipts, trie.NewStackTrie(nil)), nil
 }
 
 // Seal implements consensus.Engine, attempting to create a sealed block using
