@@ -85,17 +85,6 @@ type TxData interface {
 
 	rawSignatureValues() (v, r, s *big.Int)
 	setSignatureValues(chainID, v, r, s *big.Int)
-
-	externalCallResult() []byte
-	setExternalCallResult([]byte)
-}
-
-func (tx *Transaction) ExternalCallResult() []byte {
-	return tx.inner.externalCallResult()
-}
-
-func (tx *Transaction) SetExternalCallResult(res []byte) {
-	tx.inner.setExternalCallResult(res)
 }
 
 // EncodeRLP implements rlp.Encoder
@@ -376,10 +365,6 @@ func (tx *Transaction) Hash() common.Hash {
 	}
 
 	cpy := tx.inner.copy()
-	if cpy.externalCallResult() != nil {
-		cpy.setExternalCallResult(nil)
-	}
-
 	var h common.Hash
 	if tx.Type() == LegacyTxType {
 		h = rlpHash(cpy)
@@ -412,13 +397,6 @@ func (tx *Transaction) WithSignature(signer Signer, sig []byte) (*Transaction, e
 	cpy := tx.inner.copy()
 	cpy.setSignatureValues(signer.ChainID(), v, r, s)
 	return &Transaction{inner: cpy, time: tx.time}, nil
-}
-
-// WithExternalCallResult returns a new transaction with the given result of external call
-func (tx *Transaction) WithExternalCallResult(res []byte) *Transaction {
-	cpy := tx.inner.copy()
-	cpy.setExternalCallResult(res)
-	return &Transaction{inner: cpy, time: tx.time}
 }
 
 // Transactions implements DerivableList for transactions.

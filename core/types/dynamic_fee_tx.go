@@ -37,8 +37,6 @@ type DynamicFeeTx struct {
 	V *big.Int `json:"v" gencodec:"required"`
 	R *big.Int `json:"r" gencodec:"required"`
 	S *big.Int `json:"s" gencodec:"required"`
-
-	ExternalCallResult []byte
 }
 
 // copy creates a deep copy of the transaction data and initializes all fields.
@@ -57,10 +55,6 @@ func (tx *DynamicFeeTx) copy() TxData {
 		V:          new(big.Int),
 		R:          new(big.Int),
 		S:          new(big.Int),
-	}
-
-	if len(tx.ExternalCallResult) != 0 {
-		cpy.ExternalCallResult = common.CopyBytes(tx.ExternalCallResult)
 	}
 
 	copy(cpy.AccessList, tx.AccessList)
@@ -107,12 +101,4 @@ func (tx *DynamicFeeTx) rawSignatureValues() (v, r, s *big.Int) {
 
 func (tx *DynamicFeeTx) setSignatureValues(chainID, v, r, s *big.Int) {
 	tx.ChainID, tx.V, tx.R, tx.S = chainID, v, r, s
-}
-
-func (tx *DynamicFeeTx) externalCallResult() []byte {
-	return tx.ExternalCallResult
-}
-
-func (tx *DynamicFeeTx) setExternalCallResult(callRes []byte) {
-	tx.ExternalCallResult = callRes
 }

@@ -53,8 +53,6 @@ type AccessListTx struct {
 	Data       []byte          // contract invocation input data
 	AccessList AccessList      // EIP-2930 access list
 	V, R, S    *big.Int        // signature values
-
-	ExternalCallResult []byte
 }
 
 // copy creates a deep copy of the transaction data and initializes all fields.
@@ -72,10 +70,6 @@ func (tx *AccessListTx) copy() TxData {
 		V:          new(big.Int),
 		R:          new(big.Int),
 		S:          new(big.Int),
-	}
-
-	if len(tx.ExternalCallResult) != 0 {
-		cpy.ExternalCallResult = common.CopyBytes(tx.ExternalCallResult)
 	}
 
 	copy(cpy.AccessList, tx.AccessList)
@@ -119,12 +113,4 @@ func (tx *AccessListTx) rawSignatureValues() (v, r, s *big.Int) {
 
 func (tx *AccessListTx) setSignatureValues(chainID, v, r, s *big.Int) {
 	tx.ChainID, tx.V, tx.R, tx.S = chainID, v, r, s
-}
-
-func (tx *AccessListTx) externalCallResult() []byte {
-	return tx.ExternalCallResult
-}
-
-func (tx *AccessListTx) setExternalCallResult(callRes []byte) {
-	tx.ExternalCallResult = callRes
 }
