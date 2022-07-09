@@ -65,9 +65,6 @@ type Receipt struct {
 	ContractAddress common.Address `json:"contractAddress"`
 	GasUsed         uint64         `json:"gasUsed" gencodec:"required"`
 
-	// This field provide result of external call
-	ExternalCallResult []byte `json:"externalCallResult" gencodec:"required"`
-
 	// Inclusion information: These fields provide information about the inclusion of the
 	// transaction corresponding to this receipt.
 	BlockHash        common.Hash `json:"blockHash,omitempty"`
@@ -87,11 +84,10 @@ type receiptMarshaling struct {
 
 // receiptRLP is the consensus encoding of a receipt.
 type receiptRLP struct {
-	PostStateOrStatus  []byte
-	CumulativeGasUsed  uint64
-	Bloom              Bloom
-	Logs               []*Log
-	ExternalCallResult []byte `json:"externalCallResult" gencodec:"required"`
+	PostStateOrStatus []byte
+	CumulativeGasUsed uint64
+	Bloom             Bloom
+	Logs              []*Log
 }
 
 // storedReceiptRLP is the storage encoding of a receipt.
@@ -99,14 +95,6 @@ type storedReceiptRLP struct {
 	PostStateOrStatus []byte
 	CumulativeGasUsed uint64
 	Logs              []*LogForStorage
-}
-
-// // v4StoredReceiptRLP is the storage encoding of a receipt used in database version 4.
-type v5StoredReceiptRLP struct {
-	PostStateOrStatus  []byte
-	CumulativeGasUsed  uint64
-	ExternalCallResult []byte
-	Logs               []*LogForStorage
 }
 
 // v4StoredReceiptRLP is the storage encoding of a receipt used in database version 4.
@@ -149,7 +137,7 @@ func NewReceipt(root []byte, failed bool, cumulativeGasUsed uint64) *Receipt {
 // EncodeRLP implements rlp.Encoder, and flattens the consensus fields of a receipt
 // into an RLP stream. If no post state is present, byzantium fork is assumed.
 func (r *Receipt) EncodeRLP(w io.Writer) error {
-	data := &receiptRLP{r.statusEncoding(), r.CumulativeGasUsed, r.Bloom, r.Logs, r.ExternalCallResult}
+	data := &receiptRLP{r.statusEncoding(), r.CumulativeGasUsed, r.Bloom, r.Logs}
 	if r.Type == LegacyTxType {
 		return rlp.Encode(w, data)
 	}
@@ -173,7 +161,7 @@ func (r *Receipt) MarshalBinary() ([]byte, error) {
 	if r.Type == LegacyTxType {
 		return rlp.EncodeToBytes(r)
 	}
-	data := &receiptRLP{r.statusEncoding(), r.CumulativeGasUsed, r.Bloom, r.Logs, r.ExternalCallResult}
+	data := &receiptRLP{r.statusEncoding(), r.CumulativeGasUsed, r.Bloom, r.Logs}
 	var buf bytes.Buffer
 	err := r.encodeTyped(data, &buf)
 	return buf.Bytes(), err
@@ -304,7 +292,6 @@ func (r *ReceiptForStorage) EncodeRLP(_w io.Writer) error {
 	outerList := w.List()
 	w.WriteBytes((*Receipt)(r).statusEncoding())
 	w.WriteUint64(r.CumulativeGasUsed)
-	w.WriteBytes(r.ExternalCallResult)
 	logList := w.List()
 	for _, log := range r.Logs {
 		if err := rlp.Encode(w, log); err != nil {
@@ -333,11 +320,7 @@ func (r *ReceiptForStorage) DecodeRLP(s *rlp.Stream) error {
 	if err := decodeV3StoredReceiptRLP(r, blob); err == nil {
 		return nil
 	}
-	if err := decodeV4StoredReceiptRLP(r, blob); err == nil {
-		return nil
-	}
-
-	return decodeV5StoredReceiptRLP(r, blob)
+	return decodeV4StoredReceiptRLP(r, blob)
 }
 
 func decodeStoredReceiptRLP(r *ReceiptForStorage, blob []byte) error {
@@ -349,25 +332,6 @@ func decodeStoredReceiptRLP(r *ReceiptForStorage, blob []byte) error {
 		return err
 	}
 	r.CumulativeGasUsed = stored.CumulativeGasUsed
-	r.Logs = make([]*Log, len(stored.Logs))
-	for i, log := range stored.Logs {
-		r.Logs[i] = (*Log)(log)
-	}
-	r.Bloom = CreateBloom(Receipts{(*Receipt)(r)})
-
-	return nil
-}
-
-func decodeV5StoredReceiptRLP(r *ReceiptForStorage, blob []byte) error {
-	var stored v5StoredReceiptRLP
-	if err := rlp.DecodeBytes(blob, &stored); err != nil {
-		return err
-	}
-	if err := (*Receipt)(r).setStatus(stored.PostStateOrStatus); err != nil {
-		return err
-	}
-	r.CumulativeGasUsed = stored.CumulativeGasUsed
-	r.ExternalCallResult = stored.ExternalCallResult
 	r.Logs = make([]*Log, len(stored.Logs))
 	for i, log := range stored.Logs {
 		r.Logs[i] = (*Log)(log)
@@ -427,7 +391,7 @@ func (rs Receipts) Len() int { return len(rs) }
 // EncodeIndex encodes the i'th receipt to w.
 func (rs Receipts) EncodeIndex(i int, w *bytes.Buffer) {
 	r := rs[i]
-	data := &receiptRLP{r.statusEncoding(), r.CumulativeGasUsed, r.Bloom, r.Logs, r.ExternalCallResult}
+	data := &receiptRLP{r.statusEncoding(), r.CumulativeGasUsed, r.Bloom, r.Logs}
 	switch r.Type {
 	case LegacyTxType:
 		rlp.Encode(w, data)
