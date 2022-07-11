@@ -1310,23 +1310,20 @@ func newRPCTransaction(tx *types.Transaction, blockHash common.Hash, blockNumber
 	from, _ := types.Sender(signer, tx)
 	v, r, s := tx.RawSignatureValues()
 	result := &RPCTransaction{
-		Type:               hexutil.Uint64(tx.Type()),
-		From:               from,
-		Gas:                hexutil.Uint64(tx.Gas()),
-		GasPrice:           (*hexutil.Big)(tx.GasPrice()),
-		Hash:               tx.Hash(),
-		Input:              hexutil.Bytes(tx.Data()),
-		Nonce:              hexutil.Uint64(tx.Nonce()),
-		To:                 tx.To(),
-		Value:              (*hexutil.Big)(tx.Value()),
-		ExternalCallResult: hexutil.Bytes(tx.ExternalCallResult()),
-		V:                  (*hexutil.Big)(v),
-		R:                  (*hexutil.Big)(r),
-		S:                  (*hexutil.Big)(s),
+		Type:     hexutil.Uint64(tx.Type()),
+		From:     from,
+		Gas:      hexutil.Uint64(tx.Gas()),
+		GasPrice: (*hexutil.Big)(tx.GasPrice()),
+		Hash:     tx.Hash(),
+		Input:    hexutil.Bytes(tx.Data()),
+		Nonce:    hexutil.Uint64(tx.Nonce()),
+		To:       tx.To(),
+		Value:    (*hexutil.Big)(tx.Value()),
+		V:        (*hexutil.Big)(v),
+		R:        (*hexutil.Big)(r),
+		S:        (*hexutil.Big)(s),
 	}
-	if len(tx.ExternalCallResult()) != 0 {
-		result.ExternalCallResult = tx.ExternalCallResult()
-	}
+
 	if blockHash != (common.Hash{}) {
 		result.BlockHash = &blockHash
 		result.BlockNumber = (*hexutil.Big)(new(big.Int).SetUint64(blockNumber))
@@ -1634,6 +1631,18 @@ func (s *PublicTransactionPoolAPI) GetTransactionReceipt(ctx context.Context, ha
 	}
 	receipt := receipts[index]
 
+	// get external_call_result from uncles
+	block, err := s.b.BlockByHash(ctx, blockHash)
+	var externalCallResult []byte
+	if block != nil {
+		uncles := block.Uncles()
+		for _, uncle := range uncles {
+			if uncle.TxHash == hash {
+				externalCallResult = uncle.Extra
+			}
+		}
+	}
+
 	// Derive the sender.
 	bigblock := new(big.Int).SetUint64(blockNumber)
 	signer := types.MakeSigner(s.b.ChainConfig(), bigblock)
@@ -1677,10 +1686,11 @@ func (s *PublicTransactionPoolAPI) GetTransactionReceipt(ctx context.Context, ha
 	if receipt.ContractAddress != (common.Address{}) {
 		fields["contractAddress"] = receipt.ContractAddress
 	}
-
-	if len(receipt.ExternalCallResult) != 0 {
-		fields["externalCallResult"] = common.Bytes2Hex(receipt.ExternalCallResult)
+	// set the external_call_result
+	if externalCallResult != nil {
+		fields["externalCallResult"] = common.Bytes2Hex(externalCallResult)
 	}
+
 	return fields, nil
 }
 

@@ -99,14 +99,14 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 			return nil, nil, 0, fmt.Errorf("could not apply tx %d [%v]: %w", i, tx.Hash().Hex(), err)
 		}
 
-		if len(tx.ExternalCallResult()) != 0 {
-			log.Warn("Tx With ExternalCallResult", "txHash", tx.Hash().Hex(), "external_call_result", common.Bytes2Hex(tx.ExternalCallResult()))
-		}
 		statedb.Prepare(tx.Hash(), i)
 		// get the externalCallResult from uncle
-		expectResult := block.Uncles()[uncleIndex].GetTxExternalCallResult(tx)
-		if expectResult != nil {
-			uncleIndex++
+		var expectResult []byte
+		if len(block.Uncles()) > uncleIndex {
+			expectResult = block.Uncles()[uncleIndex].GetTxExternalCallResult(tx)
+			if expectResult != nil {
+				uncleIndex++
+			}
 		}
 
 		receipt, crossChainCallResult, err := applyTransaction(msg, p.config, p.bc, nil, gp, statedb, blockNumber, blockHash, tx, usedGas, vmenv, expectResult)
@@ -114,9 +114,9 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 			return nil, nil, 0, fmt.Errorf("could not apply tx %d [%v]: %w", i, tx.Hash().Hex(), err)
 		}
 
-		if len(crossChainCallResult) > 0 || len(tx.ExternalCallResult()) > 0 {
+		if len(crossChainCallResult) > 0 || len(expectResult) > 0 {
 			if !bytes.Equal(expectResult, crossChainCallResult) {
-				log.Error("Failed to verify cross_chain_result and override the transaction.externalCallResult()", "txHash", tx.Hash().Hex(), "cross_chain_result", common.Bytes2Hex(crossChainCallResult))
+				log.Error("Failed to verify cross_chain_result and override the transaction.externalCallResult()", "txHash", tx.Hash().Hex(), "expect_cross_chain_result", common.Bytes2Hex(expectResult), "cross_chain_result", common.Bytes2Hex(crossChainCallResult))
 				return nil, nil, 0, fmt.Errorf("failed to verify cross_chain_result, tx: %s", tx.Hash().Hex())
 			} else {
 				log.Info("Verify cross_chain_result succeed", "txHash", tx.Hash().Hex(), "cross_chain_result", common.Bytes2Hex(crossChainCallResult))
@@ -182,9 +182,6 @@ func applyTransaction(msg types.Message, config *params.ChainConfig, bc ChainCon
 	receipt.BlockHash = blockHash
 	receipt.BlockNumber = blockNumber
 	receipt.TransactionIndex = uint(statedb.TxIndex())
-	if len(result.CrossChainCallResults) != 0 {
-		receipt.ExternalCallResult = result.CrossChainCallResults
-	}
 	return receipt, result.CrossChainCallResults, err
 }
 

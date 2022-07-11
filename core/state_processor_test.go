@@ -74,20 +74,18 @@ func (ctx *TestChainContext) GetHeader(common.Hash, uint64) *types.Header {
 }
 
 type WrapTx struct {
-	Tx                    *types.Transaction
-	GasUsed               uint64
-	TxWithExternalCallRes *types.Transaction
-	Args                  *CrossChainCallArgment
-	ExpectTxData          func() ([]byte, error)
-	ExpectTraces          []*ExpectTrace
-	ExpectCCRBytes        []byte
-	UnExpectErr           error
-	Index                 int
+	Tx             *types.Transaction
+	GasUsed        uint64
+	Args           *CrossChainCallArgment
+	ExpectTxData   func() ([]byte, error)
+	ExpectTraces   []*ExpectTrace
+	ExpectCCRBytes []byte
+	UnExpectErr    error
+	Index          int
 }
 
-func (wt *WrapTx) SetTxWithExternalCallRes(crossChainCallRes []byte) {
-	cpy := wt.Tx.WithExternalCallResult(crossChainCallRes)
-	wt.TxWithExternalCallRes = cpy
+func (wt *WrapTx) SetExternalCallRes(crossChainCallRes []byte) {
+	wt.ExpectCCRBytes = crossChainCallRes
 }
 
 func (wt *WrapTx) SetUnexpectErr(err error) {
@@ -569,7 +567,7 @@ func TestApplyTransaction(t *testing.T) {
 		_, crossCallResult, err := ApplyTransaction(config, chainContext, &addr1, gaspool, statedb, block.Header(), wtx.Tx, &wtx.GasUsed, vmconfig)
 
 		wtx.VerifyCallResult(crossCallResult, err, t)
-		wtx.SetTxWithExternalCallRes(crossCallResult)
+		wtx.SetExternalCallRes(crossCallResult)
 
 		w.Flush()
 		if err != nil {
@@ -603,7 +601,16 @@ func TestApplyTransaction(t *testing.T) {
 		vmconfig := vm.Config{Debug: true, Tracer: tracer, ExternalCallClient: nil}
 
 		_, statedb := MakePreState(db, gspec.Alloc, false)
-		_, crossCallResult, err := ApplyTransaction(config, chainContext, &addr1, gaspool, statedb, block.Header(), wtx.TxWithExternalCallRes, &actualUsedGas, vmconfig)
+
+		msg, err := wtx.Tx.AsMessage(types.MakeSigner(config, block.Header().Number), block.Header().BaseFee)
+		if err != nil {
+			t.Error(err)
+		}
+		// Create a new context to be used in the EVM environment
+		blockContext := NewEVMBlockContext(block.Header(), chainContext, &addr1)
+		vmenv := vm.NewEVM(blockContext, vm.TxContext{}, statedb, config, vmconfig)
+
+		_, crossCallResult, err := applyTransaction(msg, config, chainContext, &addr1, gaspool, statedb, block.Header().Number, block.Header().Hash(), wtx.Tx, &actualUsedGas, vmenv, wtx.ExpectCCRBytes)
 		wtx.VerifyCallResult(crossCallResult, err, t)
 
 		// compare gas use

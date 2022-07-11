@@ -381,10 +381,6 @@ func (c *Tendermint) verifyHeader(chain consensus.ChainHeaderReader, header *typ
 	if header.MixDigest != (common.Hash{}) {
 		return errInvalidMixDigest
 	}
-	// Ensure that the block doesn't contain any uncles which are meaningless in PoA
-	if header.UncleHash != uncleHash {
-		return errInvalidUncleHash
-	}
 	// Ensure that the block's difficulty is meaningful (may not be correct at this point)
 	if header.Difficulty == nil || (header.Difficulty.Cmp(big.NewInt(1)) != 0) {
 		return errInvalidDifficulty
@@ -458,9 +454,6 @@ func (c *Tendermint) getEpochHeader(chain consensus.ChainHeaderReader, header *t
 // VerifyUncles implements consensus.Engine, always returning an error for any
 // uncles as this consensus mechanism doesn't permit uncles.
 func (c *Tendermint) VerifyUncles(chain consensus.ChainReader, block *types.Block) error {
-	if len(block.Uncles()) > 0 {
-		return errors.New("uncles not allowed")
-	}
 	return nil
 }
 

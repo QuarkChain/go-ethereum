@@ -832,6 +832,19 @@ func (w *worker) commitUncle(env *environment, uncle *types.Header) error {
 		return errors.New("uncle already included")
 	}
 	env.uncles[hash] = uncle
+	return nil
+}
+
+// commitUncleDirectly is used when submitting cross_chain_call_result
+func (w *worker) commitUncleDirectly(env *environment, uncle *types.Header) error {
+	hash := uncle.Hash()
+	if _, exist := env.uncles[hash]; exist {
+		return errors.New("uncle not unique")
+	}
+	env.uncles[hash] = uncle
+	if env.sortUncles == nil {
+		env.sortUncles = make([]common.Hash, 0)
+	}
 	env.sortUncles = append(env.sortUncles, hash)
 	return nil
 }
@@ -879,8 +892,11 @@ func (w *worker) commitTransaction(env *environment, tx *types.Transaction) ([]*
 			TxHash: tx.Hash(),
 			Extra:  crossChainCallResult,
 		}
-		w.commitUncle(env, uncle)
-		log.Info("worker: transaction with cross_chain_call_result", "txHash", tx.Hash().Hex(), "CrossChainCallResult", common.Bytes2Hex(crossChainCallResult))
+		err := w.commitUncleDirectly(env, uncle)
+		if err != nil {
+			return nil, err
+		}
+		log.Info("worker: transaction with cross_chain_call_result", "txHash", tx.Hash().Hex(), "cross_chain_result", common.Bytes2Hex(crossChainCallResult))
 	}
 
 	env.txs = append(env.txs, tx)
