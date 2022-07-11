@@ -43,31 +43,24 @@ import (
 	"golang.org/x/crypto/sha3"
 )
 
-var (
-	// emptyRoot is the known root hash of an empty trie.
-	emptyRoot = common.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
-
-	// emptyCode is the known hash of the empty EVM bytecode.
-	emptyCode = crypto.Keccak256Hash(nil)
-)
-
+// todo
 const (
 	// minRequestSize is the minimum number of bytes to request from a remote peer.
 	// This number is used as the low cap for account and storage range requests.
-	// Bytecode and trienode are limited inherently by item count (1).
+	// Chunk and trienode are limited inherently by item count (1).
 	minRequestSize = 64 * 1024
 
 	// maxRequestSize is the maximum number of bytes to request from a remote peer.
 	// This number is used as the high cap for account and storage range requests.
-	// Bytecode and trienode are limited more explicitly by the caps below.
+	// Chunk and trienode are limited more explicitly by the caps below.
 	maxRequestSize = 512 * 1024
 
-	// maxCodeRequestCount is the maximum number of bytecode blobs to request in a
+	// maxCodeRequestCount is the maximum number of chunk blobs to request in a
 	// single query. If this number is too low, we're not filling responses fully
 	// and waste round trip times. If it's too high, we're capping responses and
 	// waste bandwidth.
 	//
-	// Depoyed bytecodes are currently capped at 24KB, so the minimum request
+	// Depoyed chunks are currently capped at 24KB, so the minimum request
 	// size should be maxRequestSize / 24K. Assuming that most contracts do not
 	// come close to that, requesting 4x should be a good approximation.
 	maxCodeRequestCount = maxRequestSize / (24 * 1024) * 4
@@ -79,82 +72,72 @@ const (
 	maxTrieRequestCount = maxRequestSize / 512
 )
 
-var (
-	// accountConcurrency is the number of chunks to split the account trie into
-	// to allow concurrent retrievals.
-	accountConcurrency = 16
-
-	// storageConcurrency is the number of chunks to split the a large contract
-	// storage trie into to allow concurrent retrievals.
-	storageConcurrency = 16
-)
-
 // ErrCancelled is returned from snap syncing if the operation was prematurely
 // terminated.
 var ErrCancelled = errors.New("sync cancelled")
 
-// bytecodeRequest tracks a pending bytecode request to ensure responses are to
+// chunkRequest tracks a pending chunk request to ensure responses are to
 // actual requests and to validate any security constraints.
 //
-// Concurrency note: bytecode requests and responses are handled concurrently from
+// Concurrency note: chunk requests and responses are handled concurrently from
 // the main runloop to allow Keccak256 hash verifications on the peer's thread and
 // to drop on invalid response. The request struct must contain all the data to
 // construct the response without accessing runloop internals (i.e. task). That
 // is only included to allow the runloop to match a response to the task being
 // synced without having yet another set of maps.
-type bytecodeRequest struct {
+type chunkRequest struct {
 	peer string    // Peer to which this request is assigned
 	id   uint64    // Request ID of this request
 	time time.Time // Timestamp when the request was sent
 
-	deliver chan *bytecodeResponse // Channel to deliver successful response on
-	revert  chan *bytecodeRequest  // Channel to deliver request failure on
-	cancel  chan struct{}          // Channel to track sync cancellation
-	timeout *time.Timer            // Timer to track delivery timeout
-	stale   chan struct{}          // Channel to signal the request was dropped
+	deliver chan *chunkResponse // Channel to deliver successful response on
+	revert  chan *chunkRequest  // Channel to deliver request failure on
+	cancel  chan struct{}       // Channel to track sync cancellation
+	timeout *time.Timer         // Timer to track delivery timeout
+	stale   chan struct{}       // Channel to signal the request was dropped
 
-	hashes []common.Hash // Bytecode hashes to validate responses
+	hashes []common.Hash // Chunk hashes to validate responses
 	task   *accountTask  // Task which this request is filling (only access fields through the runloop!!)
 }
 
-// bytecodeResponse is an already verified remote response to a bytecode request.
-type bytecodeResponse struct {
+// chunkResponse is an already verified remote response to a chunk request.
+type chunkResponse struct {
 	task *accountTask // Task which this request is filling
 
-	hashes []common.Hash // Hashes of the bytecode to avoid double hashing
-	codes  [][]byte      // Actual bytecodes to store into the database (nil = missing)
+	hashes []common.Hash // Hashes of the chunk to avoid double hashing
+	codes  [][]byte      // Actual chunks to store into the database (nil = missing)
 }
 
-// bytecodeHealRequest tracks a pending bytecode request to ensure responses are to
+// chunkHealRequest tracks a pending chunk request to ensure responses are to
 // actual requests and to validate any security constraints.
 //
-// Concurrency note: bytecode requests and responses are handled concurrently from
+// Concurrency note: chunk requests and responses are handled concurrently from
 // the main runloop to allow Keccak256 hash verifications on the peer's thread and
 // to drop on invalid response. The request struct must contain all the data to
 // construct the response without accessing runloop internals (i.e. task). That
 // is only included to allow the runloop to match a response to the task being
 // synced without having yet another set of maps.
-type bytecodeHealRequest struct {
+type chunkHealRequest struct {
 	peer string    // Peer to which this request is assigned
 	id   uint64    // Request ID of this request
 	time time.Time // Timestamp when the request was sent
 
-	deliver chan *bytecodeHealResponse // Channel to deliver successful response on
-	revert  chan *bytecodeHealRequest  // Channel to deliver request failure on
-	cancel  chan struct{}              // Channel to track sync cancellation
-	timeout *time.Timer                // Timer to track delivery timeout
-	stale   chan struct{}              // Channel to signal the request was dropped
+	deliver chan *chunkHealResponse // Channel to deliver successful response on
+	revert  chan *chunkHealRequest  // Channel to deliver request failure on
+	cancel  chan struct{}           // Channel to track sync cancellation
+	timeout *time.Timer             // Timer to track delivery timeout
+	stale   chan struct{}           // Channel to signal the request was dropped
 
-	hashes []common.Hash // Bytecode hashes to validate responses
+	hashes []common.Hash // Chunk hashes to validate responses
 	task   *healTask     // Task which this request is filling (only access fields through the runloop!!)
 }
 
-// bytecodeHealResponse is an already verified remote response to a bytecode request.
-type bytecodeHealResponse struct {
+// chunkHealResponse is an already verified remote response to a chunk request.
+type chunkHealResponse struct {
 	task *healTask // Task which this request is filling
 
-	hashes []common.Hash // Hashes of the bytecode to avoid double hashing
-	codes  [][]byte      // Actual bytecodes to store into the database (nil = missing)
+	hashes []common.Hash // Hashes of the chunk to avoid double hashing
+	codes  [][]byte      // Actual chunks to store into the database (nil = missing)
 }
 
 // healTask represents the sync task for healing the snap-synced chunk boundaries.
@@ -169,17 +152,17 @@ type healTask struct {
 // sync. Opposed to full and fast sync, there is no way to restart a suspended
 // snap sync without prior knowledge of the suspension point.
 type SyncProgress struct {
-	BytecodeSynced uint64             // Number of bytecodes downloaded
-	BytecodeBytes  common.StorageSize // Number of bytecode bytes downloaded
+	ChunkSynced uint64             // Number of chunks downloaded
+	ChunkBytes  common.StorageSize // Number of chunk bytes downloaded
 
-	BytecodeHealSynced uint64             // Number of bytecodes downloaded
-	BytecodeHealBytes  common.StorageSize // Number of bytecodes persisted to disk
+	ChunkHealSynced uint64             // Number of chunks downloaded
+	ChunkHealBytes  common.StorageSize // Number of chunks persisted to disk
 }
 
 // SyncPending is analogous to SyncProgress, but it's used to report on pending
 // ephemeral sync progress that doesn't get persisted into the database.
 type SyncPending struct {
-	BytecodeHeal uint64 // Number of bytecodes pending
+	ChunkHeal uint64 // Number of chunks pending
 }
 
 // SyncPeer abstracts out the methods required for a peer to be synced against
@@ -223,21 +206,21 @@ type Syncer struct {
 
 	// Request tracking during syncing phase
 	statelessPeers map[string]struct{} // Peers that failed to deliver state data
-	bytecodeIdlers map[string]struct{} // Peers that aren't serving bytecode requests
+	chunkIdlers    map[string]struct{} // Peers that aren't serving chunk requests
 
-	bytecodeReqs map[uint64]*bytecodeRequest // Bytecode requests currently running
+	chunkReqs map[uint64]*chunkRequest // Chunk requests currently running
 
-	bytecodeSynced uint64             // Number of bytecodes downloaded
-	bytecodeBytes  common.StorageSize // Number of bytecode bytes downloaded
+	chunkSynced uint64             // Number of chunks downloaded
+	chunkBytes  common.StorageSize // Number of chunk bytes downloaded
 
 	// Request tracking during healing phase
-	bytecodeHealIdlers map[string]struct{}             // Peers that aren't serving bytecode requests
-	bytecodeHealReqs   map[uint64]*bytecodeHealRequest // Bytecode requests currently running
+	chunkHealIdlers map[string]struct{}          // Peers that aren't serving chunk requests
+	chunkHealReqs   map[uint64]*chunkHealRequest // Chunk requests currently running
 
-	bytecodeHealSynced uint64             // Number of bytecodes downloaded
-	bytecodeHealBytes  common.StorageSize // Number of bytecodes persisted to disk
-	bytecodeHealDups   uint64             // Number of bytecodes already processed
-	bytecodeHealNops   uint64             // Number of bytecodes not requested
+	chunkHealSynced uint64             // Number of chunks downloaded
+	chunkHealBytes  common.StorageSize // Number of chunks persisted to disk
+	chunkHealDups   uint64             // Number of chunks already processed
+	chunkHealNops   uint64             // Number of chunks not requested
 
 	stateWriter ethdb.Batch // Shared batch writer used for persisting raw states
 
@@ -260,11 +243,11 @@ func NewSyncer(db ethdb.KeyValueStore) *Syncer {
 		rates:    msgrate.NewTrackers(log.New("proto", "snap")),
 		update:   make(chan struct{}, 1),
 
-		bytecodeIdlers:     make(map[string]struct{}),
-		bytecodeReqs:       make(map[uint64]*bytecodeRequest),
-		bytecodeHealIdlers: make(map[string]struct{}),
-		bytecodeHealReqs:   make(map[uint64]*bytecodeHealRequest),
-		stateWriter:        db.NewBatch(),
+		chunkIdlers:     make(map[string]struct{}),
+		chunkReqs:       make(map[uint64]*chunkRequest),
+		chunkHealIdlers: make(map[string]struct{}),
+		chunkHealReqs:   make(map[uint64]*chunkHealRequest),
+		stateWriter:     db.NewBatch(),
 	}
 }
 
@@ -284,8 +267,8 @@ func (s *Syncer) Register(peer SyncPeer) error {
 	s.rates.Track(id, msgrate.NewTracker(s.rates.MeanCapacities(), s.rates.MedianRoundTrip()))
 
 	// Mark the peer as idle, even if no sync is running
-	s.bytecodeIdlers[id] = struct{}{}
-	s.bytecodeHealIdlers[id] = struct{}{}
+	s.chunkIdlers[id] = struct{}{}
+	s.chunkHealIdlers[id] = struct{}{}
 	s.lock.Unlock()
 
 	// Notify any active syncs that a new peer can be assigned data
@@ -309,8 +292,8 @@ func (s *Syncer) Unregister(id string) error {
 	// Remove status markers, even if no sync is running
 	delete(s.statelessPeers, id)
 
-	delete(s.bytecodeIdlers, id)
-	delete(s.bytecodeHealIdlers, id)
+	delete(s.chunkIdlers, id)
+	delete(s.chunkHealIdlers, id)
 	s.lock.Unlock()
 
 	// Notify any active syncs that pending requests need to be reverted
@@ -367,8 +350,8 @@ func (s *Syncer) Sync(root common.Hash, cancel chan struct{}) error {
 	defer func() {
 		log.Debug("Terminating snapshot sync cycle", "root", root)
 		s.lock.Lock()
-		s.bytecodeReqs = make(map[uint64]*bytecodeRequest)
-		s.bytecodeHealReqs = make(map[uint64]*bytecodeHealRequest)
+		s.chunkReqs = make(map[uint64]*chunkRequest)
+		s.chunkHealReqs = make(map[uint64]*chunkHealRequest)
 		s.lock.Unlock()
 	}()
 	// Keep scheduling sync tasks
@@ -384,10 +367,10 @@ func (s *Syncer) Sync(root common.Hash, cancel chan struct{}) error {
 	// ephemeral so a data race doesn't accidentally deliver something stale on
 	// a persistent channel across syncs (yup, this happened)
 	var (
-		bytecodeReqFails     = make(chan *bytecodeRequest)
-		bytecodeResps        = make(chan *bytecodeResponse)
-		bytecodeHealReqFails = make(chan *bytecodeHealRequest)
-		bytecodeHealResps    = make(chan *bytecodeHealResponse)
+		chunkReqFails     = make(chan *chunkRequest)
+		chunkResps        = make(chan *chunkResponse)
+		chunkHealReqFails = make(chan *chunkHealRequest)
+		chunkHealResps    = make(chan *chunkHealResponse)
 	)
 	for {
 		// Remove all completed tasks and terminate sync if everything's done
@@ -397,11 +380,11 @@ func (s *Syncer) Sync(root common.Hash, cancel chan struct{}) error {
 			return nil
 		}
 		// Assign all the data retrieval tasks to any free peers
-		s.assignBytecodeTasks(bytecodeResps, bytecodeReqFails, cancel)
+		s.assignChunkTasks(chunkResps, chunkReqFails, cancel)
 
 		if len(s.tasks) == 0 {
 			// Sync phase done, run heal phase
-			s.assignBytecodeHealTasks(bytecodeHealResps, bytecodeHealReqFails, cancel)
+			s.assignChunkHealTasks(chunkHealResps, chunkHealReqFails, cancel)
 		}
 		// Wait for something to happen
 		select {
@@ -414,15 +397,15 @@ func (s *Syncer) Sync(root common.Hash, cancel chan struct{}) error {
 		case <-cancel:
 			return ErrCancelled
 
-		case req := <-bytecodeReqFails:
-			s.revertBytecodeRequest(req)
-		case req := <-bytecodeHealReqFails:
-			s.revertBytecodeHealRequest(req)
+		case req := <-chunkReqFails:
+			s.revertChunkRequest(req)
+		case req := <-chunkHealReqFails:
+			s.revertChunkHealRequest(req)
 
-		case res := <-bytecodeResps:
-			s.processBytecodeResponse(res)
-		case res := <-bytecodeHealResps:
-			s.processBytecodeHealResponse(res)
+		case res := <-chunkResps:
+			s.processChunkResponse(res)
+		case res := <-chunkHealResps:
+			s.processChunkHealResponse(res)
 		}
 		// Report stats if something meaningful happened
 		s.report(false)
@@ -465,18 +448,18 @@ func (s *Syncer) loadSyncStatus() {
 			}
 			s.snapped = len(s.tasks) == 0
 
-			s.bytecodeSynced = progress.BytecodeSynced
-			s.bytecodeBytes = progress.BytecodeBytes
-			s.bytecodeHealSynced = progress.BytecodeHealSynced
-			s.bytecodeHealBytes = progress.BytecodeHealBytes
+			s.chunkSynced = progress.ChunkSynced
+			s.chunkBytes = progress.ChunkBytes
+			s.chunkHealSynced = progress.ChunkHealSynced
+			s.chunkHealBytes = progress.ChunkHealBytes
 			return
 		}
 	}
 	// Either we've failed to decode the previus state, or there was none.
 	// Start a fresh sync by chunking up the account range and scheduling
 	// them for retrieval.
-	s.bytecodeSynced, s.bytecodeBytes = 0, 0
-	s.bytecodeHealSynced, s.bytecodeHealBytes = 0, 0
+	s.chunkSynced, s.chunkBytes = 0, 0
+	s.chunkHealSynced, s.chunkHealBytes = 0, 0
 
 	var next common.Hash
 	step := new(big.Int).Sub(
@@ -526,11 +509,11 @@ func (s *Syncer) saveSyncStatus() {
 	}
 	// Store the actual progress markers
 	progress := &SyncProgress{
-		Tasks:              s.tasks,
-		BytecodeSynced:     s.bytecodeSynced,
-		BytecodeBytes:      s.bytecodeBytes,
-		BytecodeHealSynced: s.bytecodeHealSynced,
-		BytecodeHealBytes:  s.bytecodeHealBytes,
+		Tasks:           s.tasks,
+		ChunkSynced:     s.chunkSynced,
+		ChunkBytes:      s.chunkBytes,
+		ChunkHealSynced: s.chunkHealSynced,
+		ChunkHealBytes:  s.chunkHealBytes,
 	}
 	status, err := json.Marshal(progress)
 	if err != nil {
@@ -545,35 +528,35 @@ func (s *Syncer) Progress() (*SyncProgress, *SyncPending) {
 	defer s.lock.Unlock()
 
 	progress := &SyncProgress{
-		BytecodeSynced:     s.bytecodeSynced,
-		BytecodeBytes:      s.bytecodeBytes,
-		BytecodeHealSynced: s.bytecodeHealSynced,
-		BytecodeHealBytes:  s.bytecodeHealBytes,
+		ChunkSynced:     s.chunkSynced,
+		ChunkBytes:      s.chunkBytes,
+		ChunkHealSynced: s.chunkHealSynced,
+		ChunkHealBytes:  s.chunkHealBytes,
 	}
 	pending := new(SyncPending)
 	if s.healer != nil {
-		pending.BytecodeHeal = uint64(len(s.healer.codeTasks))
+		pending.ChunkHeal = uint64(len(s.healer.codeTasks))
 	}
 	return progress, pending
 }
 
-// assignBytecodeTasks attempts to match idle peers to pending code retrievals.
-func (s *Syncer) assignBytecodeTasks(success chan *bytecodeResponse, fail chan *bytecodeRequest, cancel chan struct{}) {
+// assignChunkTasks attempts to match idle peers to pending code retrievals.
+func (s *Syncer) assignChunkTasks(success chan *chunkResponse, fail chan *chunkRequest, cancel chan struct{}) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
 	// Sort the peers by download capacity to use faster ones if many available
 	idlers := &capacitySort{
-		ids:  make([]string, 0, len(s.bytecodeIdlers)),
-		caps: make([]int, 0, len(s.bytecodeIdlers)),
+		ids:  make([]string, 0, len(s.chunkIdlers)),
+		caps: make([]int, 0, len(s.chunkIdlers)),
 	}
 	targetTTL := s.rates.TargetTimeout()
-	for id := range s.bytecodeIdlers {
+	for id := range s.chunkIdlers {
 		if _, ok := s.statelessPeers[id]; ok {
 			continue
 		}
 		idlers.ids = append(idlers.ids, id)
-		idlers.caps = append(idlers.caps, s.rates.Capacity(id, ByteCodesMsg, targetTTL))
+		idlers.caps = append(idlers.caps, s.rates.Capacity(id, ChunksMsg, targetTTL))
 	}
 	if len(idlers.ids) == 0 {
 		return
@@ -582,7 +565,7 @@ func (s *Syncer) assignBytecodeTasks(success chan *bytecodeResponse, fail chan *
 
 	// Iterate over all the tasks and try to find a pending one
 	for _, task := range s.tasks {
-		// Skip any tasks not in the bytecode retrieval phase
+		// Skip any tasks not in the chunk retrieval phase
 		if task.res == nil {
 			continue
 		}
@@ -610,7 +593,7 @@ func (s *Syncer) assignBytecodeTasks(success chan *bytecodeResponse, fail chan *
 			if reqid == 0 {
 				continue
 			}
-			if _, ok := s.bytecodeReqs[reqid]; ok {
+			if _, ok := s.chunkReqs[reqid]; ok {
 				continue
 			}
 			break
@@ -627,7 +610,7 @@ func (s *Syncer) assignBytecodeTasks(success chan *bytecodeResponse, fail chan *
 				break
 			}
 		}
-		req := &bytecodeRequest{
+		req := &chunkRequest{
 			peer:    idle,
 			id:      reqid,
 			time:    time.Now(),
@@ -639,44 +622,44 @@ func (s *Syncer) assignBytecodeTasks(success chan *bytecodeResponse, fail chan *
 			task:    task,
 		}
 		req.timeout = time.AfterFunc(s.rates.TargetTimeout(), func() {
-			peer.Log().Debug("Bytecode request timed out", "reqid", reqid)
-			s.rates.Update(idle, ByteCodesMsg, 0, 0)
-			s.scheduleRevertBytecodeRequest(req)
+			peer.Log().Debug("Chunk request timed out", "reqid", reqid)
+			s.rates.Update(idle, ChunksMsg, 0, 0)
+			s.scheduleRevertChunkRequest(req)
 		})
-		s.bytecodeReqs[reqid] = req
-		delete(s.bytecodeIdlers, idle)
+		s.chunkReqs[reqid] = req
+		delete(s.chunkIdlers, idle)
 
 		s.pend.Add(1)
 		go func() {
 			defer s.pend.Done()
 
 			// Attempt to send the remote request and revert if it fails
-			if err := peer.RequestByteCodes(reqid, hashes, maxRequestSize); err != nil {
-				log.Debug("Failed to request bytecodes", "err", err)
-				s.scheduleRevertBytecodeRequest(req)
+			if err := peer.RequestChunks(reqid, hashes, maxRequestSize); err != nil {
+				log.Debug("Failed to request chunks", "err", err)
+				s.scheduleRevertChunkRequest(req)
 			}
 		}()
 	}
 }
 
-// assignBytecodeHealTasks attempts to match idle peers to bytecode requests to
+// assignChunkHealTasks attempts to match idle peers to chunk requests to
 // heal any trie errors caused by the snap sync's chunked retrieval model.
-func (s *Syncer) assignBytecodeHealTasks(success chan *bytecodeHealResponse, fail chan *bytecodeHealRequest, cancel chan struct{}) {
+func (s *Syncer) assignChunkHealTasks(success chan *chunkHealResponse, fail chan *chunkHealRequest, cancel chan struct{}) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
 	// Sort the peers by download capacity to use faster ones if many available
 	idlers := &capacitySort{
-		ids:  make([]string, 0, len(s.bytecodeHealIdlers)),
-		caps: make([]int, 0, len(s.bytecodeHealIdlers)),
+		ids:  make([]string, 0, len(s.chunkHealIdlers)),
+		caps: make([]int, 0, len(s.chunkHealIdlers)),
 	}
 	targetTTL := s.rates.TargetTimeout()
-	for id := range s.bytecodeHealIdlers {
+	for id := range s.chunkHealIdlers {
 		if _, ok := s.statelessPeers[id]; ok {
 			continue
 		}
 		idlers.ids = append(idlers.ids, id)
-		idlers.caps = append(idlers.caps, s.rates.Capacity(id, ByteCodesMsg, targetTTL))
+		idlers.caps = append(idlers.caps, s.rates.Capacity(id, ChunksMsg, targetTTL))
 	}
 	if len(idlers.ids) == 0 {
 		return
@@ -725,7 +708,7 @@ func (s *Syncer) assignBytecodeHealTasks(success chan *bytecodeHealResponse, fai
 			if reqid == 0 {
 				continue
 			}
-			if _, ok := s.bytecodeHealReqs[reqid]; ok {
+			if _, ok := s.chunkHealReqs[reqid]; ok {
 				continue
 			}
 			break
@@ -743,7 +726,7 @@ func (s *Syncer) assignBytecodeHealTasks(success chan *bytecodeHealResponse, fai
 				break
 			}
 		}
-		req := &bytecodeHealRequest{
+		req := &chunkHealRequest{
 			peer:    idle,
 			id:      reqid,
 			time:    time.Now(),
@@ -755,21 +738,21 @@ func (s *Syncer) assignBytecodeHealTasks(success chan *bytecodeHealResponse, fai
 			task:    s.healer,
 		}
 		req.timeout = time.AfterFunc(s.rates.TargetTimeout(), func() {
-			peer.Log().Debug("Bytecode heal request timed out", "reqid", reqid)
-			s.rates.Update(idle, ByteCodesMsg, 0, 0)
-			s.scheduleRevertBytecodeHealRequest(req)
+			peer.Log().Debug("Chunk heal request timed out", "reqid", reqid)
+			s.rates.Update(idle, ChunksMsg, 0, 0)
+			s.scheduleRevertChunkHealRequest(req)
 		})
-		s.bytecodeHealReqs[reqid] = req
-		delete(s.bytecodeHealIdlers, idle)
+		s.chunkHealReqs[reqid] = req
+		delete(s.chunkHealIdlers, idle)
 
 		s.pend.Add(1)
 		go func() {
 			defer s.pend.Done()
 
 			// Attempt to send the remote request and revert if it fails
-			if err := peer.RequestByteCodes(reqid, hashes, maxRequestSize); err != nil {
-				log.Debug("Failed to request bytecode healers", "err", err)
-				s.scheduleRevertBytecodeHealRequest(req)
+			if err := peer.RequestChunks(reqid, hashes, maxRequestSize); err != nil {
+				log.Debug("Failed to request chunk healers", "err", err)
+				s.scheduleRevertChunkHealRequest(req)
 			}
 		}()
 	}
@@ -786,10 +769,10 @@ func (s *Syncer) revertRequests(peer string) {
 			accountReqs = append(accountReqs, req)
 		}
 	}
-	var bytecodeReqs []*bytecodeRequest
-	for _, req := range s.bytecodeReqs {
+	var chunkReqs []*chunkRequest
+	for _, req := range s.chunkReqs {
 		if req.peer == peer {
-			bytecodeReqs = append(bytecodeReqs, req)
+			chunkReqs = append(chunkReqs, req)
 		}
 	}
 	var storageReqs []*storageRequest
@@ -804,10 +787,10 @@ func (s *Syncer) revertRequests(peer string) {
 			trienodeHealReqs = append(trienodeHealReqs, req)
 		}
 	}
-	var bytecodeHealReqs []*bytecodeHealRequest
-	for _, req := range s.bytecodeHealReqs {
+	var chunkHealReqs []*chunkHealRequest
+	for _, req := range s.chunkHealReqs {
 		if req.peer == peer {
-			bytecodeHealReqs = append(bytecodeHealReqs, req)
+			chunkHealReqs = append(chunkHealReqs, req)
 		}
 	}
 	s.lock.Unlock()
@@ -816,8 +799,8 @@ func (s *Syncer) revertRequests(peer string) {
 	for _, req := range accountReqs {
 		s.revertAccountRequest(req)
 	}
-	for _, req := range bytecodeReqs {
-		s.revertBytecodeRequest(req)
+	for _, req := range chunkReqs {
+		s.revertChunkRequest(req)
 	}
 	for _, req := range storageReqs {
 		s.revertStorageRequest(req)
@@ -825,14 +808,14 @@ func (s *Syncer) revertRequests(peer string) {
 	for _, req := range trienodeHealReqs {
 		s.revertTrienodeHealRequest(req)
 	}
-	for _, req := range bytecodeHealReqs {
-		s.revertBytecodeHealRequest(req)
+	for _, req := range chunkHealReqs {
+		s.revertChunkHealRequest(req)
 	}
 }
 
-// scheduleRevertBytecodeRequest asks the event loop to clean up a bytecode request
+// scheduleRevertChunkRequest asks the event loop to clean up a chunk request
 // and return all failed retrieval tasks to the scheduler for reassignment.
-func (s *Syncer) scheduleRevertBytecodeRequest(req *bytecodeRequest) {
+func (s *Syncer) scheduleRevertChunkRequest(req *chunkRequest) {
 	select {
 	case req.revert <- req:
 		// Sync event loop notified
@@ -843,16 +826,16 @@ func (s *Syncer) scheduleRevertBytecodeRequest(req *bytecodeRequest) {
 	}
 }
 
-// revertBytecodeRequest cleans up a bytecode request and returns all failed
+// revertChunkRequest cleans up a chunk request and returns all failed
 // retrieval tasks to the scheduler for reassignment.
 //
 // Note, this needs to run on the event runloop thread to reschedule to idle peers.
-// On peer threads, use scheduleRevertBytecodeRequest.
-func (s *Syncer) revertBytecodeRequest(req *bytecodeRequest) {
-	log.Debug("Reverting bytecode request", "peer", req.peer)
+// On peer threads, use scheduleRevertChunkRequest.
+func (s *Syncer) revertChunkRequest(req *chunkRequest) {
+	log.Debug("Reverting chunk request", "peer", req.peer)
 	select {
 	case <-req.stale:
-		log.Trace("Bytecode request already reverted", "peer", req.peer, "reqid", req.id)
+		log.Trace("Chunk request already reverted", "peer", req.peer, "reqid", req.id)
 		return
 	default:
 	}
@@ -860,7 +843,7 @@ func (s *Syncer) revertBytecodeRequest(req *bytecodeRequest) {
 
 	// Remove the request from the tracked set
 	s.lock.Lock()
-	delete(s.bytecodeReqs, req.id)
+	delete(s.chunkReqs, req.id)
 	s.lock.Unlock()
 
 	// If there's a timeout timer still running, abort it and mark the code
@@ -871,9 +854,9 @@ func (s *Syncer) revertBytecodeRequest(req *bytecodeRequest) {
 	}
 }
 
-// scheduleRevertBytecodeHealRequest asks the event loop to clean up a bytecode heal
+// scheduleRevertChunkHealRequest asks the event loop to clean up a chunk heal
 // request and return all failed retrieval tasks to the scheduler for reassignment.
-func (s *Syncer) scheduleRevertBytecodeHealRequest(req *bytecodeHealRequest) {
+func (s *Syncer) scheduleRevertChunkHealRequest(req *chunkHealRequest) {
 	select {
 	case req.revert <- req:
 		// Sync event loop notified
@@ -884,16 +867,16 @@ func (s *Syncer) scheduleRevertBytecodeHealRequest(req *bytecodeHealRequest) {
 	}
 }
 
-// revertBytecodeHealRequest cleans up a bytecode heal request and returns all
+// revertChunkHealRequest cleans up a chunk heal request and returns all
 // failed retrieval tasks to the scheduler for reassignment.
 //
 // Note, this needs to run on the event runloop thread to reschedule to idle peers.
-// On peer threads, use scheduleRevertBytecodeHealRequest.
-func (s *Syncer) revertBytecodeHealRequest(req *bytecodeHealRequest) {
-	log.Debug("Reverting bytecode heal request", "peer", req.peer)
+// On peer threads, use scheduleRevertChunkHealRequest.
+func (s *Syncer) revertChunkHealRequest(req *chunkHealRequest) {
+	log.Debug("Reverting chunk heal request", "peer", req.peer)
 	select {
 	case <-req.stale:
-		log.Trace("Bytecode heal request already reverted", "peer", req.peer, "reqid", req.id)
+		log.Trace("Chunk heal request already reverted", "peer", req.peer, "reqid", req.id)
 		return
 	default:
 	}
@@ -901,7 +884,7 @@ func (s *Syncer) revertBytecodeHealRequest(req *bytecodeHealRequest) {
 
 	// Remove the request from the tracked set
 	s.lock.Lock()
-	delete(s.bytecodeHealReqs, req.id)
+	delete(s.chunkHealReqs, req.id)
 	s.lock.Unlock()
 
 	// If there's a timeout timer still running, abort it and mark the code
@@ -912,9 +895,9 @@ func (s *Syncer) revertBytecodeHealRequest(req *bytecodeHealRequest) {
 	}
 }
 
-// processBytecodeResponse integrates an already validated bytecode response
+// processChunkResponse integrates an already validated chunk response
 // into the account tasks.
-func (s *Syncer) processBytecodeResponse(res *bytecodeResponse) {
+func (s *Syncer) processChunkResponse(res *chunkResponse) {
 	batch := s.db.NewBatch()
 
 	var (
@@ -923,7 +906,7 @@ func (s *Syncer) processBytecodeResponse(res *bytecodeResponse) {
 	for i, hash := range res.hashes {
 		code := res.codes[i]
 
-		// If the bytecode was not delivered, reschedule it
+		// If the chunk was not delivered, reschedule it
 		if code == nil {
 			res.task.codeTasks[hash] = struct{}{}
 			continue
@@ -935,18 +918,18 @@ func (s *Syncer) processBytecodeResponse(res *bytecodeResponse) {
 				res.task.pend--
 			}
 		}
-		// Push the bytecode into a database batch
+		// Push the chunk into a database batch
 		codes++
 		rawdb.WriteCode(batch, hash, code)
 	}
 	bytes := common.StorageSize(batch.ValueSize())
 	if err := batch.Write(); err != nil {
-		log.Crit("Failed to persist bytecodes", "err", err)
+		log.Crit("Failed to persist chunks", "err", err)
 	}
-	s.bytecodeSynced += codes
-	s.bytecodeBytes += bytes
+	s.chunkSynced += codes
+	s.chunkBytes += bytes
 
-	log.Debug("Persisted set of bytecodes", "count", codes, "bytes", bytes)
+	log.Debug("Persisted set of chunks", "count", codes, "bytes", bytes)
 
 	// If this delivery completed the last pending task, forward the account task
 	// to the next chunk
@@ -958,9 +941,9 @@ func (s *Syncer) processBytecodeResponse(res *bytecodeResponse) {
 	// task assigners to pick up and fill.
 }
 
-// processBytecodeHealResponse integrates an already validated bytecode response
+// processChunkHealResponse integrates an already validated chunk response
 // into the healer tasks.
-func (s *Syncer) processBytecodeHealResponse(res *bytecodeHealResponse) {
+func (s *Syncer) processChunkHealResponse(res *chunkHealResponse) {
 	for i, hash := range res.hashes {
 		node := res.codes[i]
 
@@ -970,18 +953,18 @@ func (s *Syncer) processBytecodeHealResponse(res *bytecodeHealResponse) {
 			continue
 		}
 		// Push the trie node into the state syncer
-		s.bytecodeHealSynced++
-		s.bytecodeHealBytes += common.StorageSize(len(node))
+		s.chunkHealSynced++
+		s.chunkHealBytes += common.StorageSize(len(node))
 
 		err := s.healer.scheduler.Process(trie.SyncResult{Hash: hash, Data: node})
 		switch err {
 		case nil:
 		case trie.ErrAlreadyProcessed:
-			s.bytecodeHealDups++
+			s.chunkHealDups++
 		case trie.ErrNotRequested:
-			s.bytecodeHealNops++
+			s.chunkHealNops++
 		default:
-			log.Error("Invalid bytecode processed", "hash", hash, "err", err)
+			log.Error("Invalid chunk processed", "hash", hash, "err", err)
 		}
 	}
 	batch := s.db.NewBatch()
@@ -991,53 +974,53 @@ func (s *Syncer) processBytecodeHealResponse(res *bytecodeHealResponse) {
 	if err := batch.Write(); err != nil {
 		log.Crit("Failed to persist healing data", "err", err)
 	}
-	log.Debug("Persisted set of healing data", "type", "bytecode", "bytes", common.StorageSize(batch.ValueSize()))
+	log.Debug("Persisted set of healing data", "type", "chunk", "bytes", common.StorageSize(batch.ValueSize()))
 }
 
-// OnByteCodes is a callback method to invoke when a batch of contract
+// OnChunks is a callback method to invoke when a batch of contract
 // bytes codes are received from a remote peer.
-func (s *Syncer) OnByteCodes(peer SyncPeer, id uint64, bytecodes [][]byte) error {
+func (s *Syncer) OnChunks(peer SyncPeer, id uint64, chunks []*Chunk) error {
 	s.lock.RLock()
 	syncing := !s.snapped
 	s.lock.RUnlock()
 
 	if syncing {
-		return s.onByteCodes(peer, id, bytecodes)
+		return s.onChunks(peer, id, chunks)
 	}
-	return s.onHealByteCodes(peer, id, bytecodes)
+	return s.onHealChunks(peer, id, chunks)
 }
 
-// onByteCodes is a callback method to invoke when a batch of contract
+// onChunks is a callback method to invoke when a batch of contract
 // bytes codes are received from a remote peer in the syncing phase.
-func (s *Syncer) onByteCodes(peer SyncPeer, id uint64, bytecodes [][]byte) error {
+func (s *Syncer) onChunks(peer SyncPeer, id uint64, chunks []*Chunk) error {
 	var size common.StorageSize
-	for _, code := range bytecodes {
+	for _, code := range chunks {
 		size += common.StorageSize(len(code))
 	}
 	logger := peer.Log().New("reqid", id)
-	logger.Trace("Delivering set of bytecodes", "bytecodes", len(bytecodes), "bytes", size)
+	logger.Trace("Delivering set of chunks", "chunks", len(chunks), "bytes", size)
 
 	// Whether or not the response is valid, we can mark the peer as idle and
 	// notify the scheduler to assign a new task. If the response is invalid,
 	// we'll drop the peer in a bit.
 	s.lock.Lock()
 	if _, ok := s.peers[peer.ID()]; ok {
-		s.bytecodeIdlers[peer.ID()] = struct{}{}
+		s.chunkIdlers[peer.ID()] = struct{}{}
 	}
 	select {
 	case s.update <- struct{}{}:
 	default:
 	}
 	// Ensure the response is for a valid request
-	req, ok := s.bytecodeReqs[id]
+	req, ok := s.chunkReqs[id]
 	if !ok {
 		// Request stale, perhaps the peer timed out but came through in the end
-		logger.Warn("Unexpected bytecode packet")
+		logger.Warn("Unexpected chunk packet")
 		s.lock.Unlock()
 		return nil
 	}
-	delete(s.bytecodeReqs, id)
-	s.rates.Update(peer.ID(), ByteCodesMsg, time.Since(req.time), len(bytecodes))
+	delete(s.chunkReqs, id)
+	s.rates.Update(peer.ID(), ChunksMsg, time.Since(req.time), len(chunks))
 
 	// Clean up the request timeout timer, we'll see how to proceed further based
 	// on the actual delivered content
@@ -1048,47 +1031,47 @@ func (s *Syncer) onByteCodes(peer SyncPeer, id uint64, bytecodes [][]byte) error
 	}
 
 	// Response is valid, but check if peer is signalling that it does not have
-	// the requested data. For bytecode range queries that means the peer is not
+	// the requested data. For chunk range queries that means the peer is not
 	// yet synced.
-	if len(bytecodes) == 0 {
-		logger.Debug("Peer rejected bytecode request")
+	if len(chunks) == 0 {
+		logger.Debug("Peer rejected chunk request")
 		s.statelessPeers[peer.ID()] = struct{}{}
 		s.lock.Unlock()
 
 		// Signal this request as failed, and ready for rescheduling
-		s.scheduleRevertBytecodeRequest(req)
+		s.scheduleRevertChunkRequest(req)
 		return nil
 	}
 	s.lock.Unlock()
 
-	// Cross reference the requested bytecodes with the response to find gaps
+	// Cross reference the requested chunks with the response to find gaps
 	// that the serving node is missing
 	hasher := sha3.NewLegacyKeccak256().(crypto.KeccakState)
 	hash := make([]byte, 32)
 
 	codes := make([][]byte, len(req.hashes))
-	for i, j := 0, 0; i < len(bytecodes); i++ {
+	for i, j := 0, 0; i < len(chunks); i++ {
 		// Find the next hash that we've been served, leaving misses with nils
 		hasher.Reset()
-		hasher.Write(bytecodes[i])
+		hasher.Write(chunks[i])
 		hasher.Read(hash)
 
 		for j < len(req.hashes) && !bytes.Equal(hash, req.hashes[j][:]) {
 			j++
 		}
 		if j < len(req.hashes) {
-			codes[j] = bytecodes[i]
+			codes[j] = chunks[i]
 			j++
 			continue
 		}
 		// We've either ran out of hashes, or got unrequested data
-		logger.Warn("Unexpected bytecodes", "count", len(bytecodes)-i)
+		logger.Warn("Unexpected chunks", "count", len(chunks)-i)
 		// Signal this request as failed, and ready for rescheduling
-		s.scheduleRevertBytecodeRequest(req)
-		return errors.New("unexpected bytecode")
+		s.scheduleRevertChunkRequest(req)
+		return errors.New("unexpected chunk")
 	}
 	// Response validated, send it to the scheduler for filling
-	response := &bytecodeResponse{
+	response := &chunkResponse{
 		task:   req.task,
 		hashes: req.hashes,
 		codes:  codes,
@@ -1101,37 +1084,37 @@ func (s *Syncer) onByteCodes(peer SyncPeer, id uint64, bytecodes [][]byte) error
 	return nil
 }
 
-// onHealByteCodes is a callback method to invoke when a batch of contract
+// onHealChunks is a callback method to invoke when a batch of contract
 // bytes codes are received from a remote peer in the healing phase.
-func (s *Syncer) onHealByteCodes(peer SyncPeer, id uint64, bytecodes [][]byte) error {
+func (s *Syncer) onHealChunks(peer SyncPeer, id uint64, chunks []*Chunk) error {
 	var size common.StorageSize
-	for _, code := range bytecodes {
+	for _, code := range chunks {
 		size += common.StorageSize(len(code))
 	}
 	logger := peer.Log().New("reqid", id)
-	logger.Trace("Delivering set of healing bytecodes", "bytecodes", len(bytecodes), "bytes", size)
+	logger.Trace("Delivering set of healing chunks", "chunks", len(chunks), "bytes", size)
 
 	// Whether or not the response is valid, we can mark the peer as idle and
 	// notify the scheduler to assign a new task. If the response is invalid,
 	// we'll drop the peer in a bit.
 	s.lock.Lock()
 	if _, ok := s.peers[peer.ID()]; ok {
-		s.bytecodeHealIdlers[peer.ID()] = struct{}{}
+		s.chunkHealIdlers[peer.ID()] = struct{}{}
 	}
 	select {
 	case s.update <- struct{}{}:
 	default:
 	}
 	// Ensure the response is for a valid request
-	req, ok := s.bytecodeHealReqs[id]
+	req, ok := s.chunkHealReqs[id]
 	if !ok {
 		// Request stale, perhaps the peer timed out but came through in the end
-		logger.Warn("Unexpected bytecode heal packet")
+		logger.Warn("Unexpected chunk heal packet")
 		s.lock.Unlock()
 		return nil
 	}
-	delete(s.bytecodeHealReqs, id)
-	s.rates.Update(peer.ID(), ByteCodesMsg, time.Since(req.time), len(bytecodes))
+	delete(s.chunkHealReqs, id)
+	s.rates.Update(peer.ID(), ChunksMsg, time.Since(req.time), len(chunks))
 
 	// Clean up the request timeout timer, we'll see how to proceed further based
 	// on the actual delivered content
@@ -1142,47 +1125,47 @@ func (s *Syncer) onHealByteCodes(peer SyncPeer, id uint64, bytecodes [][]byte) e
 	}
 
 	// Response is valid, but check if peer is signalling that it does not have
-	// the requested data. For bytecode range queries that means the peer is not
+	// the requested data. For chunk range queries that means the peer is not
 	// yet synced.
-	if len(bytecodes) == 0 {
-		logger.Debug("Peer rejected bytecode heal request")
+	if len(chunks) == 0 {
+		logger.Debug("Peer rejected chunk heal request")
 		s.statelessPeers[peer.ID()] = struct{}{}
 		s.lock.Unlock()
 
 		// Signal this request as failed, and ready for rescheduling
-		s.scheduleRevertBytecodeHealRequest(req)
+		s.scheduleRevertChunkHealRequest(req)
 		return nil
 	}
 	s.lock.Unlock()
 
-	// Cross reference the requested bytecodes with the response to find gaps
+	// Cross reference the requested chunks with the response to find gaps
 	// that the serving node is missing
 	hasher := sha3.NewLegacyKeccak256().(crypto.KeccakState)
 	hash := make([]byte, 32)
 
 	codes := make([][]byte, len(req.hashes))
-	for i, j := 0, 0; i < len(bytecodes); i++ {
+	for i, j := 0, 0; i < len(chunks); i++ {
 		// Find the next hash that we've been served, leaving misses with nils
 		hasher.Reset()
-		hasher.Write(bytecodes[i])
+		hasher.Write(chunks[i])
 		hasher.Read(hash)
 
 		for j < len(req.hashes) && !bytes.Equal(hash, req.hashes[j][:]) {
 			j++
 		}
 		if j < len(req.hashes) {
-			codes[j] = bytecodes[i]
+			codes[j] = chunks[i]
 			j++
 			continue
 		}
 		// We've either ran out of hashes, or got unrequested data
-		logger.Warn("Unexpected healing bytecodes", "count", len(bytecodes)-i)
+		logger.Warn("Unexpected healing chunks", "count", len(chunks)-i)
 		// Signal this request as failed, and ready for rescheduling
-		s.scheduleRevertBytecodeHealRequest(req)
-		return errors.New("unexpected healing bytecode")
+		s.scheduleRevertChunkHealRequest(req)
+		return errors.New("unexpected healing chunk")
 	}
 	// Response validated, send it to the scheduler for filling
-	response := &bytecodeHealResponse{
+	response := &chunkHealResponse{
 		task:   req.task,
 		hashes: req.hashes,
 		codes:  codes,
@@ -1241,7 +1224,7 @@ func (s *Syncer) reportSyncProgress(force bool) {
 		return
 	}
 	// Don't report anything until we have a meaningful progress
-	synced := s.bytecodeBytes
+	synced := s.chunkBytes
 	if synced == 0 {
 		return
 	}
@@ -1267,10 +1250,10 @@ func (s *Syncer) reportSyncProgress(force bool) {
 		progress = fmt.Sprintf("%.2f%%", float64(synced)*100/estBytes)
 		accounts = fmt.Sprintf("%v@%v", log.FormatLogfmtUint64(s.accountSynced), s.accountBytes.TerminalString())
 		storage  = fmt.Sprintf("%v@%v", log.FormatLogfmtUint64(s.storageSynced), s.storageBytes.TerminalString())
-		bytecode = fmt.Sprintf("%v@%v", log.FormatLogfmtUint64(s.bytecodeSynced), s.bytecodeBytes.TerminalString())
+		chunk    = fmt.Sprintf("%v@%v", log.FormatLogfmtUint64(s.chunkSynced), s.chunkBytes.TerminalString())
 	)
 	log.Info("State sync in progress", "synced", progress, "state", synced,
-		"accounts", accounts, "slots", storage, "codes", bytecode, "eta", common.PrettyDuration(estTime-elapsed))
+		"accounts", accounts, "slots", storage, "codes", chunk, "eta", common.PrettyDuration(estTime-elapsed))
 }
 
 // reportHealProgress calculates various status reports and provides it to the user.
@@ -1283,10 +1266,10 @@ func (s *Syncer) reportHealProgress(force bool) {
 
 	// Create a mega progress report
 	var (
-		bytecode = fmt.Sprintf("%v@%v", log.FormatLogfmtUint64(s.bytecodeHealSynced), s.bytecodeHealBytes.TerminalString())
+		chunk = fmt.Sprintf("%v@%v", log.FormatLogfmtUint64(s.chunkHealSynced), s.chunkHealBytes.TerminalString())
 	)
 	log.Info("State heal in progress", "accounts", accounts, "slots", storage,
-		"codes", bytecode, "nodes", trienode, "pending", s.healer.scheduler.Pending())
+		"codes", chunk, "nodes", trienode, "pending", s.healer.scheduler.Pending())
 }
 
 // estimateRemainingSlots tries to determine roughly how many slots are left in

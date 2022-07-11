@@ -18,13 +18,11 @@ package sstorage
 
 import (
 	"fmt"
-	"time"
-
 	"github.com/ethereum/go-ethereum/core"
-	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/p2p"
 	"github.com/ethereum/go-ethereum/p2p/enode"
 	"github.com/ethereum/go-ethereum/p2p/enr"
+	"github.com/ethereum/go-ethereum/sstorage"
 )
 
 const (
@@ -78,7 +76,7 @@ func MakeProtocols(backend Backend, dnsdisc enode.Iterator) []p2p.Protocol {
 			Version: version,
 			Length:  protocolLengths[version],
 			Run: func(p *p2p.Peer, rw p2p.MsgReadWriter) error {
-				return backend.RunPeer(NewPeer(version, p, rw), func(peer *Peer) error {
+				return backend.RunPeer(NewPeer(version, sstorage.ShardList(), p, rw), func(peer *Peer) error {
 					return Handle(backend, peer)
 				})
 			},
@@ -100,14 +98,14 @@ func MakeProtocols(backend Backend, dnsdisc enode.Iterator) []p2p.Protocol {
 func Handle(backend Backend, peer *Peer) error {
 	for {
 		if err := HandleMessage(backend, peer); err != nil {
-			peer.Log().Debug("Message handling failed in `snap`", "err", err)
+			peer.Log().Debug("Message handling failed in `sstorage`", "err", err)
 			return err
 		}
 	}
 }
 
 // HandleMessage is invoked whenever an inbound message is received from a
-// remote peer on the `snap` protocol. The remote connection is torn down upon
+// remote peer on the `sstorage` protocol. The remote connection is torn down upon
 // returning any error.
 func HandleMessage(backend Backend, peer *Peer) error {
 	// Read the next message from the remote peer, and ensure it's fully consumed
@@ -119,19 +117,6 @@ func HandleMessage(backend Backend, peer *Peer) error {
 		return fmt.Errorf("%w: %v > %v", errMsgTooLarge, msg.Size, maxMessageSize)
 	}
 	defer msg.Discard()
-	start := time.Now()
-	// Track the emount of time it takes to serve the request and run the handler
-	if metrics.Enabled {
-		h := fmt.Sprintf("%s/%s/%d/%#02x", p2p.HandleHistName, ProtocolName, peer.Version(), msg.Code)
-		defer func(start time.Time) {
-			sampler := func() metrics.Sample {
-				return metrics.ResettingSample(
-					metrics.NewExpDecaySample(1028, 0.015),
-				)
-			}
-			metrics.GetOrRegisterHistogramLazy(h, nil, sampler).Update(time.Since(start).Microseconds())
-		}(start)
-	}
 	// Handle the message depending on its contents
 	switch {
 	case msg.Code == GetChunksMsg:
@@ -141,23 +126,22 @@ func HandleMessage(backend Backend, peer *Peer) error {
 			return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 		}
 		// Service the request, potentially returning nothing in case of errors
-		nodes, err := ServiceGetChunksQuery(backend.Chain(), &req, start)
+		chunks, err := ServiceGetChunksQuery(backend.Chain(), &req)
 		if err != nil {
 			return err
 		}
 		// Send back anything accumulated (or empty in case of errors)
 		return p2p.Send(peer.rw, ChunksMsg, &ChunksPacket{
 			ID:     req.ID,
-			Chunks: nodes, // todo
+			Chunks: chunks,
 		})
 
 	case msg.Code == ChunksMsg:
-		// A batch of trie nodes arrived to one of our previous requests
+		// A batch of trie chunks arrived to one of our previous requests
 		res := new(ChunksPacket)
 		if err := msg.Decode(res); err != nil {
 			return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 		}
-		requestTracker.Fulfil(peer.id, peer.version, ChunksMsg, res.ID)
 
 		return backend.Handle(peer, res)
 
@@ -168,82 +152,21 @@ func HandleMessage(backend Backend, peer *Peer) error {
 
 // ServiceGetChunksQuery assembles the response to a trie nodes query.
 // It is exposed to allow external packages to test protocol behavior.
-func ServiceGetChunksQuery(chain *core.BlockChain, req *GetChunksPacket, start time.Time) ([]*Chunk, error) {
-	return nil, nil
-	/*if req.Bytes > softResponseLimit {
-		req.Bytes = softResponseLimit
+func ServiceGetChunksQuery(chain *core.BlockChain, req *GetChunksPacket) ([]*Chunk, error) {
+	sf := sstorage.GetDataShard(req.ShardId)
+	if sf == nil {
+		return nil, fmt.Errorf("shard file %d is not support", req.ShardId)
 	}
-	// Make sure we have the state associated with the request
-	triedb := chain.StateCache().TrieDB()
 
-	accTrie, err := trie.NewSecure(req.Root, triedb)
-	if err != nil {
-		// We don't have the requested state available, bail out
-		return nil, nil
-	}
-	snap := chain.Snapshots().Snapshot(req.Root)
-	if snap == nil {
-		// We don't have the requested state snapshotted yet, bail out.
-		// In reality we could still serve using the account and storage
-		// tries only, but let's protect the node a bit while it's doing
-		// snapshot generation.
-		return nil, nil
-	}
-	// Retrieve trie nodes until the packet size limit is reached
-	var (
-		nodes [][]byte
-		bytes uint64
-		loads int // Trie hash expansions to cound database reads
-	)
-	for _, pathset := range req.Paths {
-		switch len(pathset) {
-		case 0:
-			// Ensure we penalize invalid requests
-			return nil, fmt.Errorf("%w: zero-item pathset requested", errBadRequest)
-
-		case 1:
-			// If we're only retrieving an account trie node, fetch it directly
-			blob, resolved, err := accTrie.TryGetNode(pathset[0])
-			loads += resolved // always account database reads, even for failures
-			if err != nil {
-				break
-			}
-			nodes = append(nodes, blob)
-			bytes += uint64(len(blob))
-
-		default:
-			// Storage slots requested, open the storage trie and retrieve from there
-			account, err := snap.Account(common.BytesToHash(pathset[0]))
-			loads++ // always account database reads, even for failures
-			if err != nil || account == nil {
-				break
-			}
-			stTrie, err := trie.NewSecure(common.BytesToHash(account.Root), triedb)
-			loads++ // always account database reads, even for failures
-			if err != nil {
-				break
-			}
-			for _, path := range pathset[1:] {
-				blob, resolved, err := stTrie.TryGetNode(path)
-				loads += resolved // always account database reads, even for failures
-				if err != nil {
-					break
-				}
-				nodes = append(nodes, blob)
-				bytes += uint64(len(blob))
-
-				// Sanity check limits to avoid DoS on the store trie loads
-				if bytes > req.Bytes || loads > maxEntryLookups || time.Since(start) > maxTrieNodeTimeSpent {
-					break
-				}
-			}
-		}
-		// Abort request processing if we've exceeded our limits
-		if bytes > req.Bytes || loads > maxEntryLookups || time.Since(start) > maxTrieNodeTimeSpent {
-			break
+	res := make([]*Chunk, 0)
+	for idx := req.StartIdx; idx <= req.EndIdx; idx++ {
+		if data, err := sf.ReadMasked(idx); err == nil {
+			chunk := Chunk{idx, data}
+			res = append(res, &chunk)
 		}
 	}
-	return nodes, nil*/
+
+	return res, nil
 }
 
 // NodeInfo represents a short summary of the `snap` sub-protocol metadata

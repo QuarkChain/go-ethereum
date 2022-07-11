@@ -20,6 +20,7 @@ package downloader
 import (
 	"errors"
 	"fmt"
+	"github.com/ethereum/go-ethereum/eth/protocols/sstorage"
 	"math/big"
 	"sync"
 	"sync/atomic"
@@ -129,6 +130,7 @@ type Downloader struct {
 
 	snapSync       bool         // Whether to run state sync over the snap protocol
 	SnapSyncer     *snap.Syncer // TODO(karalabe): make private! hack for now
+	SstorageSyncer *sstorage.Syncer
 	stateSyncStart chan *stateSync
 
 	// Cancellation and termination
@@ -217,6 +219,7 @@ func New(checkpoint uint64, stateDb ethdb.Database, mux *event.TypeMux, chain Bl
 		headerProcCh:   make(chan *headerTask, 1),
 		quitCh:         make(chan struct{}),
 		SnapSyncer:     snap.NewSyncer(stateDb),
+		SstorageSyncer: sstorage.NewSyncer(stateDb),
 		stateSyncStart: make(chan *stateSync),
 	}
 	go dl.stateFetcher()
@@ -1610,6 +1613,18 @@ func (d *Downloader) DeliverSnapPacket(peer *snap.Peer, packet snap.Packet) erro
 
 	case *snap.TrieNodesPacket:
 		return d.SnapSyncer.OnTrieNodes(peer, packet.ID, packet.Nodes)
+
+	default:
+		return fmt.Errorf("unexpected snap packet type: %T", packet)
+	}
+}
+
+// DeliverSstoragePacket is invoked from a peer's message handler when it transmits a
+// data packet for the local node to consume.
+func (d *Downloader) DeliverSstoragePacket(peer *sstorage.Peer, packet sstorage.Packet) error {
+	switch packet := packet.(type) {
+	case *sstorage.ChunksPacket:
+		return d.SstorageSyncer.OnChunks(peer, packet.ID, packet.Chunks)
 
 	default:
 		return fmt.Errorf("unexpected snap packet type: %T", packet)

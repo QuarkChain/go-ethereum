@@ -111,3 +111,24 @@ func IsComplete() error {
 	}
 	return nil
 }
+
+func ShardList() []uint64 {
+	shardList := make([]uint64, 0)
+	for _, sm := range ContractToShardManager {
+		for idx, _ := range sm.shardMap {
+			shardList = append(shardList, idx)
+		}
+	}
+	
+	return shardList
+}
+
+func GetDataShard(shardIdx uint64) *DataShard {
+	for _, sm := range ContractToShardManager {
+		if ds, ok := sm.shardMap[shardIdx]; ok {
+			return ds
+		}
+	}
+
+	return nil
+}
