@@ -162,9 +162,8 @@ func (s *Store) ValidateBlock(state pbft.ChainState, block *types.FullBlock, com
 			return err
 		}
 
-		log.Info("ValidateBlock", "extraData", common.Bytes2Hex(extraData), "state", common.Bytes2Hex(state))
 		if len(extraData) < len(state) || bytes.Compare(state, extraData[:len(state)]) != 0 {
-			return errors.New("EpochState is incorrect")
+			return fmt.Errorf("EpochState is incorrect. state: %s; extraData: %s", common.Bytes2Hex(state), common.Bytes2Hex(extraData[:len(state)]))
 		}
 	}
 	if !gov.CompareValidators(header.NextValidators, validators) {
