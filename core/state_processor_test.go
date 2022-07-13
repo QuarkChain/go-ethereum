@@ -114,13 +114,13 @@ func (wt *WrapTx) VerifyCallResult(crossCallResult []byte, unexpErr error, t *te
 		// todo
 	}
 
-	tracesWithVersion := &vm.CrossChainCallTracesWithVersion{}
+	tracesWithVersion := &vm.CrossChainCallResultsWithVersion{}
 	err := rlp.DecodeBytes(crossCallResult, tracesWithVersion)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	actualTraces := tracesWithVersion.List
+	actualTraces := tracesWithVersion.Results
 
 	if len(wt.ExpectTraces) != len(actualTraces) {
 		t.Fatalf("wrapTx.ExpectTraces length [%d] no match actualTraces length [%d]", len(wt.ExpectTraces), len(actualTraces))

@@ -74,21 +74,9 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 	}
 
 	blockContext := NewEVMBlockContext(header, p.bc, nil)
-
-	if p.config.ExternalCall.Role != params.DisableExternalCall {
-		if p.config.ExternalCall.Role == params.NodeWithExternalCallClient {
-			if cfg.ExternalCallClient == nil {
-				if p.bc.vmConfig.ExternalCallClient == nil {
-					return nil, nil, 0, fmt.Errorf("validator: the external_call_client from blockchain.evmConfig is nil")
-				}
-				// set up externalCallClient
-				cfg.ExternalCallClient = p.bc.vmConfig.ExternalCallClient
-			}
-		} else {
-			return nil, nil, *usedGas, fmt.Errorf("validator:the role of external_call of validator must be [1], but got [%d]", p.bc.chainConfig.ExternalCall.Role)
-		}
-	}
-
+	// set the external_call_client from blockchain
+	cfg.EnableExternalCall = p.bc.vmConfig.EnableExternalCall
+	cfg.ExternalCallClient = p.bc.vmConfig.ExternalCallClient
 	vmenv := vm.NewEVM(blockContext, vm.TxContext{}, statedb, p.config, cfg)
 
 	// Iterate over and process the individual transactions
@@ -137,13 +125,8 @@ func applyTransaction(msg types.Message, config *params.ChainConfig, bc ChainCon
 	txContext := NewEVMTxContext(msg)
 	evm.Reset(txContext, statedb)
 
-	// todo : deal with external_call_client is nil
-	if evm.ExternalCallClient() == nil && len(expectExternalCallResult) != 0 {
-		err := evm.Interpreter().SetCrossChainCallResultList(expectExternalCallResult)
-		if err != nil {
-			return nil, nil, err
-		}
-	}
+	// Set cross_chain_call_result as expectExternalCallResult when external_call_client is nil and external_call_result is not empty
+	evm.SetCrossChainCallResults(expectExternalCallResult)
 
 	// Apply the transaction to the current state (included in the env).
 	result, err := ApplyMessage(evm, msg, gp)

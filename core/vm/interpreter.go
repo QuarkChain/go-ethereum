@@ -37,7 +37,8 @@ type Config struct {
 
 	ExtraEips []int // Additional EIPS that are to be enabled
 
-	ExternalCallClient *ethclient.Client
+	EnableExternalCall bool              // Whether to support external calls
+	ExternalCallClient *ethclient.Client // This client is used to make external calls
 
 	IsJsonRpc bool // Whether the call is in context of JsonRpc
 }
@@ -71,8 +72,8 @@ type EVMInterpreter struct {
 
 	// crossChainCallResultList will store the return value of each cross-chain call,
 	// and the callResultIdx will increase by 1 for each cross-chain call.
-	crossChainCallResultList []*CrossChainCallResultList
-	callResultIdx            uint64
+	crossChainCallResults []*CrossChainCallResults
+	callResultIdx         uint64
 }
 
 // NewEVMInterpreter returns a new instance of the Interpreter.
@@ -126,27 +127,27 @@ func (in *EVMInterpreter) AddCallResultIdx() {
 	in.callResultIdx++
 }
 
-func (in *EVMInterpreter) CrossChainCallResultList() []*CrossChainCallResultList {
-	return in.crossChainCallResultList
+func (in *EVMInterpreter) CrossChainCallResults() []*CrossChainCallResults {
+	return in.crossChainCallResults
 }
 
-func (in *EVMInterpreter) AppendCrossChainCallResultList(trace *CrossChainCallResultList) []*CrossChainCallResultList {
-	in.crossChainCallResultList = append(in.crossChainCallResultList, trace)
-	return in.crossChainCallResultList
+func (in *EVMInterpreter) AppendCrossChainCallResults(trace *CrossChainCallResults) []*CrossChainCallResults {
+	in.crossChainCallResults = append(in.crossChainCallResults, trace)
+	return in.crossChainCallResults
 }
 
-func (in *EVMInterpreter) SetCrossChainCallResultList(b []byte) error {
-	cr := &CrossChainCallTracesWithVersion{}
+func (in *EVMInterpreter) SetCrossChainCallResults(b []byte) error {
+	cr := &CrossChainCallResultsWithVersion{}
 	err := rlp.DecodeBytes(b, cr)
 	if err != nil {
 		return err
 	}
-	in.crossChainCallResultList = cr.List
+	in.crossChainCallResults = cr.Results
 	return nil
 }
 
-func (in *EVMInterpreter) resetCrossChainCallResultListAndTraceIdx() {
-	in.crossChainCallResultList = nil
+func (in *EVMInterpreter) resetCrossChainCallResultsAndResultIdx() {
+	in.crossChainCallResults = nil
 	in.callResultIdx = 0
 }
 

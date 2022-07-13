@@ -173,11 +173,11 @@ func (h *Header) EmptyReceipts() bool {
 	return h.ReceiptHash == EmptyRootHash
 }
 
+// GetTxExternalCallResult return the external_call_result when the txHash matches between h.txHash and tx.Hash()
 func (h *Header) GetTxExternalCallResult(tx *Transaction) []byte {
 	if h.TxHash == tx.Hash() {
 		return h.Extra
 	}
-
 	return nil
 }
 
@@ -371,6 +371,16 @@ func (b *Block) Size() common.StorageSize {
 // stuffed with junk data to add processing overhead
 func (b *Block) SanityCheck() error {
 	return b.header.SanityCheck()
+}
+
+// GetExternalCallResult return the external_call_result of the given transaction from uncles when it exists
+func (b *Block) GetExternalCallResult(transaction *Transaction) []byte {
+	for _, u := range b.uncles {
+		if u.TxHash == transaction.Hash() {
+			return u.Extra
+		}
+	}
+	return nil
 }
 
 type writeCounter common.StorageSize

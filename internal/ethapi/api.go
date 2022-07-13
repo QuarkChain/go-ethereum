@@ -917,19 +917,23 @@ func DoCall(ctx context.Context, b Backend, args TransactionArgs, blockNrOrHash 
 		return nil, err
 	}
 
+	// GetEvm will return the external_call_client within evmConfig when the input of evmConfig is nil
 	evm, vmError, err := b.GetEVM(ctx, msg, state, header, nil)
-	evm.Config.NoBaseFee = true
-	evm.Config.IsJsonRpc = true
 	if err != nil {
 		return nil, err
 	}
+	if evm.Config.EnableExternalCall && evm.Config.ExternalCallClient == nil {
+		return nil, fmt.Errorf("DoCall must matain a active external_call_client when executing transaction")
+	}
+	evm.Config.NoBaseFee = true
+	evm.Config.IsJsonRpc = true
+
 	// Wait for the context to be done and cancel the evm. Even if the
 	// EVM has finished, cancelling may be done (repeatedly)
 	go func() {
 		<-ctx.Done()
 		evm.Cancel()
 	}()
-
 	// Execute the message.
 	gp := new(core.GasPool).AddGas(math.MaxUint64)
 	result, err := core.ApplyMessage(evm, msg, gp)
@@ -1476,11 +1480,17 @@ func AccessList(ctx context.Context, b Backend, blockNrOrHash rpc.BlockNumberOrH
 
 		// Apply the transaction with the access list tracer
 		tracer := logger.NewAccessListTracer(accessList, args.from(), to, precompiles)
-		config := vm.Config{Tracer: tracer, Debug: true, NoBaseFee: true}
-		vmenv, _, err := b.GetEVM(ctx, msg, statedb, header, &config)
+		// GetEvm will return the external_call_client within evmConfig when the input of evmConfig is nil
+		vmenv, _, err := b.GetEVM(ctx, msg, statedb, header, nil)
 		if err != nil {
 			return nil, 0, nil, err
 		}
+		if vmenv.Config.EnableExternalCall && vmenv.Config.ExternalCallClient == nil {
+			return nil, 0, nil, fmt.Errorf("AccessList must matain a active external_call_client when executing transaction")
+		}
+		vmenv.Config.Tracer = tracer
+		vmenv.Config.Debug = true
+		vmenv.Config.NoBaseFee = true
 		res, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(msg.Gas()))
 		if err != nil {
 			return nil, 0, nil, fmt.Errorf("failed to apply transaction: %v err: %v", args.toTransaction().Hash(), err)
