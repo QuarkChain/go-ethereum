@@ -307,11 +307,10 @@ var (
 			},
 		},
 		ExternalCall: &ExternalCallConfig{
-			Role:                                  NodeWithExternalCallClient,
-			VerifyExternalCallResultWhenSyncState: true,
-			Version:                               1,
-			SupportChainId:                        4,
-			CallRpc:                               "https://rinkeby.infura.io/v3/4e3e18f80d8d4ad5959b7404e85e0143",
+			Role:           NodeWithExternalCallClient,
+			Version:        1,
+			SupportChainId: 4,
+			CallRpc:        "https://rinkeby.infura.io/v3/4e3e18f80d8d4ad5959b7404e85e0143",
 		},
 	}
 
@@ -613,11 +612,10 @@ type ExternalCallConfig struct {
 	//Role 0 : ExternalCall disable
 	//Role 1 : Node reuses the consensus client as externalCallClient(the callRpc is not empty)
 	//Role 2 : Node without externalCallClient
-	Role                                  int    `json:"role"`
-	VerifyExternalCallResultWhenSyncState bool   `json:"verifyExternalCallResultWhenSyncState"`
-	Version                               uint64 `json:"version"`
-	SupportChainId                        uint64 `json:"supportChainId"`
-	CallRpc                               string `json:"callRpc"`
+	Role           int    `json:"role"`
+	Version        uint64 `json:"version"`
+	SupportChainId uint64 `json:"supportChainId"`
+	CallRpc        string `json:"callRpc"`
 }
 
 // String implements the stringer interface

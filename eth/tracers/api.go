@@ -532,6 +532,8 @@ func (api *API) IntermediateRoots(ctx context.Context, hash common.Hash, config 
 			vmenv     = vm.NewEVM(vmctx, txContext, statedb, chainConfig, vm.Config{})
 		)
 		statedb.Prepare(tx.Hash(), i)
+		// set the external_call_result from the block.Uncles()
+		vmenv.SetCrossChainCallResultsByUncles(block.Uncles(), tx)
 		if _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(msg.Gas())); err != nil {
 			log.Warn("Tracing intermediate roots did not complete", "txindex", i, "txhash", tx.Hash(), "err", err)
 			// We intentionally don't return the error here: if we do, then the RPC server will not

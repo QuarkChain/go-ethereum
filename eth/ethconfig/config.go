@@ -219,20 +219,14 @@ type Config struct {
 	ValidatorChangeEpochId uint64
 
 	// ExternalCall config
-	ExternalCallRole            int
-	ExternalCallVerifyResInSync uint
-	ExternalCallSupportChainId  uint64
-	ExternalCallRpc             string
+	ExternalCallRole           int
+	ExternalCallSupportChainId uint64
+	ExternalCallRpc            string
 
 	// Sstorage config
 	SstorageFiles  []string `toml:",omitempty"`
 	SstorageShards []string `toml:",omitempty"`
 }
-
-const (
-	EnableExternalCallVerifyResInSync  = 1
-	DisableExternalCallVerifyResInSync = 2
-)
 
 // CreateConsensusEngine creates a consensus engine for the given chain configuration.
 func CreateConsensusEngine(

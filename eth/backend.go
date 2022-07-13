@@ -171,14 +171,10 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	}
 
 	var externalCallClient *ethclient.Client
+	var enableExternalCall bool
 	if chainConfig.ExternalCall != nil {
 		if config.ExternalCallRole != params.DisableExternalCall {
 			chainConfig.ExternalCall.Role = config.ExternalCallRole
-			if config.ExternalCallVerifyResInSync == ethconfig.EnableExternalCallVerifyResInSync {
-				chainConfig.ExternalCall.VerifyExternalCallResultWhenSyncState = true
-			} else if config.ExternalCallVerifyResInSync == ethconfig.DisableExternalCallVerifyResInSync {
-				chainConfig.ExternalCall.VerifyExternalCallResultWhenSyncState = false
-			}
 
 			if config.ExternalCallSupportChainId != 0 {
 				chainConfig.ExternalCall.SupportChainId = config.ExternalCallSupportChainId
@@ -199,6 +195,10 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 				return nil, err
 			}
 			defer externalCallClient.Close()
+		}
+
+		if chainConfig.ExternalCall.Role != params.DisableExternalCall {
+			enableExternalCall = true
 		}
 
 	}
@@ -246,7 +246,8 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	var (
 		vmConfig = &vm.Config{
 			EnablePreimageRecording: config.EnablePreimageRecording,
-			// set up the externalCallClient
+			// set up the externalCall config
+			EnableExternalCall: enableExternalCall,
 			ExternalCallClient: externalCallClient,
 		}
 		cacheConfig = &core.CacheConfig{

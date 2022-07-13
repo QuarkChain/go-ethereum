@@ -206,10 +206,6 @@ var (
 		Name:  "externalcall.role",
 		Usage: "different role to support externalCall( \n role 0: disable external call \n role 1: node reuses client of consensus as external call client \n role 2: node without client of external call \n role 3: node with independent client of external call(callRpc is not empty))",
 	}
-	ExternalCallVerifyResInSyncFlag = cli.UintFlag{
-		Name:  "externalcall.verifyresinsync",
-		Usage: "verify external call result when syncing state (1 enable , 2 disable)",
-	}
 	ExternalCallRpcFlag = cli.StringFlag{
 		Name:  "externalcall.callrpc",
 		Usage: "rpc to launch independent external call client",
@@ -1525,10 +1521,6 @@ func setTendermint(ctx *cli.Context, cfg *ethconfig.Config) {
 func setExternalCall(ctx *cli.Context, cfg *ethconfig.Config) {
 	if ctx.GlobalIsSet(ExternalCallRoleFlag.Name) {
 		cfg.ExternalCallRole = ctx.GlobalInt(ExternalCallRoleFlag.Name)
-	}
-
-	if ctx.GlobalIsSet(ExternalCallVerifyResInSyncFlag.Name) {
-		cfg.ExternalCallVerifyResInSync = ctx.GlobalUint(ExternalCallVerifyResInSyncFlag.Name)
 	}
 
 	if ctx.GlobalIsSet(ExternalCallRpcFlag.Name) {
