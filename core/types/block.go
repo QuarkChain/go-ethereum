@@ -374,9 +374,9 @@ func (b *Block) SanityCheck() error {
 }
 
 // GetExternalCallResult return the external_call_result of the given transaction from uncles when it exists
-func (b *Block) GetExternalCallResult(transaction *Transaction) []byte {
+func (b *Block) GetExternalCallResult(txHash common.Hash) []byte {
 	for _, u := range b.uncles {
-		if u.TxHash == transaction.Hash() {
+		if u.TxHash == txHash {
 			return u.Extra
 		}
 	}
