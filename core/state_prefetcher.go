@@ -69,7 +69,7 @@ func (p *statePrefetcher) Prefetch(block *types.Block, statedb *state.StateDB, c
 		}
 		statedb.Prepare(tx.Hash(), i)
 		// get the external_call_result from uncles of block
-		expectExternalCallResult := block.GetExternalCallResult(tx)
+		expectExternalCallResult := block.GetExternalCallResult(tx.Hash())
 		if err := precacheTransaction(msg, p.config, gaspool, statedb, header, evm, expectExternalCallResult); err != nil {
 			return // Ugh, something went horribly wrong, bail out
 		}
