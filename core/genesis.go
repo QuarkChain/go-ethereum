@@ -466,15 +466,18 @@ func DefaultWeb3QTestnetGenesisBlock() *Genesis {
 		Timestamp:  1644537097,
 		Alloc: map[common.Address]GenesisAccount{
 			common.HexToAddress("0x0E961a6A6235eFDB9a0F0BC753E395211B77cc28"): {Balance: new(big.Int).Mul(big.NewInt(1000000000000000000), big.NewInt(1000000000))}, // 1e9 Ether
-			common.HexToAddress("0x5C935469C5592Aeeac3372e922d9bCEabDF8830d"): {Balance: new(big.Int).Mul(big.NewInt(1000000000000000000), big.NewInt(1000000000))}, // 1e9 Ether
+			common.HexToAddress("0x024d6050275eec53b233B467AdA12d2C65B3AEce"): {Balance: new(big.Int).Mul(big.NewInt(1000000000000000000), big.NewInt(1000000000))}, // 1e9 Ether
+			common.HexToAddress("0x96f22a48DcD4dFb99A11560b24bee02F374cA77D"): {Balance: new(big.Int).Mul(big.NewInt(1000000000000000000), big.NewInt(1000000000))}, // 1e9 Ether
+			common.HexToAddress("0x560CD6c5054847c2AFCAae0dd9E34E22E6f47100"): {Balance: new(big.Int).Mul(big.NewInt(1000000000000000000), big.NewInt(1000000000))}, // 1e9 Ether
+			common.HexToAddress("0x3d2Bf29BaB6ec95422Eb143e856df3B0E775e50c"): {Balance: new(big.Int).Mul(big.NewInt(1000000000000000000), big.NewInt(1000000000))}, // 1e9 Ether
+			common.HexToAddress("0xb71af880FC87F2aA099251A2224ef3f38BE7f451"): {Balance: new(big.Int).Mul(big.NewInt(1000000000000000000), big.NewInt(1000000000))}, // 1e9 Ether
 		},
 		NextValidators: []common.Address{
-			common.HexToAddress("0x2cff0b8e36522eba76f6f5c328d58581243882e4"),
-			common.HexToAddress("0x959994471dee37411f579dd2820a8743cba20f46"),
-			common.HexToAddress("0x977cfc676bb06daed7ddfa7711bcfe8d50c93081"),
-			common.HexToAddress("0xcd21538af6e33ff6fcf1e2ca20f771413004cfd3"),
+			common.HexToAddress("0x96f22a48DcD4dFb99A11560b24bee02F374cA77D"),
+			common.HexToAddress("0x560CD6c5054847c2AFCAae0dd9E34E22E6f47100"),
+			common.HexToAddress("0x3d2Bf29BaB6ec95422Eb143e856df3B0E775e50c"),
 		},
-		NextValidatorPowers: []uint64{1, 1, 1, 1},
+		NextValidatorPowers: []uint64{1, 1, 1},
 	}
 }
 
