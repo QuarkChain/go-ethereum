@@ -870,7 +870,7 @@ func (w *worker) commitTransaction(env *environment, tx *types.Transaction) ([]*
 
 	// the evmConfig is the pointer of blockchain.evmConfig, so the externalCallClient maintains one instance of externalCallClient.
 	evmConfig := *w.chain.GetVMConfig()
-	if evmConfig.ExternalCallClient == nil {
+	if evmConfig.ExternalCallClient == nil && evmConfig.EnableExternalCall {
 		return nil, fmt.Errorf("worker: the external_call_client from blockchain.evmConfig is nil")
 	}
 
