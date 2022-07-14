@@ -165,9 +165,16 @@ func (evm *EVM) ExternalCallClient() *ethclient.Client {
 }
 
 func (evm *EVM) SetCrossChainCallResults(result []byte) {
-	if evm.ExternalCallClient() == nil && evm.Config.EnableExternalCall && len(result) != 0 {
+	if evm.ExternalCallClient() == nil && evm.EnableExternalCall() && len(result) != 0 {
 		evm.Interpreter().SetCrossChainCallResults(result)
 	}
+}
+
+func (evm *EVM) EnableExternalCall() bool {
+	if evm.ChainConfig().ExternalCall.EnableBlockNumber != nil && evm.Context.BlockNumber.Cmp(evm.ChainConfig().ExternalCall.EnableBlockNumber) != -1 {
+		return true
+	}
+	return false
 }
 
 func (evm *EVM) SetCrossChainCallResultsByUncles(uncles []*types.Header, tx *types.Transaction) {

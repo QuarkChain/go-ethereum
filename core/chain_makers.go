@@ -238,14 +238,13 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 	genblock := func(i int, parent *types.Block, statedb *state.StateDB) (*types.Block, types.Receipts) {
 		b := &BlockGen{i: i, chain: blocks, parent: parent, statedb: statedb, config: config, engine: engine}
 		if config.ExternalCall != nil {
-			if config.ExternalCall.Role == params.NodeWithExternalCallClient {
-				client, err := ethclient.Dial(config.ExternalCall.CallRpc)
-				defer client.Close()
-				if err != nil {
-					return nil, nil
-				}
-				b.vmconfig = &vm.Config{EnableExternalCall: true, ExternalCallClient: client}
+			// Here it is assumed that the node has an active rpc
+			client, err := ethclient.Dial(config.ExternalCall.CallRpc)
+			defer client.Close()
+			if err != nil {
+				return nil, nil
 			}
+			b.vmconfig = &vm.Config{ExternalCallClient: client}
 		}
 
 		b.header = makeHeader(chainreader, parent, statedb, b.engine)

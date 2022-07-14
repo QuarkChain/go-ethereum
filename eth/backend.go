@@ -61,6 +61,11 @@ import (
 	"github.com/ethereum/go-ethereum/rpc"
 )
 
+const (
+	NodeWithExternalCallClient    = 1
+	NodeWithoutExternalCallClient = 2
+)
+
 // Config contains the configuration options of the ETH protocol.
 // Deprecated: use ethconfig.Config instead.
 type Config = ethconfig.Config
@@ -171,23 +176,16 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	}
 
 	var externalCallClient *ethclient.Client
-	var enableExternalCall bool
 	if chainConfig.ExternalCall != nil {
-		if config.ExternalCallRole != params.DisableExternalCall {
-			chainConfig.ExternalCall.Role = config.ExternalCallRole
-
-			if config.ExternalCallSupportChainId != 0 {
-				chainConfig.ExternalCall.SupportChainId = config.ExternalCallSupportChainId
-			}
-
-			if config.ExternalCallRpc != "" {
-				chainConfig.ExternalCall.CallRpc = config.ExternalCallRpc
-			}
-
-			log.Info("External Config Info ", "config", *chainConfig.ExternalCall)
+		if config.ExternalCallSupportChainId != 0 {
+			chainConfig.ExternalCall.SupportChainId = config.ExternalCallSupportChainId
 		}
 
-		if chainConfig.ExternalCall.Role == params.NodeWithExternalCallClient {
+		if config.ExternalCallRpc != "" {
+			chainConfig.ExternalCall.CallRpc = config.ExternalCallRpc
+		}
+
+		if config.ExternalCallRole == NodeWithExternalCallClient {
 			// initialize external call client
 			externalCallClient, err = ethclient.Dial(chainConfig.ExternalCall.CallRpc)
 			if err != nil {
@@ -197,13 +195,9 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			defer externalCallClient.Close()
 		}
 
-		if chainConfig.ExternalCall.Role != params.DisableExternalCall {
-			enableExternalCall = true
-		}
-
 	}
 
-	log.Info("Initialised chain configuration", "config", chainConfig)
+	log.Warn("Initialised chain configuration", "config", *externalCallClient)
 
 	if err := pruner.RecoverPruning(stack.ResolvePath(""), chainDb, stack.ResolvePath(config.TrieCleanCacheJournal)); err != nil {
 		log.Error("Failed to recover state", "error", err)
@@ -247,7 +241,6 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		vmConfig = &vm.Config{
 			EnablePreimageRecording: config.EnablePreimageRecording,
 			// set up the externalCall config
-			EnableExternalCall: enableExternalCall,
 			ExternalCallClient: externalCallClient,
 		}
 		cacheConfig = &core.CacheConfig{

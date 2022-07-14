@@ -868,10 +868,12 @@ func (w *worker) updateSnapshot(env *environment) {
 func (w *worker) commitTransaction(env *environment, tx *types.Transaction) ([]*types.Log, error) {
 	snap := env.state.Snapshot()
 
-	// the evmConfig is the pointer of blockchain.evmConfig, so the externalCallClient maintains one instance of externalCallClient.
 	evmConfig := *w.chain.GetVMConfig()
-	if evmConfig.ExternalCallClient == nil && evmConfig.EnableExternalCall {
-		return nil, fmt.Errorf("worker: the external_call_client from blockchain.evmConfig is nil")
+	// the evmConfig is the pointer of blockchain.evmConfig, so the externalCallClient maintains one instance of externalCallClient.
+	if w.chainConfig.ExternalCall.EnableBlockNumber != nil && env.header.Number.Cmp(w.chainConfig.ExternalCall.EnableBlockNumber) != -1 {
+		if evmConfig.ExternalCallClient == nil {
+			return nil, fmt.Errorf("worker: the external_call_client from blockchain.evmConfig is nil")
+		}
 	}
 
 	receipt, crossChainCallResult, err := core.ApplyTransaction(w.chainConfig, w.chain, &env.coinbase, env.gasPool, env.state, env.header, tx, &env.header.GasUsed, evmConfig)

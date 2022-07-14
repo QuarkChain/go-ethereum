@@ -922,8 +922,8 @@ func DoCall(ctx context.Context, b Backend, args TransactionArgs, blockNrOrHash 
 	if err != nil {
 		return nil, err
 	}
-	if evm.Config.EnableExternalCall && evm.Config.ExternalCallClient == nil {
-		return nil, fmt.Errorf("DoCall must matain a active external_call_client when executing transaction")
+	if evm.Config.ExternalCallClient == nil && evm.EnableExternalCall() {
+		return nil, fmt.Errorf("DoCall must matain a active external_call_client when external call is active")
 	}
 	evm.Config.NoBaseFee = true
 	evm.Config.IsJsonRpc = true
@@ -1485,7 +1485,7 @@ func AccessList(ctx context.Context, b Backend, blockNrOrHash rpc.BlockNumberOrH
 		if err != nil {
 			return nil, 0, nil, err
 		}
-		if vmenv.Config.EnableExternalCall && vmenv.Config.ExternalCallClient == nil {
+		if vmenv.EnableExternalCall() && vmenv.Config.ExternalCallClient == nil {
 			return nil, 0, nil, fmt.Errorf("AccessList must matain a active external_call_client when executing transaction")
 		}
 		vmenv.Config.Tracer = tracer

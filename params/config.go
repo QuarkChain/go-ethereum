@@ -307,10 +307,10 @@ var (
 			},
 		},
 		ExternalCall: &ExternalCallConfig{
-			Role:           NodeWithExternalCallClient,
-			Version:        1,
-			SupportChainId: 4,
-			CallRpc:        "https://rinkeby.infura.io/v3/4e3e18f80d8d4ad5959b7404e85e0143",
+			EnableBlockNumber: big.NewInt(0),
+			Version:           1,
+			SupportChainId:    4,
+			CallRpc:           "https://rinkeby.infura.io/v3/4e3e18f80d8d4ad5959b7404e85e0143",
 		},
 	}
 
@@ -477,7 +477,7 @@ var (
 	}
 
 	TestChainConfig = &ChainConfig{big.NewInt(1), big.NewInt(0), nil, false, big.NewInt(0), common.Hash{}, big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), nil, big.NewInt(0), nil, new(EthashConfig), nil, nil, &ExternalCallConfig{
-		NodeWithExternalCallClient,
+		big.NewInt(0),
 		1,
 		4,
 		"https://rinkeby.infura.io/v3/4e3e18f80d8d4ad5959b7404e85e0143",
@@ -607,20 +607,14 @@ type TendermintConfig struct {
 	ConsensusConfig        ConsensusConfig
 }
 
-const (
-	DisableExternalCall = iota
-	NodeWithExternalCallClient
-	NodeWithoutExternalCallClient
-)
-
 type ExternalCallConfig struct {
 	//Role 0 : ExternalCall disable
 	//Role 1 : Node reuses the consensus client as externalCallClient(the callRpc is not empty)
 	//Role 2 : Node without externalCallClient
-	Role           int    `json:"role"`
-	Version        uint64 `json:"version"`
-	SupportChainId uint64 `json:"supportChainId"`
-	CallRpc        string `json:"callRpc"`
+	EnableBlockNumber *big.Int `json:"role"`
+	Version           uint64   `json:"version"`
+	SupportChainId    uint64   `json:"supportChainId"`
+	CallRpc           string   `json:"callRpc"`
 }
 
 // String implements the stringer interface
