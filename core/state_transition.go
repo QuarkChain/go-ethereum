@@ -86,7 +86,7 @@ type ExecutionResult struct {
 	UsedGas               uint64 // Total used gas but include the refunded gas
 	Err                   error  // Any error encountered during the execution(listed in core/vm/errors.go)
 	ReturnData            []byte // Returned data from evm(function result or data supplied with revert opcode)
-	CrossChainCallResults []byte
+	CrossChainCallResults []byte // Return the external call result in the format rlp(version, abi.pack(evm.Interpreter().CrossChainCallResults()))
 }
 
 // Unwrap returns the internal evm error which allows us for further
@@ -322,6 +322,7 @@ func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
 	if rules := st.evm.ChainConfig().Rules(st.evm.Context.BlockNumber, st.evm.Context.Random != nil); rules.IsBerlin {
 		st.state.PrepareAccessList(msg.From(), msg.To(), vm.ActivePrecompiles(rules), msg.AccessList())
 	}
+
 	var (
 		ret   []byte
 		vmerr error // vm errors do not effect consensus and are therefore not assigned to err
@@ -353,8 +354,8 @@ func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
 	st.state.AddBalance(st.evm.Context.Coinbase, new(big.Int).Mul(new(big.Int).SetUint64(st.gasUsed()), effectiveTip))
 
 	// deal with the result of cross chain call
-	if len(st.evm.Interpreter().CrossChainCallTraces()) != 0 {
-		traces := st.evm.Interpreter().CrossChainCallTraces()
+	if len(st.evm.Interpreter().CrossChainCallResults()) != 0 {
+		results := st.evm.Interpreter().CrossChainCallResults()
 
 		var version uint64
 		if st.evm.ChainConfig().ExternalCall.Version != 0 {
@@ -363,9 +364,9 @@ func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
 			version = 0
 		}
 
-		cr := vm.CrossChainCallTracesWithVersion{
+		cr := vm.CrossChainCallResultsWithVersion{
 			Version: version,
-			Traces:  traces,
+			Results: results,
 		}
 
 		cb, err := rlp.EncodeToBytes(cr)

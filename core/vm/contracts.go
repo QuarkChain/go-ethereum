@@ -1181,7 +1181,7 @@ func (c *bls12381Pairing) Run(input []byte) ([]byte, error) {
 		off := 384 * i
 		t0, t1, t2 := off, off+128, off+384
 
-		// Decode G1 pointF
+		// Decode G1 point
 		p1, err := g1.DecodePoint(input[t0:t1])
 		if err != nil {
 			return nil, err
@@ -1316,7 +1316,7 @@ var (
 type crossChainCall struct {
 }
 
-// overpay gas
+// RequiredGas is the maximum gas consumption that will calculate the cross_chain_call
 func (c *crossChainCall) RequiredGas(input []byte) uint64 {
 	if len(input) != 164 {
 		return 0
@@ -1332,17 +1332,20 @@ func (c *crossChainCall) RequiredGas(input []byte) uint64 {
 	callResultGas += maxDataLen * params.ExternalCallByteGasCost
 	gasUsed := callResultGas + inputGas + params.ExternalCallGas
 	/*
-		// address:32
+		The gas calculation formula is as follows：
+		gas_overpay =  ExternalCallByteGasCost * (address_len + topics_len + data_len) + ExternalCallGas
+
+		address_len = 32
 		000000000000000000000000751320c36f413a6280ad54487766ae0f780b6f58
 
-		// topics:3 *32 + 32 * 4(consider that the max number of topics is 4)
+		topics_len = 3 *32 + 32 * 4(consider that the max number of topics is 4)
 		0000000000000000000000000000000000000000000000000000000000000060
 		00000000000000000000000000000000000000000000000000000000000000c0
 		0000000000000000000000000000000000000000000000000000000000000002
 		dce721dc2d078c030530aeb5511eb76663a705797c2a4a4d41a70dddfb8efca9
 		0000000000000000000000000000000000000000000000000000000000000001
 
-		// data:32 + (32 - maxDataLen % 32) + maxDatalen
+		data_len= 32 + (32 - maxDataLen % 32) + maxDatalen
 		00000000000000000000000000000000000000000000000000000000000000c0
 		0000000000000000000000000000000000000000000000000000000000000002
 		0000000000000000000000000000000000000000000000000000000000000001
@@ -1360,27 +1363,35 @@ func (c *crossChainCall) Run(input []byte) ([]byte, error) {
 }
 
 func (c *crossChainCall) RunWith(env *PrecompiledContractCallEnv, input []byte) ([]byte, uint64, error) {
+	if env.evm.ChainConfig().ExternalCall.EnableBlockNumber == nil {
+		return nil, 0, fmt.Errorf("crossChainCall: external call disable")
+	}
+
+	if env.evm.Context.BlockNumber.Cmp(env.evm.ChainConfig().ExternalCall.EnableBlockNumber) == -1 {
+		return nil, 0, fmt.Errorf("cross chain call is active when when blockNumber reaches %d \n", env.evm.ChainConfig().ExternalCall.EnableBlockNumber.Int64())
+	}
+
 	ctx := context.Background()
 	if bytes.Equal(input[0:4], getLogByTxHashId) {
 
 		client := env.evm.ExternalCallClient()
-		var trace *CrossChainCallTrace
+		var list *CrossChainCallResults
 
 		if client == nil {
-			traceIdx := env.evm.Interpreter().TraceIdx()
-			if traceIdx >= uint64(len(env.evm.Interpreter().CrossChainCallTraces())) {
+			Idx := env.evm.Interpreter().CallResultIdx()
+			if Idx >= uint64(len(env.evm.Interpreter().CrossChainCallResults())) {
 				// unexpect error
 				env.evm.setCrossChainCallUnExpectErr(ErrOutOfBoundsTracePtr)
 				return nil, 0, ErrOutOfBoundsTracePtr
 			}
-			trace = env.evm.Interpreter().CrossChainCallTraces()[traceIdx]
-			env.evm.Interpreter().AddTraceIdx()
+			list = env.evm.Interpreter().CrossChainCallResults()[Idx]
+			env.evm.Interpreter().AddCallResultIdx()
 
-			if !trace.Success {
-				return trace.CallRes, trace.GasUsed, ErrExecutionReverted
+			if !list.Success {
+				return list.CallRes, list.GasUsed, ErrExecutionReverted
 			}
 
-			return trace.CallRes, trace.GasUsed, nil
+			return list.CallRes, list.GasUsed, nil
 		} else {
 			chainId := new(big.Int).SetBytes(getData(input, 4, 32)).Uint64()
 			txHash := common.BytesToHash(getData(input, 4+32, 32))
@@ -1400,14 +1411,14 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractCallEnv, input []byte) 
 				actualGasUsed += params.ExternalCallGas
 
 				errPack, _ := expErr.ABIPack()
-				trace = &CrossChainCallTrace{
+				list = &CrossChainCallResults{
 					CallRes: errPack,
 					Success: false,
 					GasUsed: actualGasUsed,
 				}
 
-				env.evm.Interpreter().AppendCrossChainCallTrace(trace)
-				return trace.CallRes, trace.GasUsed, ErrExecutionReverted
+				env.evm.Interpreter().AppendCrossChainCallResults(list)
+				return list.CallRes, list.GasUsed, ErrExecutionReverted
 			} else {
 				// calculate actual cost of gas
 				actualGasUsed := callres.GasCost(params.ExternalCallByteGasCost)
@@ -1419,14 +1430,14 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractCallEnv, input []byte) 
 					env.evm.setCrossChainCallUnExpectErr(err)
 					return nil, 0, err
 				}
-				trace = &CrossChainCallTrace{
+				list = &CrossChainCallResults{
 					CallRes: resultValuePack,
 					Success: true,
 					GasUsed: actualGasUsed,
 				}
-				env.evm.Interpreter().AppendCrossChainCallTrace(trace)
+				env.evm.Interpreter().AppendCrossChainCallResults(list)
 
-				return trace.CallRes, trace.GasUsed, nil
+				return list.CallRes, list.GasUsed, nil
 			}
 
 		}
@@ -1605,14 +1616,14 @@ func (c *ExpectCallErr) GasCost(perBytePrice uint64) uint64 {
 	return uint64(len(pack)) * perBytePrice
 }
 
-type CrossChainCallTrace struct {
+type CrossChainCallResults struct {
 	CallRes []byte
 	// todo
 	Success bool // judge by expect error or unexpect error? // false condition:
 	GasUsed uint64
 }
 
-type CrossChainCallTracesWithVersion struct {
+type CrossChainCallResultsWithVersion struct {
 	Version uint64
-	Traces  []*CrossChainCallTrace
+	Results []*CrossChainCallResults
 }

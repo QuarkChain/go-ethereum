@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/ethereum/go-ethereum/ethclient"
 	"math/big"
 	"strings"
 	"time"
@@ -917,37 +916,24 @@ func DoCall(ctx context.Context, b Backend, args TransactionArgs, blockNrOrHash 
 	if err != nil {
 		return nil, err
 	}
-	chainCfg := b.ChainConfig()
 
-	vmCfg := &vm.Config{NoBaseFee: true, IsJsonRpc: true}
-	if chainCfg.ExternalCall.Role == 1 {
-		// In this case node is a full node with externalCallClient
-		if b.Engine().ExternalCallClient() != nil {
-			vmCfg.ExternalCallClient = b.Engine().ExternalCallClient()
-		} else {
-			return nil, errors.New("when ExternalCall.Enable Enable is true, b.Engine().ExternalCallClient() should not be nil")
-		}
-	} else if chainCfg.ExternalCall.Role == 3 {
-		// In this case node is a jsonRpc node with independent externalCallClient
-		independentClient, err := ethclient.Dial(chainCfg.ExternalCall.CallRpc)
-		defer independentClient.Close()
-		if err != nil {
-			return nil, err
-		}
-		vmCfg.ExternalCallClient = independentClient
-	}
-
-	evm, vmError, err := b.GetEVM(ctx, msg, state, header, vmCfg)
+	// GetEvm will return the external_call_client within evmConfig when the input of evmConfig is nil
+	evm, vmError, err := b.GetEVM(ctx, msg, state, header, nil)
 	if err != nil {
 		return nil, err
 	}
+	if evm.Config.ExternalCallClient == nil && evm.EnableExternalCall() {
+		return nil, fmt.Errorf("DoCall must matain a active external_call_client when external call is active")
+	}
+	evm.Config.NoBaseFee = true
+	evm.Config.IsJsonRpc = true
+
 	// Wait for the context to be done and cancel the evm. Even if the
 	// EVM has finished, cancelling may be done (repeatedly)
 	go func() {
 		<-ctx.Done()
 		evm.Cancel()
 	}()
-
 	// Execute the message.
 	gp := new(core.GasPool).AddGas(math.MaxUint64)
 	result, err := core.ApplyMessage(evm, msg, gp)
@@ -1328,23 +1314,20 @@ func newRPCTransaction(tx *types.Transaction, blockHash common.Hash, blockNumber
 	from, _ := types.Sender(signer, tx)
 	v, r, s := tx.RawSignatureValues()
 	result := &RPCTransaction{
-		Type:               hexutil.Uint64(tx.Type()),
-		From:               from,
-		Gas:                hexutil.Uint64(tx.Gas()),
-		GasPrice:           (*hexutil.Big)(tx.GasPrice()),
-		Hash:               tx.Hash(),
-		Input:              hexutil.Bytes(tx.Data()),
-		Nonce:              hexutil.Uint64(tx.Nonce()),
-		To:                 tx.To(),
-		Value:              (*hexutil.Big)(tx.Value()),
-		ExternalCallResult: hexutil.Bytes(tx.ExternalCallResult()),
-		V:                  (*hexutil.Big)(v),
-		R:                  (*hexutil.Big)(r),
-		S:                  (*hexutil.Big)(s),
+		Type:     hexutil.Uint64(tx.Type()),
+		From:     from,
+		Gas:      hexutil.Uint64(tx.Gas()),
+		GasPrice: (*hexutil.Big)(tx.GasPrice()),
+		Hash:     tx.Hash(),
+		Input:    hexutil.Bytes(tx.Data()),
+		Nonce:    hexutil.Uint64(tx.Nonce()),
+		To:       tx.To(),
+		Value:    (*hexutil.Big)(tx.Value()),
+		V:        (*hexutil.Big)(v),
+		R:        (*hexutil.Big)(r),
+		S:        (*hexutil.Big)(s),
 	}
-	if len(tx.ExternalCallResult()) != 0 {
-		result.ExternalCallResult = tx.ExternalCallResult()
-	}
+
 	if blockHash != (common.Hash{}) {
 		result.BlockHash = &blockHash
 		result.BlockNumber = (*hexutil.Big)(new(big.Int).SetUint64(blockNumber))
@@ -1497,11 +1480,17 @@ func AccessList(ctx context.Context, b Backend, blockNrOrHash rpc.BlockNumberOrH
 
 		// Apply the transaction with the access list tracer
 		tracer := logger.NewAccessListTracer(accessList, args.from(), to, precompiles)
-		config := vm.Config{Tracer: tracer, Debug: true, NoBaseFee: true}
-		vmenv, _, err := b.GetEVM(ctx, msg, statedb, header, &config)
+		// GetEvm will return the external_call_client within evmConfig when the input of evmConfig is nil
+		vmenv, _, err := b.GetEVM(ctx, msg, statedb, header, nil)
 		if err != nil {
 			return nil, 0, nil, err
 		}
+		if vmenv.EnableExternalCall() && vmenv.Config.ExternalCallClient == nil {
+			return nil, 0, nil, fmt.Errorf("AccessList must matain a active external_call_client when executing transaction")
+		}
+		vmenv.Config.Tracer = tracer
+		vmenv.Config.Debug = true
+		vmenv.Config.NoBaseFee = true
 		res, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(msg.Gas()))
 		if err != nil {
 			return nil, 0, nil, fmt.Errorf("failed to apply transaction: %v err: %v", args.toTransaction().Hash(), err)
@@ -1652,6 +1641,18 @@ func (s *PublicTransactionPoolAPI) GetTransactionReceipt(ctx context.Context, ha
 	}
 	receipt := receipts[index]
 
+	// get external_call_result from uncles
+	block, err := s.b.BlockByHash(ctx, blockHash)
+	var externalCallResult []byte
+	if block != nil {
+		uncles := block.Uncles()
+		for _, uncle := range uncles {
+			if uncle.TxHash == hash {
+				externalCallResult = uncle.Extra
+			}
+		}
+	}
+
 	// Derive the sender.
 	bigblock := new(big.Int).SetUint64(blockNumber)
 	signer := types.MakeSigner(s.b.ChainConfig(), bigblock)
@@ -1695,10 +1696,11 @@ func (s *PublicTransactionPoolAPI) GetTransactionReceipt(ctx context.Context, ha
 	if receipt.ContractAddress != (common.Address{}) {
 		fields["contractAddress"] = receipt.ContractAddress
 	}
-
-	if len(receipt.ExternalCallResult) != 0 {
-		fields["externalCallResult"] = common.Bytes2Hex(receipt.ExternalCallResult)
+	// set the external_call_result
+	if externalCallResult != nil {
+		fields["externalCallResult"] = common.Bytes2Hex(externalCallResult)
 	}
+
 	return fields, nil
 }
 

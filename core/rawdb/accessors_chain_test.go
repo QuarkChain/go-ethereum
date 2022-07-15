@@ -358,10 +358,9 @@ func TestBlockReceiptStorage(t *testing.T) {
 			{Address: common.BytesToAddress([]byte{0x11})},
 			{Address: common.BytesToAddress([]byte{0x01, 0x11})},
 		},
-		TxHash:             tx1.Hash(),
-		ContractAddress:    common.BytesToAddress([]byte{0x01, 0x11, 0x11}),
-		GasUsed:            111111,
-		ExternalCallResult: []byte{0, 1, 2, 3},
+		TxHash:          tx1.Hash(),
+		ContractAddress: common.BytesToAddress([]byte{0x01, 0x11, 0x11}),
+		GasUsed:         111111,
 	}
 	receipt1.Bloom = types.CreateBloom(types.Receipts{receipt1})
 

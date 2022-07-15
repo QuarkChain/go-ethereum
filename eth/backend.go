@@ -20,6 +20,7 @@ package eth
 import (
 	"errors"
 	"fmt"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"math/big"
 	"runtime"
 	"sync"
@@ -58,6 +59,11 @@ import (
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/rpc"
+)
+
+const (
+	NodeWithExternalCallClient    = 1
+	NodeWithoutExternalCallClient = 2
 )
 
 // Config contains the configuration options of the ETH protocol.
@@ -169,30 +175,27 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		}
 	}
 
+	var externalCallClient *ethclient.Client
 	if chainConfig.ExternalCall != nil {
-		log.Warn("Config", "value:", *config)
-		if config.ExternalCallRole != 0 {
-			chainConfig.ExternalCall.Role = config.ExternalCallRole
-			if config.ExternalCallVerifyResInSync == 1 {
-				chainConfig.ExternalCall.VerifyExternalCallResultWhenSyncState = true
-			} else if config.ExternalCallVerifyResInSync == 2 {
-				chainConfig.ExternalCall.VerifyExternalCallResultWhenSyncState = false
-			}
-
-			if config.ExternalCallSupportChainId != 0 {
-				chainConfig.ExternalCall.SupportChainId = config.ExternalCallSupportChainId
-			}
-
-			if config.ExternalCallRpc != "" {
-				chainConfig.ExternalCall.CallRpc = config.ExternalCallRpc
-			}
+		if config.ExternalCallSupportChainId != 0 {
+			chainConfig.ExternalCall.SupportChainId = config.ExternalCallSupportChainId
 		}
 
-		log.Warn("External Config", "value:", *chainConfig.ExternalCall)
+		if config.ExternalCallRpc != "" {
+			chainConfig.ExternalCall.CallRpc = config.ExternalCallRpc
+		}
+
+		if config.ExternalCallRole == NodeWithExternalCallClient {
+			// initialize external call client
+			externalCallClient, err = ethclient.Dial(chainConfig.ExternalCall.CallRpc)
+			if err != nil {
+				log.Error("Failed to initialize externalCallClient", "error", err)
+				return nil, err
+			}
+			defer externalCallClient.Close()
+		}
+
 	}
-
-	log.Info("Initialised chain configuration", "config", chainConfig)
-
 	if err := pruner.RecoverPruning(stack.ResolvePath(""), chainDb, stack.ResolvePath(config.TrieCleanCacheJournal)); err != nil {
 		log.Error("Failed to recover state", "error", err)
 	}
@@ -232,8 +235,10 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		}
 	}
 	var (
-		vmConfig = vm.Config{
+		vmConfig = &vm.Config{
 			EnablePreimageRecording: config.EnablePreimageRecording,
+			// set up the externalCall config
+			ExternalCallClient: externalCallClient,
 		}
 		cacheConfig = &core.CacheConfig{
 			TrieCleanLimit:      config.TrieCleanCache,
@@ -247,10 +252,11 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			Preimages:           config.Preimages,
 		}
 	)
-	eth.blockchain, err = core.NewBlockChain(chainDb, cacheConfig, chainConfig, eth.engine, vmConfig, eth.shouldPreserve, &config.TxLookupLimit)
+	eth.blockchain, err = core.NewBlockChain(chainDb, cacheConfig, chainConfig, eth.engine, *vmConfig, eth.shouldPreserve, &config.TxLookupLimit)
 	if err != nil {
 		return nil, err
 	}
+
 	// Rewind the chain in case of an incompatible config upgrade.
 	if compat, ok := genesisErr.(*params.ConfigCompatError); ok {
 		log.Warn("Rewinding chain to upgrade configuration", "err", compat)

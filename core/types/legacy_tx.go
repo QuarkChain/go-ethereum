@@ -31,8 +31,6 @@ type LegacyTx struct {
 	Value    *big.Int        // wei amount
 	Data     []byte          // contract invocation input data
 	V, R, S  *big.Int        // signature values
-
-	ExternalCallResult []byte
 }
 
 // NewTransaction creates an unsigned legacy transaction.
@@ -74,9 +72,6 @@ func (tx *LegacyTx) copy() TxData {
 		R:        new(big.Int),
 		S:        new(big.Int),
 	}
-	if len(tx.ExternalCallResult) != 0 {
-		cpy.ExternalCallResult = common.CopyBytes(tx.ExternalCallResult)
-	}
 
 	if tx.Value != nil {
 		cpy.Value.Set(tx.Value)
@@ -115,12 +110,4 @@ func (tx *LegacyTx) rawSignatureValues() (v, r, s *big.Int) {
 
 func (tx *LegacyTx) setSignatureValues(chainID, v, r, s *big.Int) {
 	tx.V, tx.R, tx.S = v, r, s
-}
-
-func (tx *LegacyTx) externalCallResult() []byte {
-	return tx.ExternalCallResult
-}
-
-func (tx *LegacyTx) setExternalCallResult(callRes []byte) {
-	tx.ExternalCallResult = callRes
 }

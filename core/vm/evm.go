@@ -17,6 +17,7 @@
 package vm
 
 import (
+	"github.com/ethereum/go-ethereum/core/types"
 	"math/big"
 	"sync/atomic"
 	"time"
@@ -163,12 +164,38 @@ func (evm *EVM) ExternalCallClient() *ethclient.Client {
 	return evm.Config.ExternalCallClient
 }
 
+func (evm *EVM) SetCrossChainCallResults(result []byte) {
+	if evm.ExternalCallClient() == nil && evm.EnableExternalCall() && len(result) != 0 {
+		evm.Interpreter().SetCrossChainCallResults(result)
+	}
+}
+
+func (evm *EVM) EnableExternalCall() bool {
+	if evm.ChainConfig().ExternalCall.EnableBlockNumber != nil && evm.Context.BlockNumber.Cmp(evm.ChainConfig().ExternalCall.EnableBlockNumber) != -1 {
+		return true
+	}
+	return false
+}
+
+func (evm *EVM) SetCrossChainCallResultsByUncles(uncles []*types.Header, tx *types.Transaction) {
+	if evm.ExternalCallClient() == nil {
+		if len(uncles) != 0 {
+			for _, u := range uncles {
+				if u.TxHash == tx.Hash() {
+					evm.Interpreter().SetCrossChainCallResults(u.Extra)
+					break
+				}
+			}
+		}
+	}
+}
+
 // Reset resets the EVM with a new transaction context.Reset
 // This is not threadsafe and should only be done very cautiously.
 func (evm *EVM) Reset(txCtx TxContext, statedb StateDB) {
 	evm.TxContext = txCtx
 	evm.StateDB = statedb
-	evm.interpreter.resetCrossChainCallTracesAndTraceIdx()
+	evm.interpreter.resetCrossChainCallResultsAndResultIdx()
 }
 
 // Cancel cancels any running EVM operation. This may be called concurrently and

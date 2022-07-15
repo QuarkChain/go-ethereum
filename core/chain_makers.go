@@ -18,6 +18,7 @@ package core
 
 import (
 	"fmt"
+	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"math/big"
 
@@ -26,7 +27,6 @@ import (
 	"github.com/ethereum/go-ethereum/consensus/misc"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/params"
 )
@@ -45,8 +45,9 @@ type BlockGen struct {
 	receipts []*types.Receipt
 	uncles   []*types.Header
 
-	config *params.ChainConfig
-	engine consensus.Engine
+	config   *params.ChainConfig
+	engine   consensus.Engine
+	vmconfig *vm.Config
 }
 
 // SetCoinbase sets the coinbase of the generated block.
@@ -105,26 +106,18 @@ func (b *BlockGen) AddTxWithChain(bc *BlockChain, tx *types.Transaction) {
 	}
 	b.statedb.Prepare(tx.Hash(), len(b.txs))
 
-	evmConfig := vm.Config{}
-	if bc.chainConfig.ExternalCall.Role != 0 {
-		if bc.chainConfig.ExternalCall.Role == 1 {
-			if bc.Engine().ExternalCallClient() == nil {
-				panic(fmt.Errorf("ExternalCallClient of consensus is nil"))
-			}
-			evmConfig.ExternalCallClient = bc.Engine().ExternalCallClient()
-		} else if bc.chainConfig.ExternalCall.Role == 3 {
-			independentClient, err := ethclient.Dial(bc.chainConfig.ExternalCall.CallRpc)
-			defer independentClient.Close()
-			if err != nil {
-				panic(err)
-			}
-			evmConfig.ExternalCallClient = independentClient
-		}
-	}
-
-	receipt, _, err := ApplyTransaction(b.config, bc, &b.header.Coinbase, b.gasPool, b.statedb, b.header, tx, &b.header.GasUsed, evmConfig)
+	receipt, crossChainCallResult, err := ApplyTransaction(b.config, bc, &b.header.Coinbase, b.gasPool, b.statedb, b.header, tx, &b.header.GasUsed, *b.vmconfig)
 	if err != nil {
 		panic(err)
+	}
+
+	if len(crossChainCallResult) != 0 {
+		uncle := &types.Header{
+			Number: big.NewInt(int64(len(b.txs))),
+			TxHash: tx.Hash(),
+			Extra:  crossChainCallResult,
+		}
+		b.uncles = append(b.uncles, uncle)
 	}
 	b.txs = append(b.txs, tx)
 	b.receipts = append(b.receipts, receipt)
@@ -244,6 +237,16 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 	chainreader := &fakeChainReader{config: config}
 	genblock := func(i int, parent *types.Block, statedb *state.StateDB) (*types.Block, types.Receipts) {
 		b := &BlockGen{i: i, chain: blocks, parent: parent, statedb: statedb, config: config, engine: engine}
+		if config.ExternalCall != nil {
+			// Here it is assumed that the node has an active rpc
+			client, err := ethclient.Dial(config.ExternalCall.CallRpc)
+			defer client.Close()
+			if err != nil {
+				return nil, nil
+			}
+			b.vmconfig = &vm.Config{ExternalCallClient: client}
+		}
+
 		b.header = makeHeader(chainreader, parent, statedb, b.engine)
 
 		// Set the difficulty for clique block. The chain maker doesn't have access

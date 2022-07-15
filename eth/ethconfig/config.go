@@ -219,10 +219,9 @@ type Config struct {
 	ValidatorChangeEpochId uint64
 
 	// ExternalCall config
-	ExternalCallRole            uint64
-	ExternalCallVerifyResInSync uint
-	ExternalCallSupportChainId  uint64
-	ExternalCallRpc             string
+	ExternalCallRole           int
+	ExternalCallSupportChainId uint64
+	ExternalCallRpc            string
 
 	// Sstorage config
 	SstorageFiles  []string `toml:",omitempty"`
