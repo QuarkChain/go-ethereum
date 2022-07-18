@@ -61,24 +61,27 @@ func runCheckProposedState(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	startBlock := *startEpochIdx * *epoch
+	startBlock := *startEpochIdx**epoch + 1
 	endBlock := (*endEpochIdx + 1) * *epoch
 
-	initBlock, err := client.BlockByNumber(ctx, new(big.Int).SetUint64(startBlock))
+	lastEpochBlock, err := client.BlockByNumber(ctx, new(big.Int).SetUint64(startBlock-1))
 	if err != nil {
 		log.Error(err.Error())
 		return
 	}
-	validatorSet = initBlock.NextValidators()
+	validatorSet = lastEpochBlock.NextValidators()
 
-	for i := startBlock; i < endBlock; i++ {
+	for i := startBlock; i <= endBlock; i++ {
 		block, err := client.BlockByNumber(ctx, new(big.Int).SetUint64(i))
 		if err != nil {
 			log.Error(err.Error())
 			return
 		}
 
-		if i > startBlock && i%*epoch == 0 {
+		updateState(block.Coinbase())
+		log.Info("state", "epoch", i / *epoch, "state", state)
+
+		if i%*epoch == 0 {
 			err = verifyState(block)
 			if err != nil {
 				log.Error(err.Error())
@@ -88,8 +91,6 @@ func runCheckProposedState(cmd *cobra.Command, args []string) {
 			log.Info("Proposed state", "epoch", i / *epoch - 1, "state", state)
 			state = make(map[common.Address]uint32)
 		}
-
-		updateState(block.Coinbase())
 	}
 }
 
