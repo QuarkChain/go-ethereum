@@ -82,10 +82,6 @@ var Web3QTestnetBootnodes = []string{
 	"enode://0b1f72bd2cdf8af6b42e1f1b24b1e927afd393de4a43f69f5bc402e2754d06bc140c3c3baac12f94aaf0aa4513f2b216c768c5d1a66f0b3b6c923575f0db64b1@128.199.102.174:30303",
 }
 
-var Web3QRinkebyBootnodes = []string{
-	"enode://c5509679a461eef22dc63e5ed0109c3f408e8cb6e1313f1488452c5828eda85540c9eceec1c5c60217a108f54c5568d18d4cbe7dbff9b3796c1c7cb04e8950cb@127.0.0.1:30301",
-}
-
 // TODO: to update
 var Web3QGalileoBootnodes = []string{
 	"enode://209b82267f7986b10081bd023e93268f7cdc254534922995b8b15610599194af888abc071c2c9b5a07a8d37dcbc358f0fa4f1601578aa180a2b4b94e7d42ed6a@164.92.88.137:30303",

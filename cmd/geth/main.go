@@ -150,7 +150,6 @@ var (
 		utils.GoerliFlag,
 		utils.Web3QTestnetFlag,
 		utils.Web3QGalileoFlag,
-		utils.Web3QRinkebyFlag,
 		utils.Web3QMainnetFlag,
 		utils.ValPortFlag,
 		utils.ValNodeKeyFlag,
@@ -305,9 +304,6 @@ func prepare(ctx *cli.Context) {
 
 	case ctx.GlobalIsSet(utils.Web3QGalileoFlag.Name):
 		log.Info("Starting Geth in Web3Q Galileo testnet...")
-
-	case ctx.GlobalIsSet(utils.Web3QRinkebyFlag.Name):
-		log.Info("Starting Geth in Web3Q Rinkeby testnet...")
 
 	case !ctx.GlobalIsSet(utils.NetworkIdFlag.Name):
 		log.Info("Starting Geth on Ethereum mainnet...")

@@ -259,8 +259,6 @@ func (g *Genesis) configOrDefault(ghash common.Hash) *params.ChainConfig {
 		return params.Web3QTestnetChainConfig
 	case ghash == params.Web3QGalileoGenesisHash:
 		return params.Web3QGalileoChainConfig
-	case ghash == params.Web3QRinkebyGenesisHash:
-		return params.Web3QRinkebyChainConfig
 	default:
 		return params.AllEthashProtocolChanges
 	}
