@@ -192,7 +192,6 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 				log.Error("Failed to initialize externalCallClient", "error", err)
 				return nil, err
 			}
-			defer externalCallClient.Close()
 		}
 
 	}
