@@ -443,7 +443,7 @@ var (
 
 // TrustedCheckpoint represents a set of post-processed trie roots (CHT and
 // BloomTrie) associated with the appropriate section index and head hash. It is
-// used to start light syncing from this checkpoint and avoiwd downloading the
+// used to start light syncing from this checkpoint and avoid downloading the
 // entire header chain while still being able to securely access old headers/logs.
 type TrustedCheckpoint struct {
 	SectionIndex uint64      `json:"sectionIndex"`

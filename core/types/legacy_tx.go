@@ -72,7 +72,6 @@ func (tx *LegacyTx) copy() TxData {
 		R:        new(big.Int),
 		S:        new(big.Int),
 	}
-
 	if tx.Value != nil {
 		cpy.Value.Set(tx.Value)
 	}
