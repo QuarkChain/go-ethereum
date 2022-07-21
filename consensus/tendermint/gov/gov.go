@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	validatorsetABI           = `[{"inputs": [],"name": "GetEpochValidators","outputs": [{"internalType": "uint256","name": "EpochIdx","type": "uint256"},{"internalType": "address[]","name": "Validators","type": "address[]"},{"internalType": "uint256[]","name": "Powers","type": "uint256[]"}],"stateMutability": "view","type": "function"},{"inputs": [],"name": "proposedValidators","outputs": [{"internalType": "address[]","name": "Validators","type": "address[]"},{"internalType": "uint256[]","name": "Powers","type": "uint256[]"}],"stateMutability": "view","type": "function"}]`
+	validatorsetABI           = `[{"inputs": [],"name": "proposedValidators","outputs": [{"internalType": "address[]","name": "Validators","type": "address[]"},{"internalType": "uint256[]","name": "Powers","type": "uint256[]"}],"stateMutability": "view","type": "function"}]`
 	confirmedNumber           = 96
 	contractFunc_GetValidator = "proposedValidators"
 	gas                       = uint64(math.MaxUint64 / 2)

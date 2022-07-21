@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus"
@@ -16,6 +17,7 @@ import (
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/ethereum/go-ethereum/rlp"
 )
 
 var (
@@ -30,6 +32,7 @@ type Store struct {
 	makeBlock        func(parentHash common.Hash, coinbase common.Address, timestamp uint64) (block *types.Block, err error)
 	gov              *gov.Governance
 	mux              *event.TypeMux
+	state            map[common.Address]uint32
 }
 
 func NewStore(
@@ -39,7 +42,25 @@ func NewStore(
 	makeBlock func(parentHash common.Hash, coinbase common.Address, timestamp uint64) (block *types.Block, err error),
 	gov *gov.Governance,
 	mux *event.TypeMux) *Store {
-	return &Store{config: config, chain: chain, verifyHeaderFunc: verifyHeaderFunc, makeBlock: makeBlock, gov: gov, mux: mux}
+	store := Store{
+		config:           config,
+		chain:            chain,
+		verifyHeaderFunc: verifyHeaderFunc,
+		makeBlock:        makeBlock,
+		gov:              gov,
+		mux:              mux,
+		state:            make(map[common.Address]uint32),
+	}
+
+	t := time.Now()
+	header := chain.CurrentHeader()
+	lastEpochHeight := header.Number.Uint64() - header.Number.Uint64()%config.Epoch
+	for header != nil && header.Number.Uint64() > lastEpochHeight {
+		store.updateState(header.Coinbase)
+		header = chain.GetHeaderByHash(header.ParentHash)
+	}
+	log.Info("Init state", "time", time.Now().Sub(t).Milliseconds())
+	return &store
 }
 
 func (s *Store) Base() uint64 {
@@ -102,22 +123,28 @@ func (s *Store) ValidateBlock(state pbft.ChainState, block *types.FullBlock, com
 	}
 
 	validators, powers := []common.Address{}, []uint64{}
-	if header.Number.Uint64()%s.config.Epoch == 0 {
-		epochId := header.Number.Uint64() / s.config.Epoch
+	height := header.Number.Uint64()
+	if height%s.config.Epoch == 0 {
+		epochId := height / s.config.Epoch
+		// if update validator set from mainnet staking contracts enabled (epochId > s.config.ValidatorChangeEpochId > 0),
+		// extraData will look like prefix + mainnet block height + mainnet block hash + rlp.encode(epochState) + ...
+		// else if update validator set from mainnet staking contracts disabled
+		// extraData will look like rlp.encode(epochState) + ...
+		extraData := header.Extra
 		// if update validator set from contract enable
 		if s.config.ValidatorChangeEpochId > 0 && s.config.ValidatorChangeEpochId <= epochId {
 			l := len(prefix)
-			if len(header.Extra) < l+8+32 || !bytes.Equal(header.Extra[:l], prefix) {
+			if len(extraData) < l+8+32 || !bytes.Equal(extraData[:l], prefix) {
 				return errors.New("header.Extra missing validator chain block height and hash")
 			}
 
-			nb := header.Extra[l : l+8]
+			nb := extraData[l : l+8]
 			number := binary.BigEndian.Uint64(nb)
 			if number == 0 {
 				return errors.New("invalid block number in header.Extra")
 			}
 
-			hb := header.Extra[l+8 : l+8+32]
+			hb := extraData[l+8 : l+8+32]
 			hash := common.BytesToHash(hb)
 			if hash == emptyHash {
 				return errors.New("invalid remote block hash in header.Extra")
@@ -127,10 +154,20 @@ func (s *Store) ValidateBlock(state pbft.ChainState, block *types.FullBlock, com
 			if err != nil {
 				return errors.New(fmt.Sprintf("verifyHeader failed with %s", err.Error()))
 			}
+			extraData = extraData[l+8+32:]
 		} else {
 			// else use default validator set and powers in genesis block
 			header := s.chain.GetHeaderByNumber(0)
 			validators, powers = header.NextValidators, header.NextValidatorPowers
+		}
+
+		state, err := s.getEpochState(s.chain.GetHeaderByNumber(height-s.config.Epoch), header.Coinbase)
+		if err != nil {
+			return err
+		}
+
+		if len(extraData) < len(state) || bytes.Compare(state, extraData[:len(state)]) != 0 {
+			return fmt.Errorf("EpochState is incorrect. state: %s; extraData: %s", common.Bytes2Hex(state), common.Bytes2Hex(extraData[:len(state)]))
 		}
 	}
 	if !gov.CompareValidators(header.NextValidators, validators) {
@@ -222,6 +259,11 @@ func (s *Store) ApplyBlock(ctx context.Context, state pbft.ChainState, block *ty
 		return state, fmt.Errorf("commit failed for application: %v", err)
 	}
 
+	s.updateState(block.Coinbase())
+	if block.Number().Uint64()%s.config.Epoch == 0 {
+		s.state = make(map[common.Address]uint32)
+	}
+
 	return state, nil
 }
 
@@ -289,6 +331,16 @@ func (s *Store) MakeBlock(
 	header.LastCommitHash = commit.Hash()
 
 	if height%s.config.Epoch == 0 {
+		// header Extra format will be prefix + remote block height + remote block hash +
+		// state bytes + header Extra
+		state, err := s.getEpochState(s.chain.GetHeaderByNumber(height-s.config.Epoch), proposerAddress)
+		log.Info("Epoch state", "bytes", common.Bytes2Hex(state))
+		if err != nil {
+			log.Error(err.Error())
+			return nil
+		}
+		header.Extra = append(state, header.Extra...)
+
 		epochId := height / s.config.Epoch
 		// if update validator set from contract enable
 		if s.config.ValidatorChangeEpochId > 0 && s.config.ValidatorChangeEpochId <= epochId {
@@ -320,4 +372,26 @@ func (s *Store) MakeBlock(
 	block = block.WithSeal(header)
 
 	return &types.FullBlock{Block: block, LastCommit: commit}
+}
+
+func (s *Store) updateState(coinbase common.Address) {
+	if _, ok := s.state[coinbase]; !ok {
+		s.state[coinbase] = uint32(0)
+	}
+
+	s.state[coinbase] = s.state[coinbase] + 1
+}
+
+func (s *Store) getEpochState(lastEpochHeader *types.Header, proposerAddress common.Address) ([]byte, error) {
+	// use the Nextvalidators order in epoch header which using the same order in the mainnet contract.
+	state := make([]uint32, len(lastEpochHeader.NextValidators))
+	for i, addr := range lastEpochHeader.NextValidators {
+		state[i] = s.state[addr]
+		if addr == proposerAddress {
+			state[i] = state[i] + 1
+		}
+		log.Info("Epoch state", "address", addr, "count", state[i])
+	}
+
+	return rlp.EncodeToBytes(state)
 }

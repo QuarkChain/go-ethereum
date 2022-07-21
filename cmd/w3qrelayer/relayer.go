@@ -4,8 +4,6 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"fmt"
-	"github.com/ethereum/go-ethereum"
-	"github.com/ethereum/go-ethereum/rlp"
 	"io"
 	"io/ioutil"
 	"math/big"
@@ -13,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
@@ -20,13 +19,14 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/mattn/go-colorable"
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 )
 
 const (
-	ABI                    = `[{"inputs":[],"name":"curEpochHeight","outputs":[{"internalType":"uint256","name":"height","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"curEpochIdx","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"epochPeriod","outputs":[{"internalType":"uint256","name":"height","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"getCurrentEpoch","outputs":[{"internalType":"uint256","name":"","type":"uint256"},{"internalType":"address[]","name":"","type":"address[]"},{"internalType":"uint256[]","name":"","type":"uint256[]"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"getNextEpochHeight","outputs":[{"internalType":"uint256","name":"height","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"getStaking","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address[]","name":"epochSigners","type":"address[]"},{"internalType":"uint256[]","name":"epochVotingPowers","type":"uint256[]"},{"internalType":"uint256","name":"height","type":"uint256"},{"internalType":"bytes32","name":"headHash","type":"bytes32"}],"name":"initEpoch","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[],"name":"proposedValidators","outputs":[{"internalType":"address[]","name":"","type":"address[]"},{"internalType":"uint256[]","name":"","type":"uint256[]"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256","name":"_epochPeriod","type":"uint256"}],"name":"setEpochPeriod","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"bytes","name":"_epochHeaderBytes","type":"bytes"},{"internalType":"bytes","name":"commitBytes","type":"bytes"},{"internalType":"bool","name":"lookByIndex","type":"bool"}],"name":"submitHead","outputs":[],"stateMutability":"nonpayable","type":"function"}]`
+	ABI                    = `[{"inputs":[],"name":"getNextEpochHeight","outputs":[{"internalType":"uint256","name":"height","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256","name":"","type":"uint256"},{"internalType":"bytes","name":"_epochHeaderBytes","type":"bytes"},{"internalType":"bytes","name":"commitBytes","type":"bytes"},{"internalType":"bool","name":"lookByIndex","type":"bool"}],"name":"submitHead","outputs":[],"stateMutability":"nonpayable","type":"function"}]`
 	SubmitHeaderFunc       = "submitHead"
 	GetNextEpochHeightFunc = "getNextEpochHeight"
 	gas                    = uint64(1000000) // uint64(math.MaxUint64 / 2)
@@ -155,14 +155,15 @@ func runRelay(cmd *cobra.Command, args []string) {
 	go func() {
 		log.Info("start loop")
 		i := 0
+		var (
+			header          *types.Header
+			nextEpochHeight uint64
+			w3qCurNumber    uint64
+		)
+
 		for true {
 			log.Info("round", "i", i)
 			i++
-			var (
-				header          *types.Header
-				nextEpochHeight uint64
-				w3qCurNumber    uint64
-			)
 			curNumber, err := relayer.ethClient.BlockNumber(relayer.ctx)
 			if err != nil {
 				log.Error("get ethClient block number failed", "err", err.Error())
@@ -175,6 +176,7 @@ func runRelay(cmd *cobra.Command, args []string) {
 				goto sleep
 			}
 
+			log.Info("GetNextEpochHeight", "height", nextEpochHeight)
 			if nextEpochHeight == 0 {
 				goto sleep
 			}
@@ -253,7 +255,7 @@ func (r *relayer) SubmitHeaderToContract(header *types.Header) error {
 		return err
 	}
 
-	data, err := r.valABI.Pack(SubmitHeaderFunc, eHeader, eCommit, false)
+	data, err := r.valABI.Pack(SubmitHeaderFunc, header.Number, eHeader, eCommit, false)
 	if err != nil {
 		return err
 	}
