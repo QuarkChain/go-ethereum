@@ -330,7 +330,7 @@ func (s *Store) MakeBlock(
 	header.TimeMs = timestampMs
 	header.LastCommitHash = commit.Hash()
 
-	if height%s.config.Epoch == 0 && height > 0 {
+	if height%s.config.Epoch == 0 {
 		// header Extra format will be prefix + remote block height + remote block hash +
 		// state bytes + header Extra
 		state, err := s.getEpochState(s.chain.GetHeaderByNumber(height-s.config.Epoch), proposerAddress)
