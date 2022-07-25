@@ -180,12 +180,12 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		if config.ExternalCallSupportChainId != 0 {
 			chainConfig.ExternalCall.SupportChainId = config.ExternalCallSupportChainId
 		}
-
 		if config.ExternalCallRpc != "" {
 			chainConfig.ExternalCall.CallRpc = config.ExternalCallRpc
 		}
 
-		if config.ExternalCallRole == NodeWithExternalCallClient {
+		if config.ExternalCallEnableBlockNumber != nil {
+			chainConfig.ExternalCall.EnableBlockNumber = config.ExternalCallEnableBlockNumber
 			// initialize external call client
 			externalCallClient, err = ethclient.Dial(chainConfig.ExternalCall.CallRpc)
 			if err != nil {

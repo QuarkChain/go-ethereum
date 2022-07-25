@@ -198,7 +198,7 @@ var (
 		Name:  "validator.rpc",
 		Usage: "rpc for Validator to update validator set",
 	}
-	ExternalCallRoleFlag = cli.IntFlag{
+	ExternalCallEnableBlockNumber = cli.StringFlag{
 		Name:  "externalcall.role",
 		Usage: "different role to support externalCall( \n role 0: disable external call \n role 1: node reuses client of consensus as external call client \n role 2: node without client of external call \n role 3: node with independent client of external call(callRpc is not empty))",
 	}
@@ -1508,8 +1508,8 @@ func setTendermint(ctx *cli.Context, cfg *ethconfig.Config) {
 }
 
 func setExternalCall(ctx *cli.Context, cfg *ethconfig.Config) {
-	if ctx.GlobalIsSet(ExternalCallRoleFlag.Name) {
-		cfg.ExternalCallRole = ctx.GlobalInt(ExternalCallRoleFlag.Name)
+	if ctx.GlobalIsSet(ExternalCallEnableBlockNumber.Name) {
+		cfg.ExternalCallEnableBlockNumber.SetString(ctx.GlobalString(ExternalCallEnableBlockNumber.Name), 10)
 	}
 
 	if ctx.GlobalIsSet(ExternalCallRpcFlag.Name) {
