@@ -219,6 +219,7 @@ type Config struct {
 	ValidatorChangeEpochId uint64
 
 	// ExternalCall config
+	IsMiner                       bool
 	ExternalCallEnableBlockNumber *big.Int
 	ExternalCallSupportChainId    uint64
 	ExternalCallRpc               string

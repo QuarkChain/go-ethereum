@@ -157,7 +157,7 @@ var (
 		utils.ValContractFlag,
 		utils.ValChainIdFlag,
 		utils.ValChangeEpochIdFlag,
-		utils.ExternalCallRoleFlag,
+		utils.ExternalCallEnableBlockNumber,
 		utils.ExternalCallRpcFlag,
 		utils.ExternalCallSupportChainId,
 		utils.VMEnableDebugFlag,

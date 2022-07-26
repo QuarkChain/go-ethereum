@@ -199,8 +199,8 @@ var (
 		Usage: "rpc for Validator to update validator set",
 	}
 	ExternalCallEnableBlockNumber = cli.StringFlag{
-		Name:  "externalcall.role",
-		Usage: "different role to support externalCall( \n role 0: disable external call \n role 1: node reuses client of consensus as external call client \n role 2: node without client of external call \n role 3: node with independent client of external call(callRpc is not empty))",
+		Name:  "externalcall.enableblocknumber",
+		Usage: "define in which blockNumber the externalCall is supported",
 	}
 	ExternalCallRpcFlag = cli.StringFlag{
 		Name:  "externalcall.callrpc",
@@ -1508,6 +1508,10 @@ func setTendermint(ctx *cli.Context, cfg *ethconfig.Config) {
 }
 
 func setExternalCall(ctx *cli.Context, cfg *ethconfig.Config) {
+	if ctx.GlobalIsSet(MiningEnabledFlag.Name) {
+		cfg.IsMiner = true
+	}
+
 	if ctx.GlobalIsSet(ExternalCallEnableBlockNumber.Name) {
 		cfg.ExternalCallEnableBlockNumber.SetString(ctx.GlobalString(ExternalCallEnableBlockNumber.Name), 10)
 	}
