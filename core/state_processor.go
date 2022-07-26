@@ -74,9 +74,9 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 	}
 
 	blockContext := NewEVMBlockContext(header, p.bc, nil)
-	// set the external_call_client from blockchain
-	if usingClient {
-		cfg.ExternalCallClient = p.bc.vmConfig.ExternalCallClient
+	// set the external_call_client as nil if the usingClient is false
+	if !usingClient {
+		cfg.ExternalCallClient = nil
 	}
 	vmenv := vm.NewEVM(blockContext, vm.TxContext{}, statedb, p.config, cfg)
 
