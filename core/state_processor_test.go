@@ -22,6 +22,7 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"fmt"
+	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/consensus/clique"
 	"github.com/ethereum/go-ethereum/core/state"
@@ -80,7 +81,7 @@ type WrapTx struct {
 	ExpectTxData   func() ([]byte, error)
 	ExpectTraces   []*ExpectTrace
 	ExpectCCRBytes []byte
-	UnExpectErr    error
+	happenError    error
 	Index          int
 }
 
@@ -89,7 +90,7 @@ func (wt *WrapTx) SetExternalCallRes(crossChainCallRes []byte) {
 }
 
 func (wt *WrapTx) SetUnexpectErr(err error) {
-	wt.UnExpectErr = err
+	wt.happenError = err
 }
 
 func (wt *WrapTx) MarkTransitionIndex() string {
@@ -100,18 +101,20 @@ func NewWrapTx(tx *types.Transaction, args *CrossChainCallArgment) *WrapTx {
 	return &WrapTx{Tx: tx, Args: args}
 }
 
-func (wt *WrapTx) VerifyCallResult(crossCallResult []byte, unexpErr error, t *testing.T) {
-	if unexpErr != nil {
-		if wt.UnExpectErr == nil {
-			t.Error("happen unexpect err:", unexpErr)
+func (wt *WrapTx) VerifyCallResult(crossCallResult []byte, happenedError error, t *testing.T) {
+	if happenedError != nil {
+		if wt.happenError == nil {
+			t.Fatal("happened err:", happenedError)
+			return
 		}
 
-		if unexpErr != wt.UnExpectErr {
-			t.Error("\nexpect happen unexpect err:", wt.UnExpectErr, "\nactual happen unexpect err:", wt.UnExpectErr)
+		if happenedError.Error() != wt.happenError.Error() {
+			t.Fatal("\nexpect happen err:", wt.happenError, "\nactual happen err:", happenedError)
 		} else {
-			t.Log("WoW! unexpect err match:", unexpErr.Error())
+			t.Log("expect happen err match:", happenedError.Error())
 		}
-		// todo
+		happenedError = nil
+		return
 	}
 
 	tracesWithVersion := &vm.CrossChainCallResultsWithVersion{}
@@ -135,54 +138,30 @@ func (wt *WrapTx) VerifyCallResult(crossCallResult []byte, unexpErr error, t *te
 
 type ExpectTrace struct {
 	CallResultBytes []byte // call result
-	ExpectErrBytes  []byte
+	ExpectErrBytes  error
 	success         bool
 	UnExpectErr     error
 }
 
-func NewExpectTrace(callResultBytes []byte, expectErrBytes []byte, unExpectErr error) *ExpectTrace {
+func NewExpectTrace(callResultBytes []byte, expectErrBytes error, unExpectErr error) *ExpectTrace {
 	return &ExpectTrace{CallResultBytes: callResultBytes, ExpectErrBytes: expectErrBytes, UnExpectErr: unExpectErr}
 }
 
 func (et *ExpectTrace) compareRes(cs []byte) bool {
-	if len(et.ExpectErrBytes) != 0 {
-		return bytes.Equal(et.ExpectErrBytes, cs)
-	} else {
-		return bytes.Equal(et.CallResultBytes, cs)
-	}
+	return bytes.Equal(et.CallResultBytes, cs)
 }
 
 func (et *ExpectTrace) verifyRes(cs []byte, t *testing.T, traceIndex int, success bool) {
-	if len(et.ExpectErrBytes) != 0 {
-		if success != false {
-			t.Error("the trace.Success should be false when happen Expect Err")
-		}
-		exp := vm.NewExpectCallErr("")
-		err := exp.ABIUnpack(et.ExpectErrBytes)
-		if err != nil {
-			t.Fatal(err)
-		}
 
-		act := vm.NewExpectCallErr("")
-		err = act.ABIUnpack(cs)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if bytes.Equal(et.ExpectErrBytes, cs) {
-			t.Logf("[TraceIndex %d] expect err match:%s", traceIndex, exp.Error())
-		} else {
-			t.Errorf("[TraceIndex %d] expect err no match , expect %s , actual %s", traceIndex, exp.Error(), act.Error())
-		}
-	} else {
-		if success != true {
-			t.Error("the trace.Success should be true when execute succeed")
-		}
-		if bytes.Equal(et.CallResultBytes, cs) {
-			t.Logf("[TraceIndex %d] res match!!! \ncall_result{%s} ", traceIndex, common.Bytes2Hex(et.CallResultBytes))
-		} else {
-			t.Errorf("[TraceIndex %d] res no match ,expect : %s, actual: %s", traceIndex, common.Bytes2Hex(et.CallResultBytes), common.Bytes2Hex(cs))
-		}
+	if success != true {
+		t.Error("the trace.Success should be true when execute succeed")
 	}
+	if bytes.Equal(et.CallResultBytes, cs) {
+		t.Logf("[TraceIndex %d] res match!!! \ncall_result{%s} ", traceIndex, common.Bytes2Hex(et.CallResultBytes))
+	} else {
+		t.Errorf("[TraceIndex %d] res no match ,expect : %s, actual: %s", traceIndex, common.Bytes2Hex(et.CallResultBytes), common.Bytes2Hex(cs))
+	}
+
 }
 
 type CrossChainCallArgment struct {
@@ -323,11 +302,7 @@ func (c *CrossChainCallArgment) CrossChainCallResultToExpectCallResult() *Expect
 	if unExpErr != nil {
 		return NewExpectTrace(nil, nil, unExpErr)
 	} else if expErr != nil {
-		pack, err := expErr.ABIPack()
-		if err != nil {
-			panic(err)
-		}
-		return NewExpectTrace(nil, pack, nil)
+		return NewExpectTrace(nil, expErr, nil)
 	} else {
 		pack, err := cs.ABIPack()
 		if err != nil {
@@ -357,8 +332,9 @@ func TestApplyTransaction(t *testing.T) {
 			PisaBlock:           big.NewInt(0),
 			ArrowGlacierBlock:   nil,
 			ExternalCall: &params.ExternalCallConfig{
-				Version:        1,
-				SupportChainId: 4,
+				EnableBlockNumber: big.NewInt(0),
+				Version:           1,
+				SupportChainId:    4,
 			},
 		}
 		key1, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -444,9 +420,10 @@ func TestApplyTransaction(t *testing.T) {
 			}),
 			Args:         Args_ExpectErrAsLogIdxExceed,
 			ExpectTxData: Args_ExpectErrAsLogIdxExceed.CallOncePack,
-			ExpectTraces: []*ExpectTrace{
-				Args_ExpectErrAsLogIdxExceed.CrossChainCallResultToExpectCallResult(),
-			},
+			//ExpectTraces: []*ExpectTrace{
+			//	Args_ExpectErrAsLogIdxExceed.CrossChainCallResultToExpectCallResult(),
+			//},
+			happenError: vm.NewExpectCallErr("CrossChainCall:logIdx out-of-bound"),
 		},
 		// expect err txHash not found
 		&WrapTx{
@@ -462,9 +439,7 @@ func TestApplyTransaction(t *testing.T) {
 			}),
 			Args:         Args_ExpectErrAsNotFound,
 			ExpectTxData: Args_ExpectErrAsNotFound.CallOncePack,
-			ExpectTraces: []*ExpectTrace{
-				Args_ExpectErrAsNotFound.CrossChainCallResultToExpectCallResult(),
-			},
+			happenError:  vm.NewExpectCallErr(ethereum.NotFound.Error()),
 		},
 		// expect err chainId no support
 		&WrapTx{
@@ -480,9 +455,7 @@ func TestApplyTransaction(t *testing.T) {
 			}),
 			Args:         Args_ExpectErrChainIdNoSupport,
 			ExpectTxData: Args_ExpectErrChainIdNoSupport.CallOncePack,
-			ExpectTraces: []*ExpectTrace{
-				Args_ExpectErrChainIdNoSupport.CrossChainCallResultToExpectCallResult(),
-			},
+			happenError:  vm.NewExpectCallErr(fmt.Sprintf("CrossChainCall:chainId %d no support", Args_ExpectErrChainIdNoSupport.ChainId)),
 		},
 		// external call twice
 		&WrapTx{
@@ -565,24 +538,16 @@ func TestApplyTransaction(t *testing.T) {
 
 		_, statedb := MakePreState(db, gspec.Alloc, false)
 		_, crossCallResult, err := ApplyTransaction(config, chainContext, &addr1, gaspool, statedb, block.Header(), wtx.Tx, &wtx.GasUsed, vmconfig)
-
+		t.Log("CrossCallResult:", crossCallResult)
 		wtx.VerifyCallResult(crossCallResult, err, t)
 		wtx.SetExternalCallRes(crossCallResult)
-
-		w.Flush()
-		if err != nil {
-			t.Log(err)
-			if buf.Len() == 0 {
-				t.Log("no EVM operation logs generated")
-			} else {
-				t.Log("EVM operation log:\n" + buf.String())
-			}
-		}
-
 	}
 
 	//evm executes a transaction while the external calling client is inactive
 	for index, wtx := range wrapTxs {
+		if wtx.happenError != nil {
+			continue
+		}
 		// prepare chainContext
 		cli := &clique.Clique{}
 		wtm := NewWrapTendermint(cli, nil)
@@ -617,16 +582,6 @@ func TestApplyTransaction(t *testing.T) {
 		if actualUsedGas != wtx.GasUsed {
 			t.Errorf("The gas consumption is different when the client is nil and not nil, txIndex=[%d] , nil gas used (%d) , no nil gas used (%d) ", index, actualUsedGas, wtx.GasUsed)
 		}
-
-		w.Flush()
-		if err != nil {
-			t.Log(err)
-			if buf.Len() == 0 {
-				t.Log("no EVM operation logs generated")
-			} else {
-				t.Log("EVM operation log:\n" + buf.String())
-			}
-		}
 	}
 }
 
@@ -650,8 +605,9 @@ func BenchmarkApplyTransactionWithCallResult(b *testing.B) {
 			PisaBlock:           big.NewInt(0),
 			ArrowGlacierBlock:   nil,
 			ExternalCall: &params.ExternalCallConfig{
-				Version:        1,
-				SupportChainId: 4,
+				EnableBlockNumber: big.NewInt(0),
+				Version:           1,
+				SupportChainId:    4,
 			},
 		}
 		key1, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -723,7 +679,7 @@ func BenchmarkApplyTransactionWithCallResult(b *testing.B) {
 				}),
 				Args:           Args_CallOnce,
 				ExpectTxData:   Args_CallOnce.CallOncePack,
-				ExpectCCRBytes: common.FromHex("f901ae01f901aaf901a7b901a0000000000000000000000000751320c36f413a6280ad54487766ae0f780b6f58000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000c00000000000000000000000000000000000000000000000000000000000000002dce721dc2d078c030530aeb5511eb76663a705797c2a4a4d41a70dddfb8efca9000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000c00000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000028bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb000000000000000000000000000000000000000000000000018206cc"),
+				ExpectCCRBytes: common.FromHex("f901ae01f901aaf901a7b901a0000000000000000000000000751320c36f413a6280ad54487766ae0f780b6f58000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000c00000000000000000000000000000000000000000000000000000000000000002dce721dc2d078c030530aeb5511eb76663a705797c2a4a4d41a70dddfb8efca9000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000c00000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000600000000000000000000000000000000000000000000000000000000000000028bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb00000000000000000000000000000000000000000000000001826b08"),
 			}
 
 		signer := types.LatestSignerForChainID(globalchainId)
