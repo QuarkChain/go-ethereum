@@ -1277,6 +1277,10 @@ func (c *crossChainCall) Run(input []byte) ([]byte, error) {
 }
 
 func (c *crossChainCall) RunWith(env *PrecompiledContractCallEnv, input []byte) ([]byte, uint64, error) {
+	if len(input) != 164 {
+		return nil, 0, fmt.Errorf("invalid length of input")
+	}
+
 	if env.evm.ChainConfig().ExternalCall.EnableBlockNumber == nil {
 		return nil, 0, fmt.Errorf("crossChainCall: external call disable")
 	}
@@ -1321,7 +1325,7 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractCallEnv, input []byte) 
 			} else if expErr != nil {
 				// expect error uses the same error handling method as unexpect err
 				env.evm.setCrossChainCallUnExpectErr(expErr)
-				return list.CallRes, list.GasUsed, expErr
+				return nil, 0, expErr
 			} else {
 				// calculate actual cost of gas
 				actualGasUsed := callres.GasCost(params.ExternalCallByteGasCost)
