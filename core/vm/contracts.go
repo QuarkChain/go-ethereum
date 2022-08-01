@@ -1363,6 +1363,10 @@ func (c *crossChainCall) Run(input []byte) ([]byte, error) {
 }
 
 func (c *crossChainCall) RunWith(env *PrecompiledContractCallEnv, input []byte) ([]byte, uint64, error) {
+	if len(input) != 164 {
+		return nil, 0, fmt.Errorf("invalid length of input")
+	}
+
 	if env.evm.ChainConfig().ExternalCall.EnableBlockNumber == nil {
 		return nil, 0, fmt.Errorf("crossChainCall: external call disable")
 	}
@@ -1405,20 +1409,9 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractCallEnv, input []byte) 
 				env.evm.setCrossChainCallUnExpectErr(unexpErr)
 				return nil, 0, unexpErr
 			} else if expErr != nil {
-				// calculate actual cost of gas
-				actualGasUsed := expErr.GasCost(params.ExternalCallByteGasCost) // address
-				actualGasUsed += uint64(len(input)) * params.ExternalCallByteGasCost
-				actualGasUsed += params.ExternalCallGas
-
-				errPack, _ := expErr.ABIPack()
-				list = &CrossChainCallResults{
-					CallRes: errPack,
-					Success: false,
-					GasUsed: actualGasUsed,
-				}
-
-				env.evm.Interpreter().AppendCrossChainCallResults(list)
-				return list.CallRes, list.GasUsed, ErrExecutionReverted
+				// expect error uses the same error handling method as unexpect err
+				env.evm.setCrossChainCallUnExpectErr(expErr)
+				return nil, 0, expErr
 			} else {
 				// calculate actual cost of gas
 				actualGasUsed := callres.GasCost(params.ExternalCallByteGasCost)
@@ -1576,44 +1569,14 @@ func (c *GetLogByTxHash) GasCost(perBytePrice uint64) uint64 {
 
 type ExpectCallErr struct {
 	ErrMsg string
-	args   abi.Arguments
 }
 
 func NewExpectCallErr(errMsg string) *ExpectCallErr {
-	strType, err := abi.NewType("string", "", nil)
-	if err != nil {
-		panic(err)
-	}
-	arg0 := abi.Argument{Name: "expectCallErr", Type: strType, Indexed: false}
-	var args = abi.Arguments{arg0}
-	return &ExpectCallErr{ErrMsg: errMsg, args: args}
-}
-
-func (c *ExpectCallErr) ABIPack() ([]byte, error) {
-	packResult, err := c.args.Pack(c.ErrMsg)
-	if err != nil {
-		return nil, err
-	}
-	return packResult, nil
-}
-
-func (c *ExpectCallErr) ABIUnpack(b []byte) error {
-	unpacks, err := c.args.Unpack(b)
-	if err != nil {
-		return err
-	}
-
-	c.ErrMsg = unpacks[0].(string)
-	return nil
+	return &ExpectCallErr{ErrMsg: errMsg}
 }
 
 func (c *ExpectCallErr) Error() string {
-	return c.ErrMsg
-}
-
-func (c *ExpectCallErr) GasCost(perBytePrice uint64) uint64 {
-	pack, _ := c.ABIPack()
-	return uint64(len(pack)) * perBytePrice
+	return fmt.Sprintf("Expect Error:%s", c.ErrMsg)
 }
 
 type CrossChainCallResults struct {

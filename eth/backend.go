@@ -180,19 +180,25 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		if config.ExternalCallSupportChainId != 0 {
 			chainConfig.ExternalCall.SupportChainId = config.ExternalCallSupportChainId
 		}
-
 		if config.ExternalCallRpc != "" {
 			chainConfig.ExternalCall.CallRpc = config.ExternalCallRpc
 		}
 
-		if config.ExternalCallRole == NodeWithExternalCallClient {
+		if config.ExternalCallEnableBlockNumber != nil {
+			chainConfig.ExternalCall.EnableBlockNumber = config.ExternalCallEnableBlockNumber
+		}
+
+		if chainConfig.ExternalCall.EnableBlockNumber != nil {
 			// initialize external call client
 			externalCallClient, err = ethclient.Dial(chainConfig.ExternalCall.CallRpc)
 			if err != nil {
 				log.Error("Failed to initialize externalCallClient", "error", err)
 				return nil, err
 			}
-			defer externalCallClient.Close()
+		}
+
+		if chainConfig.ExternalCall.EnableBlockNumber != nil && config.IsMiner && externalCallClient == nil {
+			return nil, fmt.Errorf("VALIDATOR role must have an active external_call_client When CHAIN supports EXTERNAL_CALL")
 		}
 
 	}

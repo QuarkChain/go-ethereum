@@ -36,7 +36,6 @@ var (
 	GoerliGenesisHash       = common.HexToHash("0xbf7e331f7f7c1dd2e05159666b3bf8bc7a8a3a9eb1d518969eab529dd9b88c1a")
 	Web3QTestnetGenesisHash = common.HexToHash("0xe1b551a47236ea806a1a9f6a9082ab989cffd999a44caa6015edc27136e0aab5")
 	Web3QGalileoGenesisHash = common.HexToHash("0xa576a985390f3a643e2acdeaed074cc9866c99f6bdf3ca8c49ec959054703745")
-	Web3QRinkebyGenesisHash = common.HexToHash("0x36f9ea166c6c89eb8af0a49c345731f13c5c2b26ff901fb0177b959f1242d7dd")
 )
 
 // TrustedCheckpoints associates each known checkpoint with the genesis hash of
@@ -257,63 +256,6 @@ var (
 		Threshold: 2,
 	}
 
-	Web3QRinkebyValBootnodes = []string{
-		"/ip4/127.0.0.1/udp/33333/quic/p2p/12D3KooWEZ94qZgJgUNYiLwXahknkniYgozxw5eocijZJkew6Mj5",
-		"/ip4/127.0.0.1/udp/33334/quic/p2p/12D3KooWRAPv94qoUn8dAa3NQpZGKjaBcdiaqCETrcuyo2rT2ZvV",
-	}
-
-	// Web3QTestnetChainConfig contains the chain parameters to run a node on the Web3Q test network.
-	Web3QRinkebyChainConfig = &ChainConfig{
-		ChainID:             big.NewInt(3335),
-		HomesteadBlock:      big.NewInt(0),
-		DAOForkBlock:        nil,
-		DAOForkSupport:      true,
-		EIP150Block:         big.NewInt(0),
-		EIP155Block:         big.NewInt(0),
-		EIP158Block:         big.NewInt(0),
-		ByzantiumBlock:      big.NewInt(0),
-		ConstantinopleBlock: big.NewInt(0),
-		PetersburgBlock:     big.NewInt(0),
-		IstanbulBlock:       big.NewInt(0),
-		MuirGlacierBlock:    nil,
-		BerlinBlock:         big.NewInt(0),
-		LondonBlock:         big.NewInt(0),
-		PisaBlock:           big.NewInt(0),
-		ArrowGlacierBlock:   nil,
-		Tendermint: &TendermintConfig{
-			Epoch:                  100800, // expect 6s block interval = one week
-			ValidatorContract:      "",
-			ContractChainID:        0,
-			ValidatorChangeEpochId: 0,
-			ValRpc:                 "",
-			P2pPort:                33333,
-			ProposerRepetition:     8,
-			P2pBootstrap:           strings.Join(Web3QRinkebyValBootnodes, ","),
-			NodeKeyPath:            "",
-			ConsensusConfig: ConsensusConfig{
-				// WalPath:                     filepath.Join(defaultDataDir, "cs.wal", "wal"),
-				TimeoutPropose:               3000 * time.Millisecond,
-				TimeoutProposeDelta:          500 * time.Millisecond,
-				TimeoutPrevote:               1000 * time.Millisecond,
-				TimeoutPrevoteDelta:          500 * time.Millisecond,
-				TimeoutPrecommit:             1000 * time.Millisecond,
-				TimeoutPrecommitDelta:        500 * time.Millisecond,
-				TimeoutCommit:                5000 * time.Millisecond,
-				SkipTimeoutCommit:            false,
-				PeerGossipSleepDuration:      100 * time.Millisecond,
-				PeerQueryMaj23SleepDuration:  2000 * time.Millisecond,
-				DoubleSignCheckHeight:        uint64(0),
-				ConsensusSyncRequestDuration: 500 * time.Millisecond,
-			},
-		},
-		ExternalCall: &ExternalCallConfig{
-			EnableBlockNumber: big.NewInt(0),
-			Version:           1,
-			SupportChainId:    4,
-			CallRpc:           "https://rinkeby.infura.io/v3/4e3e18f80d8d4ad5959b7404e85e0143",
-		},
-	}
-
 	Web3QTestnetValBootnodes = []string{
 		//"/ip4/68.183.157.114/udp/33333/quic/p2p/12D3KooWEZ94qZgJgUNYiLwXahknkniYgozxw5eocijZJkew6Mj5",
 		//"/ip4/128.199.102.174/udp/33333/quic/p2p/12D3KooWNjKALie7Cdpb4KG8axgABA4VCCsKoBQdvYvRhVZhbtPk",
@@ -496,7 +438,7 @@ var (
 
 // TrustedCheckpoint represents a set of post-processed trie roots (CHT and
 // BloomTrie) associated with the appropriate section index and head hash. It is
-// used to start light syncing from this checkpoint and avoiwd downloading the
+// used to start light syncing from this checkpoint and avoid downloading the
 // entire header chain while still being able to securely access old headers/logs.
 type TrustedCheckpoint struct {
 	SectionIndex uint64      `json:"sectionIndex"`

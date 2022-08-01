@@ -37,7 +37,6 @@ type Config struct {
 
 	ExtraEips []int // Additional EIPS that are to be enabled
 
-	EnableExternalCall bool              // Whether to support external calls
 	ExternalCallClient *ethclient.Client // This client is used to make external calls
 
 	IsJsonRpc bool // Whether the call is in context of JsonRpc

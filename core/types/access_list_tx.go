@@ -71,7 +71,6 @@ func (tx *AccessListTx) copy() TxData {
 		R:          new(big.Int),
 		S:          new(big.Int),
 	}
-
 	copy(cpy.AccessList, tx.AccessList)
 	if tx.Value != nil {
 		cpy.Value.Set(tx.Value)

@@ -454,7 +454,10 @@ func (c *Tendermint) getEpochHeader(chain consensus.ChainHeaderReader, header *t
 // VerifyUncles implements consensus.Engine, always returning an error for any
 // uncles as this consensus mechanism doesn't permit uncles.
 func (c *Tendermint) VerifyUncles(chain consensus.ChainReader, block *types.Block) error {
-	return nil
+	if len(block.Uncles()) <= len(block.Transactions()) {
+		return nil
+	}
+	return fmt.Errorf("the number of uncles exceeds the number of transactions")
 }
 
 // Prepare implements consensus.Engine, preparing all the consensus fields of the
@@ -521,8 +524,4 @@ func (c *Tendermint) Close() error {
 // controlling the signer voting.
 func (c *Tendermint) APIs(chain consensus.ChainHeaderReader) []rpc.API {
 	return []rpc.API{}
-}
-
-func (c *Tendermint) ExternalCallClient() *ethclient.Client {
-	return c.client
 }

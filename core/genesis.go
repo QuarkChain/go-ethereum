@@ -259,8 +259,6 @@ func (g *Genesis) configOrDefault(ghash common.Hash) *params.ChainConfig {
 		return params.Web3QTestnetChainConfig
 	case ghash == params.Web3QGalileoGenesisHash:
 		return params.Web3QGalileoChainConfig
-	case ghash == params.Web3QRinkebyGenesisHash:
-		return params.Web3QRinkebyChainConfig
 	default:
 		return params.AllEthashProtocolChanges
 	}
@@ -426,32 +424,6 @@ func DefaultSepoliaGenesisBlock() *Genesis {
 		GasLimit:   0x1c9c380,
 		Difficulty: big.NewInt(0x20000),
 		Timestamp:  1633267481,
-	}
-}
-
-// DefaultWeb3QRinkebyGenesisBlock returns the Web3Q test network genesis block.
-func DefaultWeb3QRinkebyGenesisBlock() *Genesis {
-	return &Genesis{
-		Config:     params.Web3QRinkebyChainConfig,
-		Nonce:      0,
-		ExtraData:  hexutil.MustDecode("0x57656c636f6d6520746f20746865206272617665206e65772057656233512121dc0c84b6e563e7a4cc54d2b0aa99cf18a372f76edcfa418856cfb2695734ce7535bf79b2eb4261bd0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"),
-		GasLimit:   30000000,
-		Difficulty: big.NewInt(0x1),
-		Timestamp:  1644537097,
-		Alloc: map[common.Address]GenesisAccount{
-			common.HexToAddress("0x0E961a6A6235eFDB9a0F0BC753E395211B77cc28"): {Balance: new(big.Int).Mul(big.NewInt(1000000000000000000), big.NewInt(1000000000))}, // 1e9 Ether
-			common.HexToAddress("0x024d6050275eec53b233B467AdA12d2C65B3AEce"): {Balance: new(big.Int).Mul(big.NewInt(1000000000000000000), big.NewInt(1000000000))}, // 1e9 Ether
-			common.HexToAddress("0x96f22a48DcD4dFb99A11560b24bee02F374cA77D"): {Balance: new(big.Int).Mul(big.NewInt(1000000000000000000), big.NewInt(1000000000))}, // 1e9 Ether
-			common.HexToAddress("0x560CD6c5054847c2AFCAae0dd9E34E22E6f47100"): {Balance: new(big.Int).Mul(big.NewInt(1000000000000000000), big.NewInt(1000000000))}, // 1e9 Ether
-			common.HexToAddress("0x3d2Bf29BaB6ec95422Eb143e856df3B0E775e50c"): {Balance: new(big.Int).Mul(big.NewInt(1000000000000000000), big.NewInt(1000000000))}, // 1e9 Ether
-			common.HexToAddress("0xb71af880FC87F2aA099251A2224ef3f38BE7f451"): {Balance: new(big.Int).Mul(big.NewInt(1000000000000000000), big.NewInt(1000000000))}, // 1e9 Ether
-		},
-		NextValidators: []common.Address{
-			common.HexToAddress("0x96f22a48DcD4dFb99A11560b24bee02F374cA77D"),
-			common.HexToAddress("0x560CD6c5054847c2AFCAae0dd9E34E22E6f47100"),
-			common.HexToAddress("0x3d2Bf29BaB6ec95422Eb143e856df3B0E775e50c"),
-		},
-		NextValidatorPowers: []uint64{1, 1, 1},
 	}
 }
 

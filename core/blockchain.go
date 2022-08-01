@@ -1591,7 +1591,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals, setHead bool)
 
 		// Process block using the parent state as reference point
 		substart := time.Now()
-		receipts, logs, usedGas, err := bc.processor.Process(block, statedb, bc.vmConfig)
+		receipts, logs, usedGas, err := bc.processor.Process(block, statedb, bc.vmConfig, false)
 		if err != nil {
 			bc.reportBlock(block, receipts, err)
 			atomic.StoreUint32(&followupInterrupt, 1)
@@ -2319,7 +2319,7 @@ func (bc *BlockChain) PreExecuteBlock(block *types.Block) (err error) {
 		err = fmt.Errorf("txHash mismatch, got %s, expect %s", block.TxHash(), txHash)
 		return
 	}
-	receipts, _, usedGas, err := bc.processor.Process(block, statedb, bc.vmConfig)
+	receipts, _, usedGas, err := bc.processor.Process(block, statedb, bc.vmConfig, true)
 	if err != nil {
 		return
 	}

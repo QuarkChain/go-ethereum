@@ -170,10 +170,6 @@ var (
 		Name:  "web3q_galileo",
 		Usage: "Web3Q network: pre-configured proof-of-authority BFT test network",
 	}
-	Web3QRinkebyFlag = cli.BoolFlag{
-		Name:  "web3q_rinkeby",
-		Usage: "Web3Q network: pre-configured proof-of-authority BFT test network",
-	}
 	Web3QMainnetFlag = cli.BoolFlag{
 		Name:  "web3q_mainnet",
 		Usage: "Web3Q mainnet",
@@ -202,9 +198,9 @@ var (
 		Name:  "validator.rpc",
 		Usage: "rpc for Validator to update validator set",
 	}
-	ExternalCallRoleFlag = cli.IntFlag{
-		Name:  "externalcall.role",
-		Usage: "different role to support externalCall( \n role 0: disable external call \n role 1: node reuses client of consensus as external call client \n role 2: node without client of external call \n role 3: node with independent client of external call(callRpc is not empty))",
+	ExternalCallEnableBlockNumber = cli.StringFlag{
+		Name:  "externalcall.enableblocknumber",
+		Usage: "define in which blockNumber the externalCall is supported",
 	}
 	ExternalCallRpcFlag = cli.StringFlag{
 		Name:  "externalcall.callrpc",
@@ -881,9 +877,6 @@ func MakeDataDir(ctx *cli.Context) string {
 		if ctx.GlobalBool(Web3QGalileoFlag.Name) {
 			return filepath.Join(path, "web3q_galileo")
 		}
-		if ctx.GlobalBool(Web3QRinkebyFlag.Name) {
-			return filepath.Join(path, "web3q_rinkeby")
-		}
 		if ctx.GlobalBool(Web3QMainnetFlag.Name) {
 			return filepath.Join(path, "web3q_mainnet")
 		}
@@ -945,8 +938,6 @@ func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
 		urls = params.Web3QTestnetBootnodes
 	case ctx.GlobalBool(Web3QGalileoFlag.Name):
 		urls = params.Web3QGalileoBootnodes
-	case ctx.GlobalBool(Web3QRinkebyFlag.Name):
-		urls = params.Web3QRinkebyBootnodes
 	case ctx.GlobalBool(Web3QMainnetFlag.Name):
 		urls = params.Web3QMainnetBootnodes
 	case cfg.BootstrapNodes != nil:
@@ -1400,8 +1391,6 @@ func setDataDir(ctx *cli.Context, cfg *node.Config) {
 		cfg.DataDir = filepath.Join(node.DefaultDataDir(), "web3q_testnet")
 	case ctx.GlobalBool(Web3QGalileoFlag.Name) && cfg.DataDir == node.DefaultDataDir():
 		cfg.DataDir = filepath.Join(node.DefaultDataDir(), "web3q_galileo")
-	case ctx.GlobalBool(Web3QRinkebyFlag.Name) && cfg.DataDir == node.DefaultDataDir():
-		cfg.DataDir = filepath.Join(node.DefaultDataDir(), "web3q_rinkeby")
 	case ctx.GlobalBool(Web3QMainnetFlag.Name) && cfg.DataDir == node.DefaultDataDir():
 		cfg.DataDir = filepath.Join(node.DefaultDataDir(), "web3q_mainnet")
 	}
@@ -1519,8 +1508,12 @@ func setTendermint(ctx *cli.Context, cfg *ethconfig.Config) {
 }
 
 func setExternalCall(ctx *cli.Context, cfg *ethconfig.Config) {
-	if ctx.GlobalIsSet(ExternalCallRoleFlag.Name) {
-		cfg.ExternalCallRole = ctx.GlobalInt(ExternalCallRoleFlag.Name)
+	if ctx.GlobalIsSet(MiningEnabledFlag.Name) {
+		cfg.IsMiner = true
+	}
+
+	if ctx.GlobalIsSet(ExternalCallEnableBlockNumber.Name) {
+		cfg.ExternalCallEnableBlockNumber.SetString(ctx.GlobalString(ExternalCallEnableBlockNumber.Name), 10)
 	}
 
 	if ctx.GlobalIsSet(ExternalCallRpcFlag.Name) {
@@ -1625,7 +1618,7 @@ func CheckExclusive(ctx *cli.Context, args ...interface{}) {
 // SetEthConfig applies eth-related command line flags to the config.
 func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	// Avoid conflicting network flags
-	CheckExclusive(ctx, MainnetFlag, DeveloperFlag, RopstenFlag, RinkebyFlag, GoerliFlag, SepoliaFlag, Web3QTestnetFlag, Web3QGalileoFlag, Web3QRinkebyFlag, Web3QMainnetFlag)
+	CheckExclusive(ctx, MainnetFlag, DeveloperFlag, RopstenFlag, RinkebyFlag, GoerliFlag, SepoliaFlag, Web3QTestnetFlag, Web3QGalileoFlag, Web3QMainnetFlag)
 	CheckExclusive(ctx, LightServeFlag, SyncModeFlag, "light")
 	CheckExclusive(ctx, DeveloperFlag, ExternalSignerFlag) // Can't use both ephemeral unlocked and external signer
 	if ctx.GlobalString(GCModeFlag.Name) == "archive" && ctx.GlobalUint64(TxLookupLimitFlag.Name) != 0 {
@@ -1801,12 +1794,6 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 			cfg.NetworkId = 3334
 		}
 		cfg.Genesis = core.DefaultWeb3QGalileoGenesisBlock()
-		SetDNSDiscoveryDefaults(cfg, cfg.Genesis.ToBlock(nil).Hash())
-	case ctx.GlobalBool(Web3QRinkebyFlag.Name):
-		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
-			cfg.NetworkId = 3335
-		}
-		cfg.Genesis = core.DefaultWeb3QRinkebyGenesisBlock()
 		SetDNSDiscoveryDefaults(cfg, cfg.Genesis.ToBlock(nil).Hash())
 	case ctx.GlobalBool(Web3QMainnetFlag.Name):
 		if !ctx.GlobalIsSet(NetworkIdFlag.Name) {
