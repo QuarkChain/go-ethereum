@@ -89,6 +89,64 @@ func (t *Trie) Prove(key []byte, fromLevel uint, proofDb ethdb.KeyValueWriter) e
 	return nil
 }
 
+func (t *Trie) GetProof(key []byte, fromLevel uint, proofDb ethdb.KeyValueWriter) ([]node, [][]byte, error) {
+	// Collect all nodes on the path to key.
+	key = keybytesToHex(key)
+	var nodes []node
+	tn := t.root
+	for len(key) > 0 && tn != nil {
+		switch n := tn.(type) {
+		case *shortNode:
+			if len(key) < len(n.Key) || !bytes.Equal(n.Key, key[:len(n.Key)]) {
+				// The trie doesn't contain the key.
+				tn = nil
+			} else {
+				tn = n.Val
+				key = key[len(n.Key):]
+			}
+			nodes = append(nodes, n)
+		case *fullNode:
+			tn = n.Children[key[0]]
+			key = key[1:]
+			nodes = append(nodes, n)
+		case hashNode:
+			var err error
+			tn, err = t.resolveHash(n, nil)
+			if err != nil {
+				log.Error(fmt.Sprintf("Unhandled trie error: %v", err))
+				return nil, nil, err
+			}
+		default:
+			panic(fmt.Sprintf("%T: invalid node: %v", tn, tn))
+		}
+	}
+	hasher := newHasher(false)
+	defer returnHasherToPool(hasher)
+
+	nodesValue := make([]node, 0)
+	nodesValueBytes := make([][]byte, 0)
+	for i, n := range nodes {
+		if fromLevel > 0 {
+			fromLevel--
+			continue
+		}
+		var hn node
+		n, hn = hasher.proofHash(n)
+		if hash, ok := hn.(hashNode); ok || i == 0 {
+			// If the node's database encoding is a hash (or is the
+			// root node), it becomes a proof element.
+			enc, _ := rlp.EncodeToBytes(n)
+			if !ok {
+				hash = hasher.hashData(enc)
+			}
+			proofDb.Put(hash, enc)
+			nodesValue = append(nodesValue, n)
+			nodesValueBytes = append(nodesValueBytes, enc)
+		}
+	}
+	return nodesValue, nodesValueBytes, nil
+}
+
 // Prove constructs a merkle proof for key. The result contains all encoded nodes
 // on the path to the value at key. The value itself is also included in the last
 // node and can be retrieved by verifying the proof.
