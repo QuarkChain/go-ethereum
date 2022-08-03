@@ -1626,6 +1626,43 @@ func (s *PublicTransactionPoolAPI) GetRawTransactionByHash(ctx context.Context, 
 	return tx.MarshalBinary()
 }
 
+// GetExternalCallResult returns the externalCallResult for the given transaction hash
+func (s *PublicTransactionPoolAPI) GetExternalCallResult(ctx context.Context, hash common.Hash) (map[string]interface{}, error) {
+	_, blockHash, blockNumber, index, err := s.b.GetTransaction(ctx, hash)
+	if err != nil {
+		return nil, nil
+	}
+
+	// get external_call_result from uncles
+	block, err := s.b.BlockByHash(ctx, blockHash)
+	var externalCallResult []byte
+	var txWithExternalCallResult bool
+	if block != nil {
+		uncles := block.Uncles()
+		for _, uncle := range uncles {
+			if uncle.TxHash == hash {
+				externalCallResult = uncle.Extra
+				txWithExternalCallResult = true
+				break
+			}
+		}
+	}
+
+	if !txWithExternalCallResult {
+		return nil, fmt.Errorf("can't find the externalCallResult for the given txhash")
+	}
+
+	fields := map[string]interface{}{
+		"blockHash":          blockHash,
+		"blockNumber":        blockNumber,
+		"transactionHash":    hash,
+		"transactionIndex":   index,
+		"externalCallResult": hexutil.Bytes(externalCallResult),
+	}
+
+	return fields, nil
+}
+
 // GetTransactionReceipt returns the transaction receipt for the given transaction hash.
 func (s *PublicTransactionPoolAPI) GetTransactionReceipt(ctx context.Context, hash common.Hash) (map[string]interface{}, error) {
 	tx, blockHash, blockNumber, index, err := s.b.GetTransaction(ctx, hash)
@@ -1698,7 +1735,7 @@ func (s *PublicTransactionPoolAPI) GetTransactionReceipt(ctx context.Context, ha
 	}
 	// set the external_call_result
 	if externalCallResult != nil {
-		fields["externalCallResult"] = common.Bytes2Hex(externalCallResult)
+		fields["externalCallResult"] = hexutil.Bytes(externalCallResult)
 	}
 
 	return fields, nil
