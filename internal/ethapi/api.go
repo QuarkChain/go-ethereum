@@ -1730,13 +1730,12 @@ func (s *PublicTransactionPoolAPI) GetReceiptProof(ctx context.Context, txHash c
 		return nil, err
 	}
 	receiptTrieRoot := head.ReceiptHash
-	log.Warn("Head Info", "BlockNumber", head.Number, "receiptTrieRoot", receiptTrieRoot.Hex())
 	//3. generate receipt key
-	idx, err := rlp.EncodeToBytes(receipt.TransactionIndex)
+	var key []byte
+	key = rlp.AppendUint64(key[:0], uint64(receipt.TransactionIndex))
 	if err != nil {
 		return nil, err
 	}
-	key := append([]byte{0}, idx...)
 	//4. create the receipt tree
 	tree, err := trie.New(common.Hash{}, trie.NewDatabase(memorydb.New()))
 	if err != nil {
@@ -1750,16 +1749,18 @@ func (s *PublicTransactionPoolAPI) GetReceiptProof(ctx context.Context, txHash c
 	}
 
 	//6.generate the path of proof
-	_, pathBs, err := tree.GetProof(key, 0, memorydb.New())
+	nodes, _, err := tree.GetProof(key, 0, memorydb.New())
 	if err != nil {
 		return nil, err
 	}
 
 	buf := bytes.Buffer{}
-	err = rlp.Encode(&buf, pathBs)
+	err = rlp.Encode(&buf, nodes)
 	if err != nil {
 		return nil, err
 	}
+
+	hpkey := trie.HexToCompact(trie.KeyBytesToHex(key))
 
 	fields := map[string]interface{}{
 		"blockHash":        blockHash,
@@ -1768,7 +1769,7 @@ func (s *PublicTransactionPoolAPI) GetReceiptProof(ctx context.Context, txHash c
 		"transactionIndex": index,
 		"receiptRoot":      hash,
 		"receiptValue":     hexutil.Bytes(receiptBuf.Bytes()),
-		"receiptKey":       hexutil.Bytes(key),
+		"receiptKey":       hexutil.Bytes(hpkey),
 		"receiptPath":      hexutil.Bytes(buf.Bytes()),
 	}
 
