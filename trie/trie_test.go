@@ -206,6 +206,65 @@ func TestGet(t *testing.T) {
 	}
 }
 
+func TestGenerateProof(t *testing.T) {
+	trie := newEmpty()
+
+	var (
+		key1 = []byte("test")
+		key2 = []byte("cool")
+		key3 = []byte("test12")
+		key4 = []byte("testtttt")
+		key5 = []byte("testtttkkkzkkk")
+
+		value1 = []byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+		value2 = []byte("abcaaagaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+		value3 = []byte("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+		value4 = []byte("acaaaacaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+		value5 = []byte("abcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabcabc")
+	)
+
+	trie.Update(key1, value1)
+	trie.Update(key2, value2)
+	trie.Update(key3, value3)
+	trie.Update(key4, value4)
+	trie.Update(key5, value5)
+	root, _, err := trie.Commit(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	testKey := key1
+	testValue := value1
+	encodedKey := keybytesToHex(testKey)
+	hp_encodedKey := hexToCompact(encodedKey)
+	t.Log("key:", common.Bytes2Hex(testKey), "value:", common.Bytes2Hex(testValue))
+	encodedKey3 := keybytesToHex(key3)
+	hp_encodedKey3 := hexToCompact(encodedKey3)
+	t.Log("encoded    key:", encodedKey, " hex:", common.Bytes2Hex(encodedKey))
+	t.Log("hp encoded key:", hp_encodedKey, "hex:", common.Bytes2Hex(hp_encodedKey))
+	t.Log("encoded    key3:", encodedKey3, " hex:", common.Bytes2Hex(encodedKey3))
+	t.Log("hp encoded key3:", hp_encodedKey3, "hex:", common.Bytes2Hex(hp_encodedKey3))
+
+	proofDb := memorydb.New()
+	proofNodes, _, err := trie.GetProof(testKey, 0, proofDb)
+	if err != nil {
+		t.Error(err)
+	}
+
+	rlpV, err := rlp.EncodeToBytes(proofNodes)
+	if err != nil {
+		t.Error(err)
+	}
+
+	if !bytes.Equal(rlpV, common.FromHex("f90113f851808080808080a07ea62200956d52a5a41f5d101ec2e3e88377e5b78ff6cff9769209bda02b05c7a0ca4811899032b60cea5ff681bf94fb470f7b1687a6dd0e84d6585651498bb4f4808080808080808080e68414657374a0c91150cb70ca0730da3a22b008e02f4043f2379766e6528c32f51756123d25a6f897808080a04135b32698ff6697a7179cd796d5116f73646f1f6279a94ea2fb73937b8b42bb808080a08dc5592d39dedd571bdda3b0ff70437829d969fd3579aa6f4bde2700e0eae3908080808080808080b845616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161")) {
+		t.Error("Generate Proof Error")
+	}
+
+	if !bytes.Equal(root.Bytes(), common.FromHex("0xacf337c1e3ae6b827c3b8d96863edbc05b936b184ea2e3c262cba837138246a0")) {
+		t.Error("Trie Root Error")
+	}
+}
+
 func TestDelete(t *testing.T) {
 	trie := newEmpty()
 	vals := []struct{ k, v string }{
