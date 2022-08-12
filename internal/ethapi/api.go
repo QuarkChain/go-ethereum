@@ -1649,7 +1649,7 @@ func (s *PublicTransactionPoolAPI) GetExternalCallResult(ctx context.Context, ha
 	}
 
 	if !txWithExternalCallResult {
-		return nil, fmt.Errorf("can't find the externalCallResult for the given txhash")
+		return nil, fmt.Errorf("can't find the externalCallResult for the given txhash %s", hash)
 	}
 
 	fields := map[string]interface{}{
