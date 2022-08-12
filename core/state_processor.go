@@ -109,10 +109,10 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 
 		if len(crossChainCallResult) > 0 || len(expectResult) > 0 {
 			if !bytes.Equal(expectResult, crossChainCallResult) {
-				log.Debug("Failed to verify cross_chain_result", "txHash", tx.Hash().Hex(), "expect_cross_chain_result", common.Bytes2Hex(expectResult), "cross_chain_result", common.Bytes2Hex(crossChainCallResult))
+				log.Warn("Failed to verify cross_chain_result", "txHash", tx.Hash().Hex(), "expect_cross_chain_result", common.Bytes2Hex(expectResult), "cross_chain_result", common.Bytes2Hex(crossChainCallResult))
 				return nil, nil, 0, fmt.Errorf("failed to verify cross_chain_result, tx: %s", tx.Hash().Hex())
 			} else {
-				log.Info("Verify cross_chain_result succeed", "txHash", tx.Hash().Hex(), "cross_chain_result", common.Bytes2Hex(crossChainCallResult))
+				log.Debug("Verify cross_chain_result succeed", "txHash", tx.Hash().Hex(), "cross_chain_result", common.Bytes2Hex(crossChainCallResult))
 			}
 		}
 
