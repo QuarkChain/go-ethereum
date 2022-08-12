@@ -878,6 +878,7 @@ func (w *worker) commitTransaction(env *environment, tx *types.Transaction) ([]*
 
 	receipt, crossChainCallResult, err := core.ApplyTransaction(w.chainConfig, w.chain, &env.coinbase, env.gasPool, env.state, env.header, tx, &env.header.GasUsed, evmConfig)
 	if err != nil {
+		log.Debug("worker: transaction happen error", "txHash", tx.Hash().Hex(), "err", err.Error())
 		env.state.RevertToSnapshot(snap)
 		return nil, err
 	}
@@ -888,11 +889,11 @@ func (w *worker) commitTransaction(env *environment, tx *types.Transaction) ([]*
 			TxHash: tx.Hash(),
 			Extra:  crossChainCallResult,
 		}
-		err := w.commitUncleDirectly(env, uncle)
+		err = w.commitUncleDirectly(env, uncle)
 		if err != nil {
 			return nil, err
 		}
-		log.Info("worker: transaction with cross_chain_call_result", "txHash", tx.Hash().Hex(), "cross_chain_result", common.Bytes2Hex(crossChainCallResult))
+		log.Debug("worker: transaction with cross_chain_call_result", "txIndex", len(env.txs), "txHash", tx.Hash().Hex(), "cross_chain_result", common.Bytes2Hex(crossChainCallResult))
 	}
 
 	env.txs = append(env.txs, tx)
