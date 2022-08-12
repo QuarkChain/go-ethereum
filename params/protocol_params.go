@@ -168,8 +168,8 @@ const (
 	BaseMaxCalldataPerBlockEIP4488 = 1048576 // BASE_MAX_CALLDATA_PER_BLOCK in EIP-4488
 	CalldataPerTxStipendEIP4488    = 300     // CALLDATA_PER_TX_STIPEND in EIP-4488
 
-	ExternalCallByteGasCost = 30
-	ExternalCallGas         = 10000
+	ExternalCallByteGasCost = 3
+	ExternalCallGas         = 20000
 )
 
 // Gas discount table for BLS12-381 G1 and G2 multi exponentiation operations
