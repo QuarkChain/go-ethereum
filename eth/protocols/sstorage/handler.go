@@ -18,20 +18,12 @@ package sstorage
 
 import (
 	"fmt"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/p2p"
 	"github.com/ethereum/go-ethereum/p2p/enode"
 	"github.com/ethereum/go-ethereum/p2p/enr"
 	"github.com/ethereum/go-ethereum/sstorage"
-)
-
-const (
-	// softResponseLimit is the target maximum size of replies to data retrievals.
-	softResponseLimit = 2 * 1024 * 1024
-
-	// maxEntryLookups is the maximum number of Entry to serve. This
-	// number is there to limit the number of disk lookups.
-	maxEntryLookups = 1024
 )
 
 // Handler is a callback to invoke from an outside runner after the boilerplate
@@ -50,7 +42,7 @@ type Backend interface {
 	// inbound messages going forward.
 	RunPeer(peer *Peer, handler Handler) error
 
-	// PeerInfo retrieves all known `snap` information about a peer.
+	// PeerInfo retrieves all known `sstorage` information about a peer.
 	PeerInfo(id enode.ID) interface{}
 
 	// Handle is a callback to be invoked when a data packet is received from
@@ -59,9 +51,9 @@ type Backend interface {
 	Handle(peer *Peer, packet Packet) error
 }
 
-// MakeProtocols constructs the P2P protocol definitions for `snap`.
-func MakeProtocols(backend Backend, dnsdisc enode.Iterator) []p2p.Protocol {
-	// Filter the discovery iterator for nodes advertising snap support.
+// MakeProtocols constructs the P2P protocol definitions for `sstorage`.
+func MakeProtocols(backend Backend, shards map[common.Address][]uint64, dnsdisc enode.Iterator) []p2p.Protocol {
+	// Filter the discovery iterator for nodes advertising sstorage support.
 	dnsdisc = enode.Filter(dnsdisc, func(n *enode.Node) bool {
 		var snap enrEntry
 		return n.Load(&snap) == nil
@@ -76,12 +68,12 @@ func MakeProtocols(backend Backend, dnsdisc enode.Iterator) []p2p.Protocol {
 			Version: version,
 			Length:  protocolLengths[version],
 			Run: func(p *p2p.Peer, rw p2p.MsgReadWriter) error {
-				return backend.RunPeer(NewPeer(version, sstorage.ShardList(), p, rw), func(peer *Peer) error {
+				return backend.RunPeer(NewPeer(version, shards, p, rw), func(peer *Peer) error {
 					return Handle(backend, peer)
 				})
 			},
 			NodeInfo: func() interface{} {
-				return nodeInfo(backend.Chain())
+				return nodeInfo(backend.Chain(), shards)
 			},
 			PeerInfo: func(id enode.ID) interface{} {
 				return backend.PeerInfo(id)
@@ -93,7 +85,7 @@ func MakeProtocols(backend Backend, dnsdisc enode.Iterator) []p2p.Protocol {
 	return protocols
 }
 
-// Handle is the callback invoked to manage the life cycle of a `snap` peer.
+// Handle is the callback invoked to manage the life cycle of a `sstorage` peer.
 // When this function terminates, the peer is disconnected.
 func Handle(backend Backend, peer *Peer) error {
 	for {
@@ -105,8 +97,8 @@ func Handle(backend Backend, peer *Peer) error {
 }
 
 // HandleMessage is invoked whenever an inbound message is received from a
-// remote peer on the `sstorage` protocol. The remote connection is torn down upon
-// returning any error.
+// remote peer on the `sstorage` protocol. The remote connection is torn down
+// upon returning any error.
 func HandleMessage(backend Backend, peer *Peer) error {
 	// Read the next message from the remote peer, and ensure it's fully consumed
 	msg, err := peer.rw.ReadMsg()
@@ -132,8 +124,9 @@ func HandleMessage(backend Backend, peer *Peer) error {
 		}
 		// Send back anything accumulated (or empty in case of errors)
 		return p2p.Send(peer.rw, ChunksMsg, &ChunksPacket{
-			ID:     req.ID,
-			Chunks: chunks,
+			ID:       req.ID,
+			Contract: req.Contract,
+			Chunks:   chunks,
 		})
 
 	case msg.Code == ChunksMsg:
@@ -150,17 +143,17 @@ func HandleMessage(backend Backend, peer *Peer) error {
 	}
 }
 
-// ServiceGetChunksQuery assembles the response to a trie nodes query.
+// ServiceGetChunksQuery assembles the response to a chunks query.
 // It is exposed to allow external packages to test protocol behavior.
 func ServiceGetChunksQuery(chain *core.BlockChain, req *GetChunksPacket) ([]*Chunk, error) {
-	sf := sstorage.GetDataShard(req.ShardId)
-	if sf == nil {
-		return nil, fmt.Errorf("shard file %d is not support", req.ShardId)
+	sm := sstorage.ContractToShardManager[req.Contract]
+	if sm == nil {
+		return nil, fmt.Errorf("shard manager for contract %d is not support", req.Contract.Hex())
 	}
 
 	res := make([]*Chunk, 0)
-	for idx := req.StartIdx; idx <= req.EndIdx; idx++ {
-		if data, err := sf.ReadMasked(idx); err == nil {
+	for _, idx := range req.ChunkList {
+		if data, ok, err := sm.TryRead(idx, int(sm.MaxKvSize())); ok && err == nil {
 			chunk := Chunk{idx, data}
 			res = append(res, &chunk)
 		}
@@ -169,11 +162,15 @@ func ServiceGetChunksQuery(chain *core.BlockChain, req *GetChunksPacket) ([]*Chu
 	return res, nil
 }
 
-// NodeInfo represents a short summary of the `snap` sub-protocol metadata
+// NodeInfo represents a short summary of the `sstorage` sub-protocol metadata
 // known about the host peer.
-type NodeInfo struct{}
+type NodeInfo struct {
+	Shards map[common.Address][]uint64
+}
 
-// nodeInfo retrieves some `snap` protocol metadata about the running host node.
-func nodeInfo(chain *core.BlockChain) *NodeInfo {
-	return &NodeInfo{}
+// nodeInfo retrieves some `sstorage` protocol metadata about the running host node.
+func nodeInfo(chain *core.BlockChain, shards map[common.Address][]uint64) *NodeInfo {
+	return &NodeInfo{
+		shards,
+	}
 }

@@ -24,6 +24,10 @@ func NewShardManager(contractAddress common.Address, kvSize uint64, kvEntries ui
 	}
 }
 
+func (sm *ShardManager) KvEntries() uint64 {
+	return sm.kvEntries
+}
+
 func (sm *ShardManager) MaxKvSize() uint64 {
 	return sm.kvSize
 }

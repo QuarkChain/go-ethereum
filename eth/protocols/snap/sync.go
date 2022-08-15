@@ -291,7 +291,7 @@ type accountTask struct {
 
 	needCode  []bool // Flags whether the filling accounts need code retrieval
 	needState []bool // Flags whether the filling accounts need storage retrieval
-	needHeal  []bool // Flags whether the filling accounts's state was chunked and need healing
+	needHeal  []bool // Flags whether the filling accounts' state was chunked and need healing
 
 	codeTasks  map[common.Hash]struct{}    // Code hashes that need retrieval
 	stateTasks map[common.Hash]common.Hash // Account hashes->roots that need full state retrieval

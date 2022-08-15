@@ -20,7 +20,6 @@ package downloader
 import (
 	"errors"
 	"fmt"
-	"github.com/ethereum/go-ethereum/eth/protocols/sstorage"
 	"math/big"
 	"sync"
 	"sync/atomic"
@@ -33,10 +32,12 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/eth/protocols/eth"
 	"github.com/ethereum/go-ethereum/eth/protocols/snap"
+	"github.com/ethereum/go-ethereum/eth/protocols/sstorage"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
+	sstor "github.com/ethereum/go-ethereum/sstorage"
 )
 
 var (
@@ -219,7 +220,7 @@ func New(checkpoint uint64, stateDb ethdb.Database, mux *event.TypeMux, chain Bl
 		headerProcCh:   make(chan *headerTask, 1),
 		quitCh:         make(chan struct{}),
 		SnapSyncer:     snap.NewSyncer(stateDb),
-		SstorageSyncer: sstorage.NewSyncer(stateDb),
+		SstorageSyncer: sstorage.NewSyncer(stateDb, sstor.Shards()),
 		stateSyncStart: make(chan *stateSync),
 	}
 	go dl.stateFetcher()

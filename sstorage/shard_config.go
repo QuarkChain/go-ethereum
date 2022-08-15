@@ -112,14 +112,15 @@ func IsComplete() error {
 	return nil
 }
 
-func ShardList() []uint64 {
-	shardList := make([]uint64, 0)
-	for _, sm := range ContractToShardManager {
+func Shards() map[common.Address][]uint64 {
+	shardList := make(map[common.Address][]uint64, 0)
+	for addr, sm := range ContractToShardManager {
+		shardList[addr] = make([]uint64, 0)
 		for idx, _ := range sm.shardMap {
-			shardList = append(shardList, idx)
+			shardList[addr] = append(shardList[addr], idx)
 		}
 	}
-	
+
 	return shardList
 }
 

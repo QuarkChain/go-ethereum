@@ -18,6 +18,7 @@ package sstorage
 
 import (
 	"errors"
+	"github.com/ethereum/go-ethereum/common"
 )
 
 // Constants to match up protocol versions and messages
@@ -25,25 +26,24 @@ const (
 	SSTORAGE1 = 1
 )
 
-// ProtocolName is the official short name of the `snap` protocol used during
+// ProtocolName is the official short name of the `sstorage` protocol used during
 // devp2p capability negotiation.
 const ProtocolName = "sstorage"
 
-// ProtocolVersions are the supported versions of the `snap` protocol (first
+// ProtocolVersions are the supported versions of the `sstorage` protocol (first
 // is primary).
 var ProtocolVersions = []uint{SSTORAGE1}
 
 // protocolLengths are the number of implemented message corresponding to
 // different protocol versions.
-var protocolLengths = map[uint]uint64{SSTORAGE1: 4}
+var protocolLengths = map[uint]uint64{SSTORAGE1: 2}
 
 // maxMessageSize is the maximum cap on the size of a protocol message.
 const maxMessageSize = 10 * 1024 * 1024
 
 const (
-	GetChunksMsg    = 0x00
-	GetChunkListMsg = 0x01
-	ChunksMsg       = 0x02
+	GetChunksMsg = 0x00
+	ChunksMsg    = 0x01
 )
 
 var (
@@ -61,21 +61,16 @@ type Packet interface {
 
 // GetChunksPacket represents an account query.
 type GetChunksPacket struct {
-	ID       uint64 // Request ID to match up responses with
-	StartIdx uint64 // StartIdx of the first chunk index to retrieve
-	EndIdx   uint64 // EndIdx of the last chunk index to retrieve
-}
-
-// GetChunkListPacket represents an account query.
-type GetChunkListPacket struct {
-	ID        uint64   // Request ID to match up responses with
-	ChunkList []uint64 // ChunkList index list to retrieve
+	ID        uint64         // Request ID to match up responses with
+	Contract  common.Address // Contract of the sharded storage
+	ChunkList []uint64       // ChunkList index list to retrieve
 }
 
 // ChunksPacket represents a shard storage slot query response.
 type ChunksPacket struct {
-	ID     uint64   // ID of the request this is a response for
-	Chunks []*Chunk // Merkle proofs for the *last* slot range, if it's incomplete
+	ID       uint64         // ID of the request this is a response for
+	Contract common.Address // Contract of the sharded storage
+	Chunks   []*Chunk       // Merkle proofs for the *last* slot range, if it's incomplete
 }
 
 type Chunk struct {
@@ -85,9 +80,6 @@ type Chunk struct {
 
 func (*GetChunksPacket) Name() string { return "GetChunksMsg" }
 func (*GetChunksPacket) Kind() byte   { return GetChunksMsg }
-
-func (*GetChunkListPacket) Name() string { return "GetChunkListMsg" }
-func (*GetChunkListPacket) Kind() byte   { return GetChunkListMsg }
 
 func (*ChunksPacket) Name() string { return "ChunksMsg" }
 func (*ChunksPacket) Kind() byte   { return ChunksMsg }
