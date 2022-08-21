@@ -169,7 +169,7 @@ const (
 	CalldataPerTxStipendEIP4488    = 300     // CALLDATA_PER_TX_STIPEND in EIP-4488
 
 	ExternalCallByteGasCost = 3
-	ExternalCallGas         = 20000
+	ExternalCallGas         = 100000
 )
 
 // Gas discount table for BLS12-381 G1 and G2 multi exponentiation operations
