@@ -31,6 +31,7 @@ type ChainConfig struct {
 }
 
 type Relayer struct {
+	address  common.Address
 	filepath string
 	prikey   *ecdsa.PrivateKey
 }
@@ -45,7 +46,7 @@ func NewRelayerByKeyStore(filepath string, passwd string) (*Relayer, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Relayer{filepath: filepath, prikey: key.PrivateKey}, nil
+	return &Relayer{address: key.Address, filepath: filepath, prikey: key.PrivateKey}, nil
 }
 
 func NewRelayer(filepath string) (*Relayer, error) {
@@ -56,6 +57,9 @@ func NewRelayer(filepath string) (*Relayer, error) {
 	return &Relayer{filepath: filepath, prikey: key}, nil
 }
 
+func (r *Relayer) Address() common.Address {
+	return r.address
+}
 func NewChainConfig(httpUrl string, wsUrl string, logLevel int, dbf string) *ChainConfig {
 	glogger := log.NewGlogHandler(log.StreamHandler(os.Stderr, log.TerminalFormat(false)))
 	glogger.Verbosity(log.Lvl(logLevel))
@@ -72,18 +76,22 @@ func (this *ChainConfig) setChainId(cid *big.Int) {
 }
 
 type ChainOperator struct {
-	config         *ChainConfig
-	relayer        *Relayer
-	clientListener *ethclient.Client
-	clientExecutor *ethclient.Client
+	config  *ChainConfig
+	relayer *Relayer
+
+	// The listener initialized through ws_rpc_url monitors the contract events that are happening
+	Listener *ethclient.Client
+	// The Executor initialized through http_rpc_url sends a transaction to the blockchain
+	Executor *ethclient.Client
 
 	contracts map[common.Address]*Contract
 
-	Ctx             context.Context
-	CancelFunc      context.CancelFunc
-	ListenTaskList  []ListenTask
-	LogsReceiveChan chan types.Log
-	errChan         chan error
+	Ctx        context.Context
+	CancelFunc context.CancelFunc
+
+	ListenTaskList []ListenTask
+
+	errChan chan error
 
 	db *leveldb.Database
 }
@@ -93,33 +101,31 @@ func (this *ChainOperator) name() string {
 }
 
 func NewChainOperator(config *ChainConfig, r *Relayer, pctx context.Context) (*ChainOperator, error) {
-	clientL, err := ethclient.Dial(config.wsUrl)
+	listener, err := ethclient.Dial(config.wsUrl)
 	if err != nil {
 		log.Error("ethclient.Dial failed:", "err", err)
 		return nil, err
 	}
 
-	clientE, err := ethclient.Dial(config.httpUrl)
+	executor, err := ethclient.Dial(config.httpUrl)
 	if err != nil {
 		return nil, err
 	}
 
 	ctx, cancelFunc := context.WithCancel(pctx)
 
-	chainId, err := clientE.ChainID(ctx)
+	chainId, err := executor.ChainID(ctx)
 	if err != nil {
 		return nil, err
 	}
 	config.setChainId(chainId)
-
-	cchan := make(chan types.Log)
 
 	database, err := leveldb.New(config.dbFile, 256, 0, "ChainId_"+config.ChainId().String(), false)
 	if err != nil {
 		return nil, err
 	}
 
-	return &ChainOperator{config: config, relayer: r, clientListener: clientL, clientExecutor: clientE, Ctx: ctx, CancelFunc: cancelFunc, LogsReceiveChan: cchan, db: database}, nil
+	return &ChainOperator{config: config, relayer: r, Listener: listener, Executor: executor, Ctx: ctx, CancelFunc: cancelFunc, db: database}, nil
 }
 
 func (this *ChainOperator) Quit() {
@@ -127,17 +133,9 @@ func (this *ChainOperator) Quit() {
 }
 
 func (this *ChainOperator) BlockNumber() (uint64, error) {
-	return this.clientExecutor.BlockNumber(this.Ctx)
+	return this.Executor.BlockNumber(this.Ctx)
 }
 
-// 处理listen逻辑：
-// listener 需要达成的目标：
-// 1.监听A链的合约的事件
-
-// 需要实现的函数
-// 1.注册合约 , contractAbi + address
-// 2.注册要监听的合约的某一个具体事(也可以选择监听所有事件，在根据监听到的事件名字分配不同的管道)
-// 3.开启监听
 func (co *ChainOperator) RegisterContract(address common.Address, abi abi.ABI) {
 	if co.contracts == nil {
 		co.contracts = make(map[common.Address]*Contract)
@@ -145,36 +143,37 @@ func (co *ChainOperator) RegisterContract(address common.Address, abi abi.ABI) {
 	co.contracts[address] = NewContract(address, abi)
 }
 
-func (co *ChainOperator) AddListenTask(task ListenTask) int {
+// InsertListenTask inserts the new listenTask in the end of chainOperator.ListenTaskList and returns the taskIndex
+func (co *ChainOperator) InsertListenTask(task ListenTask) int {
 	taskIndex := len(co.ListenTaskList)
 	co.ListenTaskList = append(co.ListenTaskList, task)
 	return taskIndex
 }
+
+// SubscribeEvent subscribe the event of the contract by the given eventName and contract address
 func (co *ChainOperator) SubscribeEvent(address common.Address, eventName string, handleFunc func(types.Log)) (int, error) {
 	receiveChan := make(chan types.Log)
 	sCtx, cf := context.WithCancel(co.Ctx)
-	sub, err := co.clientListener.SubscribeFilterLogs(sCtx, ethereum.FilterQuery{Addresses: []common.Address{address}, Topics: [][]common.Hash{{co.contracts[address].ContractAbi.Events[eventName].ID}}}, receiveChan)
+	sub, err := co.Listener.SubscribeFilterLogs(sCtx, ethereum.FilterQuery{Addresses: []common.Address{address}, Topics: [][]common.Hash{{co.contracts[address].ContractAbi.Events[eventName].ID}}}, receiveChan)
 	if err != nil {
 		return 0, err
 	}
-	task := NewHandleEventTask(address, eventName, receiveChan, sub, sCtx, cf)
+	task := NewListenEventTask(address, eventName, receiveChan, sub, sCtx, cf)
+
+	//
 	if handleFunc != nil {
 		task.handleFunc = handleFunc
 	}
 
-	taskIndex := co.AddListenTask(task)
+	taskIndex := co.InsertListenTask(task)
 
-	eventId := co.contracts[task.address].getEventId(task.eventName)
-	if co.contracts[address].HandleEventList == nil {
-		co.contracts[address].HandleEventList = make(map[common.Hash]int)
-	}
-	co.contracts[address].HandleEventList[eventId] = taskIndex
+	co.contracts[task.address].insertTaskIndex(taskIndex, task.eventName)
 
 	return taskIndex, nil
 }
 
 func (co *ChainOperator) getEventTaskIndex(address common.Address, eventName string) int {
-	taskIndex := co.contracts[address].HandleEventList[co.contracts[address].getEventId(eventName)]
+	taskIndex := co.contracts[address].getTaskIndex(eventName)
 	return taskIndex
 }
 
@@ -206,12 +205,12 @@ func (co *ChainOperator) UnsubscribeEventByIndex(taskIndex int) bool {
 	return true
 }
 
-func (co *ChainOperator) reSubscribeEvent(task *HandleEventTask) error {
+func (co *ChainOperator) reSubscribeEvent(task *ListenEventTask) error {
 	task.sub.Unsubscribe()
 	task.cancleFunc()
 
 	sCtx, cf := context.WithCancel(co.Ctx)
-	sub, err := co.clientListener.SubscribeFilterLogs(sCtx, ethereum.FilterQuery{Addresses: []common.Address{task.address}, Topics: [][]common.Hash{{co.contracts[task.address].ContractAbi.Events[task.eventName].ID}}}, task.independentReceiveChan)
+	sub, err := co.Listener.SubscribeFilterLogs(sCtx, ethereum.FilterQuery{Addresses: []common.Address{task.address}, Topics: [][]common.Hash{{co.contracts[task.address].ContractAbi.Events[task.eventName].ID}}}, task.independentReceiveChan)
 	if err != nil {
 		return err
 	}
@@ -258,20 +257,34 @@ func (co *ChainOperator) callContractMethod(methodName string, to common.Address
 	return co.signedTx(to, input, value)
 }
 
+func (co *ChainOperator) callContractMethodForce(methodName string, to common.Address, value int64, args ...interface{}) (*types.Transaction, error) {
+	abi, exist := co.contracts[to]
+	if !exist {
+		return nil, fmt.Errorf("the address has not registered")
+	}
+
+	input, err := abi.ContractAbi.Pack(methodName, args...)
+	if err != nil {
+		return nil, err
+	}
+
+	return co.signedTxForce(to, input, value)
+}
+
 func (co *ChainOperator) signedTx(to common.Address, txdata []byte, value int64) (*types.Transaction, error) {
 	relayerAddr := crypto.PubkeyToAddress(co.relayer.prikey.PublicKey)
-	nonce, err := co.clientExecutor.PendingNonceAt(co.Ctx, relayerAddr)
+	nonce, err := co.Executor.PendingNonceAt(co.Ctx, relayerAddr)
 	if err != nil {
 		return nil, err
 	}
 
 	//Estimate gasTipCap
-	tipCap, err := co.clientExecutor.SuggestGasTipCap(co.Ctx)
+	tipCap, err := co.Executor.SuggestGasTipCap(co.Ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	latestHeader, err := co.clientExecutor.HeaderByNumber(co.Ctx, nil)
+	latestHeader, err := co.Executor.HeaderByNumber(co.Ctx, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -288,7 +301,7 @@ func (co *ChainOperator) signedTx(to common.Address, txdata []byte, value int64)
 		Value:     big.NewInt(value),
 		Data:      txdata,
 	}
-	gasLimit, err := co.clientExecutor.EstimateGas(co.Ctx, msg)
+	gasLimit, err := co.Executor.EstimateGas(co.Ctx, msg)
 	if err != nil {
 		return nil, err
 	}
@@ -301,7 +314,7 @@ func (co *ChainOperator) signedTx(to common.Address, txdata []byte, value int64)
 		Value:     big.NewInt(value),
 		GasTipCap: tipCap,
 		GasFeeCap: gasFeeCap,
-		Gas:       gasLimit,
+		Gas:       gasLimit * 2,
 		Data:      txdata,
 	})
 
@@ -314,21 +327,60 @@ func (co *ChainOperator) signedTx(to common.Address, txdata []byte, value int64)
 	return signedTx, nil
 }
 
-/**
- * Contract Listener
-**/
-type Contract struct {
-	Addr            common.Address
-	ContractAbi     abi.ABI
-	HandleEventList map[common.Hash]int
-}
+func (co *ChainOperator) signedTxForce(to common.Address, txdata []byte, value int64) (*types.Transaction, error) {
+	relayerAddr := crypto.PubkeyToAddress(co.relayer.prikey.PublicKey)
+	nonce, err := co.Executor.PendingNonceAt(co.Ctx, relayerAddr)
+	if err != nil {
+		return nil, err
+	}
 
-func NewContract(addr common.Address, contractAbi abi.ABI) *Contract {
-	return &Contract{Addr: addr, ContractAbi: contractAbi}
-}
+	//Estimate gasTipCap
+	tipCap, err := co.Executor.SuggestGasTipCap(co.Ctx)
+	if err != nil {
+		return nil, err
+	}
 
-func (c *Contract) getEventId(name string) common.Hash {
-	return c.ContractAbi.Events[name].ID
+	latestHeader, err := co.Executor.HeaderByNumber(co.Ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	gasFeeCap := new(big.Int).Add(
+		tipCap, new(big.Int).Mul(latestHeader.BaseFee, big.NewInt(2)),
+	)
+
+	msg := ethereum.CallMsg{
+		From:      relayerAddr,
+		To:        &to,
+		GasTipCap: tipCap,
+		GasFeeCap: gasFeeCap,
+		Value:     big.NewInt(value),
+		Data:      txdata,
+	}
+	gasLimit, err := co.Executor.EstimateGas(co.Ctx, msg)
+	if err != nil {
+		gasLimit = 1500000
+	}
+	//fmt.Println(gasLimit)
+
+	tx := types.NewTx(&types.DynamicFeeTx{
+		ChainID:   co.config.ChainId(),
+		Nonce:     nonce,
+		To:        &to,
+		Value:     big.NewInt(value),
+		GasTipCap: tipCap,
+		GasFeeCap: gasFeeCap,
+		Gas:       gasLimit * 2,
+		Data:      txdata,
+	})
+
+	signer := types.LatestSignerForChainID(co.config.chainId)
+	signedTx, err := types.SignTx(tx, signer, co.relayer.prikey)
+	if err != nil {
+		return nil, err
+	}
+
+	return signedTx, nil
 }
 
 func (c *ChainOperator) SendMintNativeTx(to common.Address, ethChainOperator *ChainOperator) func(types.Log) {
@@ -351,10 +403,71 @@ func (c *ChainOperator) SendMintNativeTx(to common.Address, ethChainOperator *Ch
 }
 
 type Proof struct {
-	HPKey     []byte
-	Value     []byte
-	ProofPath []byte
-	Root      common.Hash
+	Value     []byte `json:"value"`
+	ProofPath []byte `json:"proofPath""`
+	HpKey     []byte `json:"hpKey"`
+}
+
+func (w3q *ChainOperator) SendMintW3qErc20TxAndSubmitHeadTx(contractAddr common.Address, ethChainOperator *ChainOperator, lightClientAddr common.Address) func(types.Log) {
+	return func(t types.Log) {
+
+		// get receipt Proof from rpc
+		receiptProof, err := w3q.Executor.ReceiptProof(w3q.Ctx, t.TxHash)
+		if err != nil {
+			panic(err)
+		}
+
+		// generate proof
+		prf := Proof{
+			Value:     receiptProof.ReceiptValue,
+			ProofPath: receiptProof.ReceiptPath,
+			HpKey:     receiptProof.ReceiptKey,
+		}
+
+		// submit this block
+		h, err := w3q.Executor.HeaderByNumber(w3q.Ctx, big.NewInt(0).SetUint64(t.BlockNumber))
+		if err != nil {
+			ethChainOperator.config.logger.Error("SendMintW3qErc20Tx: get web3q block fail", "err", err, "blockNumber", t.BlockNumber)
+		}
+
+		cph := types.CopyHeader(h)
+		cph.Commit = nil
+		eHeader, err := rlp.EncodeToBytes(cph)
+		if err != nil {
+			panic(err)
+			return
+		}
+		eCommit, err := rlp.EncodeToBytes(h.Commit)
+		if err != nil {
+			panic(err)
+			return
+		}
+
+		signedTx, err := ethChainOperator.generateSubmitHeadTx(lightClientAddr, h.Number, eHeader, eCommit, false)
+		if err != nil {
+			ethChainOperator.config.logger.Warn("SendMintW3qErc20Tx: generateSubmitHeadTx fail", "err", err, "blockNumber", h.Number)
+		}
+		err = SendTxToEthereum(ethChainOperator, w3q).Doing(signedTx)
+		if err != nil {
+			// todo if the error is "head exist" ,
+			ethChainOperator.config.logger.Warn("SendMintW3qErc20Tx: SendTxToEthereum fail", "err", err, "blockNumber", h.Number)
+		}
+
+		signedTx, err = ethChainOperator.generateMintW3qErc20Tx(contractAddr, receiptProof.BlockNumber, prf, uint64(t.Index))
+		if err != nil {
+			ethChainOperator.config.logger.Error("generateMintW3qErc20Tx:happen err", "err", err)
+			return
+		}
+
+		err = SendTxToEthereum(ethChainOperator, w3q).Doing(signedTx)
+		if err != nil {
+			ethChainOperator.config.logger.Error("SendTxToEthereum:happen err", "err", err)
+			return
+		} else {
+			ethChainOperator.config.logger.Info("mint erc20 succeed!")
+		}
+
+	}
 }
 
 // todo generate proof
@@ -362,34 +475,59 @@ func (w3q *ChainOperator) SendMintW3qErc20Tx(contractAddr common.Address, ethCha
 	return func(t types.Log) {
 
 		// get receipt Proof from rpc
-		receiptProof, err := w3q.clientExecutor.ReceiptProof(w3q.Ctx, t.TxHash)
+		receiptProof, err := w3q.Executor.ReceiptProof(w3q.Ctx, t.TxHash)
 		if err != nil {
 			panic(err)
 		}
 
 		// generate proof
 		prf := Proof{
-			HPKey:     receiptProof.ReceiptKey,
 			Value:     receiptProof.ReceiptValue,
 			ProofPath: receiptProof.ReceiptPath,
-			Root:      receiptProof.ReceiptRoot,
+			HpKey:     receiptProof.ReceiptKey,
 		}
 
+		time.Sleep(5 * time.Second)
 		// generate tx
-		signedTx, err := ethChainOperator.generateMintW3qErc20Tx(contractAddr, receiptProof.BlockNumber, prf, uint64(t.Index))
-		if err != nil {
-			panic(err)
+		retryTimes := 6
+		for {
+			if retryTimes == 0 {
+				break
+			}
+
+			signedTx, err := ethChainOperator.generateMintW3qErc20Tx(contractAddr, receiptProof.BlockNumber, prf, uint64(t.Index))
+			if err != nil {
+				if err.Error() == "execution reverted" {
+					ethChainOperator.config.logger.Warn("generateMintW3qErc20Tx:waiting head submit")
+					time.Sleep(5 * time.Second)
+				} else {
+					ethChainOperator.config.logger.Error("generateMintW3qErc20Tx:happen err", "err", err)
+				}
+
+				retryTimes--
+				continue
+
+			}
+
+			err = SendTxToEthereum(ethChainOperator, w3q).Doing(signedTx)
+			if err != nil {
+				ethChainOperator.config.logger.Error("SendTxToEthereum:happen err", "err", err)
+				retryTimes--
+				continue
+			}
+
+			break
+
 		}
 
-		err = SendTxToEthereum(ethChainOperator, w3q).Doing(signedTx)
-		if err != nil {
-			panic(err)
-		}
 	}
 }
 
 func (eth *ChainOperator) sendSubmitHeadTxOnce(w3q *ChainOperator, lightClientAddr common.Address) func(interface{}) {
 	return func(val interface{}) {
+
+		retryTimes := 6
+
 		h, ok := val.(*types.Header)
 		if !ok {
 			panic(fmt.Errorf("receive value with invalid type"))
@@ -409,20 +547,28 @@ func (eth *ChainOperator) sendSubmitHeadTxOnce(w3q *ChainOperator, lightClientAd
 			panic(err)
 			return
 		}
-		// submitHead
-		signedTx, err := eth.generateSubmitHeadTx(lightClientAddr, h.Number, eHeader, eCommit, false)
-		if err != nil {
-			// todo if the error is "head exist" ,
-			panic(err)
-			return
-		}
 
-		eth.config.logger.Info("sending submitHead tx")
-		err = SendTxToEthereum(eth, w3q).Doing(signedTx)
-		if err != nil {
-			// todo if the error is "head exist" ,
-			panic(err)
-			return
+		// submitHead
+		for {
+			if retryTimes == 0 {
+				break
+			}
+			signedTx, err := eth.generateSubmitHeadTx(lightClientAddr, h.Number, eHeader, eCommit, false)
+			if err != nil {
+				// todo if the error is "head exist" ,
+				retryTimes--
+				eth.config.logger.Warn("generateSubmitHeadTx fail", "err", err, "blockNumber", h.Number)
+				continue
+			}
+
+			eth.config.logger.Info("sending submitHead tx")
+			err = SendTxToEthereum(eth, w3q).Doing(signedTx)
+			if err != nil {
+				// todo if the error is "head exist" ,
+				eth.config.logger.Warn("SendTxToEthereum fail", "err", err, "blockNumber", h.Number)
+				retryTimes--
+				continue
+			}
 		}
 
 	}
@@ -430,6 +576,7 @@ func (eth *ChainOperator) sendSubmitHeadTxOnce(w3q *ChainOperator, lightClientAd
 
 func (eth *ChainOperator) sendSubmitHeadTx(w3q *ChainOperator, lightClientAddr common.Address, receiveHeadChan chan interface{}) func(interface{}) {
 	return func(val interface{}) {
+		retryTimes := 6
 		for {
 
 			select {
@@ -458,15 +605,17 @@ func (eth *ChainOperator) sendSubmitHeadTx(w3q *ChainOperator, lightClientAddr c
 				signedTx, err := eth.generateSubmitHeadTx(lightClientAddr, h.Number, eHeader, eCommit, false)
 				if err != nil {
 					// todo if the error is "head exist" ,
-					panic(err)
-					return
+					retryTimes--
+					eth.config.logger.Warn("generateSubmitHeadTx fail", "err", err)
+					continue
 				}
 
-				eth.config.logger.Info("sending submitHead tx")
+				eth.config.logger.Info("sending submitHead tx....")
 				err = SendTxToEthereum(eth, w3q).Doing(signedTx)
 				if err != nil {
 					// todo if the error is "head exist" ,
-					panic(err)
+					eth.config.logger.Warn("SendTxToEthereum fail", "err", err)
+					retryTimes--
 					return
 				}
 
@@ -476,30 +625,15 @@ func (eth *ChainOperator) sendSubmitHeadTx(w3q *ChainOperator, lightClientAddr c
 }
 
 func (eth *ChainOperator) generateSubmitHeadTx(contractAddr common.Address, height *big.Int, headBytes []byte, commitBytes []byte, lookByIndex bool) (*types.Transaction, error) {
-	tx, err := eth.callContractMethod("submitHead", contractAddr, 0, height, headBytes, commitBytes, lookByIndex)
-	if err != nil {
-		return nil, err
-	}
-
-	return eth.signedTx(contractAddr, tx.Data(), tx.Value().Int64())
+	return eth.callContractMethodForce("submitHeader", contractAddr, 0, height, headBytes, commitBytes, lookByIndex)
 }
 
 func (eth *ChainOperator) generateMintW3qErc20Tx(contractAddr common.Address, height uint64, proof Proof, logIdx uint64) (*types.Transaction, error) {
-	tx, err := eth.callContractMethod("mintToBridge", contractAddr, 0, big.NewInt(0).SetUint64(height), proof, big.NewInt(0).SetUint64(logIdx))
-	if err != nil {
-		return nil, err
-	}
-
-	return eth.signedTx(contractAddr, tx.Data(), tx.Value().Int64())
+	return eth.callContractMethodForce("mintToBridge", contractAddr, 0, big.NewInt(0).SetUint64(height), proof, big.NewInt(0).SetUint64(logIdx))
 }
 
 func (c *ChainOperator) generateMintNativeTx(to common.Address, txHash common.Hash, logIdx int64) (*types.Transaction, error) {
-	tx, err := c.callContractMethod("mintNative", to, 0, txHash, big.NewInt(logIdx))
-	if err != nil {
-		return nil, err
-	}
-
-	return c.signedTx(to, tx.Data(), tx.Value().Int64())
+	return c.callContractMethod("mintNative", to, 0, txHash, big.NewInt(logIdx))
 }
 
 func SendTx_MintNative(ethChainOperator *ChainOperator, w3qChainOperator *ChainOperator, ethTxHappened uint64) *CrossChainCallTask {
@@ -516,57 +650,4 @@ func SendTxToWeb3q(ethChainOperator *ChainOperator, w3qChainOperator *ChainOpera
 
 type Task interface {
 	Doing(transaction *types.Transaction, height uint64) error
-}
-
-// 是否需要一个在监听到某个区块之后去执行的taskPool
-// 将mintNative的执行过程封装成另外一种task
-// 这种task有一下特性
-// 1. 它是要到另一条chain上去执行的
-// 2. 它需要在本链达成额外的一些条件，在dstChain 才能执行成功
-// 3. 所以它应该属于一种delpayTask
-// 4. 因此我需要一些flag来标识这种task
-
-type CrossChainCallTask struct {
-	ctx               context.Context
-	srcChainOperator  *ChainOperator
-	dstChainOperator  *ChainOperator
-	delay             bool
-	delayChan         chan struct{}
-	delayFunc         func(chan struct{}, uint64) error
-	ExpectHeightOnETH uint64
-}
-
-func NewCrossChainCallTask(ctx context.Context, srcChainOperator *ChainOperator, dstChainOperator *ChainOperator, delay bool, delayChan chan struct{}, delayFunc func(chan struct{}, uint64) error, ethTxHappened uint64) *CrossChainCallTask {
-	return &CrossChainCallTask{ctx: ctx, srcChainOperator: srcChainOperator, dstChainOperator: dstChainOperator, delay: delay, delayChan: delayChan, delayFunc: delayFunc, ExpectHeightOnETH: ethTxHappened + 10}
-}
-
-func (c *CrossChainCallTask) Doing(tx *types.Transaction) error {
-	if c.delay {
-		go c.delayFunc(c.delayChan, c.ExpectHeightOnETH)
-		<-c.delayChan
-		return c.dstChainOperator.clientExecutor.SendTransaction(c.ctx, tx)
-	} else {
-		return c.dstChainOperator.clientExecutor.SendTransaction(c.ctx, tx)
-	}
-}
-
-func (c *ChainOperator) waitingExpectHeight(delay chan struct{}, expectHeight uint64) error {
-	for {
-		number, err := c.clientExecutor.BlockNumber(c.Ctx)
-		if err != nil {
-			return err
-		}
-
-		if number < expectHeight {
-			fmt.Println("交易等待中")
-			var delayNumber int64 = int64(expectHeight-number) * 15
-			st := int64(delayNumber) * int64(time.Second)
-			time.Sleep(time.Duration(st))
-		} else {
-			log.Info("发送交易条件已经达成")
-			delay <- struct{}{}
-			break
-		}
-	}
-	return nil
 }

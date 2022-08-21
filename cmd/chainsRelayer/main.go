@@ -6,7 +6,6 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/cmd/chainsRelayer/relayer"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/types"
 	"strings"
 	"sync"
 )
@@ -16,8 +15,8 @@ const cabi = "[\n\t{\n\t\t\"inputs\": [],\n\t\t\"name\": \"happen\",\n\t\t\"outp
 const rinkebyRpcUrl = "https://rinkeby.infura.io/v3/4e3e18f80d8d4ad5959b7404e85e0143"
 const rinkebyRpcWsUrl = "wss://rinkeby.infura.io/ws/v3/4e3e18f80d8d4ad5959b7404e85e0143"
 
-var w3qERC20Addr = common.HexToAddress("0xb0BC3A6071c2243C4D2E3f7303dc43fB3eE744ff")
-var LightClientAddr = common.HexToAddress("0x56ba2B4699BEAeACA5242C77d1aB126DDe7D9128")
+var w3qERC20Addr = common.HexToAddress("0x5Af53d5a4282AC2e0B0e9eF55e20327C8E5d584f")
+var LightClientAddr = common.HexToAddress("0x04A31f431c3d284C433F5E71bB2f2082B754422C")
 
 const web3QRPCUrl = "http://127.0.0.1:8545"
 const web3QWSUrl = "ws://127.0.0.1:8546"
@@ -28,7 +27,7 @@ var w3qNativeContractAddr = common.HexToAddress("0x00000000000000000000000000000
 
 func main() {
 	// initialize rinkeby chainOperator
-	rinkebyConfig := relayer.NewChainConfig(rinkebyRpcUrl, rinkebyRpcWsUrl, 3, "/Users/chenyanlong/Work/go-ethereum/cmd/chainsRelayer/db_data/ethOperator")
+	rinkebyConfig := relayer.NewChainConfig(rinkebyRpcUrl, rinkebyRpcWsUrl, 5, "/Users/chenyanlong/Work/go-ethereum/cmd/chainsRelayer/db_data/ethOperator")
 	relayerIn, err := relayer.NewRelayerByKeyStore(web3QValKetStoreFilePath, passwd)
 	if err != nil {
 		panic(err)
@@ -64,7 +63,12 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+	ILightClientJson, err := abi.JSON(strings.NewReader(relayer.ILightClientABI))
+	if err != nil {
+		panic(err)
+	}
 	web3QOperator.RegisterContract(w3qNativeContractAddr, web3qNativeJson)
+	web3QOperator.RegisterContract(LightClientAddr, ILightClientJson)
 
 	// ==================rinkebyChainOperator_Listen_Task================
 	//mintTaskIndex, err := rinkebyOperator.SubscribeEvent(w3qERC20Addr, "mintToken", nil)
@@ -80,19 +84,19 @@ func main() {
 	//fmt.Println("burnTaskIndex:", burnTaskIndex)
 
 	//=================web3QChainOperatorListen Task====================
-	task, err := relayer.CreateListeningW3qLatestBlockTask(web3QOperator, rinkebyOperator, LightClientAddr, web3QOperator.Ctx)
-	if err != nil {
-		panic(err)
-	}
-	submitHeaderIndex := web3QOperator.AddListenTask(task)
-	fmt.Println("submitHeaderIndex:", submitHeaderIndex)
-
-	//web3qChainOperator subscribe events
-	//w3qBurnIndex, err := web3QOperator.SubscribeEvent(w3qNativeContractAddr, "burnNativeToken", web3QOperator.SendMintW3qErc20Tx(w3qERC20Addr, rinkebyOperator))
+	//task, err := relayer.CreateListeningW3qLatestBlockTask(web3QOperator, rinkebyOperator, LightClientAddr, web3QOperator.Ctx)
 	//if err != nil {
 	//	panic(err)
 	//}
-	//fmt.Println("w3qBurnIndex:", w3qBurnIndex)
+	//submitHeaderIndex := web3QOperator.AddListenTask(task)
+	//fmt.Println("submitHeaderIndex:", submitHeaderIndex)
+
+	//web3qChainOperator subscribe events
+	w3qBurnIndex, err := web3QOperator.SubscribeEvent(w3qNativeContractAddr, "burnNativeToken", web3QOperator.SendMintW3qErc20TxAndSubmitHeadTx(w3qERC20Addr, rinkebyOperator, LightClientAddr))
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println("w3qBurnIndex:", w3qBurnIndex)
 
 	var pwg sync.WaitGroup
 	pwg.Add(1)
@@ -106,11 +110,4 @@ func main() {
 		defer pwg.Done()
 	}()
 	pwg.Wait()
-}
-
-func printLog(log types.Log) {
-	fmt.Println("handle log")
-	fmt.Println("log topics", log.Topics[0], log.Topics[1])
-	fmt.Println("log data", log.Data)
-
 }
