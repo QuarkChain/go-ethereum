@@ -18,7 +18,6 @@ package sstorage
 
 import (
 	"bytes"
-	"crypto/rand"
 	"encoding/binary"
 	"fmt"
 	"math/big"
@@ -36,87 +35,11 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/trie"
-	"golang.org/x/crypto/sha3"
 )
-
-func TestHashing(t *testing.T) {
-	t.Parallel()
-
-	var bytecodes = make([][]byte, 10)
-	for i := 0; i < len(bytecodes); i++ {
-		buf := make([]byte, 100)
-		rand.Read(buf)
-		bytecodes[i] = buf
-	}
-	var want, got string
-	var old = func() {
-		hasher := sha3.NewLegacyKeccak256()
-		for i := 0; i < len(bytecodes); i++ {
-			hasher.Reset()
-			hasher.Write(bytecodes[i])
-			hash := hasher.Sum(nil)
-			got = fmt.Sprintf("%v\n%v", got, hash)
-		}
-	}
-	var new = func() {
-		hasher := sha3.NewLegacyKeccak256().(crypto.KeccakState)
-		var hash = make([]byte, 32)
-		for i := 0; i < len(bytecodes); i++ {
-			hasher.Reset()
-			hasher.Write(bytecodes[i])
-			hasher.Read(hash)
-			want = fmt.Sprintf("%v\n%v", want, hash)
-		}
-	}
-	old()
-	new()
-	if want != got {
-		t.Errorf("want\n%v\ngot\n%v\n", want, got)
-	}
-}
-
-func BenchmarkHashing(b *testing.B) {
-	var bytecodes = make([][]byte, 10000)
-	for i := 0; i < len(bytecodes); i++ {
-		buf := make([]byte, 100)
-		rand.Read(buf)
-		bytecodes[i] = buf
-	}
-	var old = func() {
-		hasher := sha3.NewLegacyKeccak256()
-		for i := 0; i < len(bytecodes); i++ {
-			hasher.Reset()
-			hasher.Write(bytecodes[i])
-			hasher.Sum(nil)
-		}
-	}
-	var new = func() {
-		hasher := sha3.NewLegacyKeccak256().(crypto.KeccakState)
-		var hash = make([]byte, 32)
-		for i := 0; i < len(bytecodes); i++ {
-			hasher.Reset()
-			hasher.Write(bytecodes[i])
-			hasher.Read(hash)
-		}
-	}
-	b.Run("old", func(b *testing.B) {
-		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			old()
-		}
-	})
-	b.Run("new", func(b *testing.B) {
-		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
-			new()
-		}
-	})
-}
 
 type (
 	accountHandlerFunc func(t *testPeer, requestId uint64, root common.Hash, origin common.Hash, limit common.Hash, cap uint64) error
 	storageHandlerFunc func(t *testPeer, requestId uint64, root common.Hash, accounts []common.Hash, origin, limit []byte, max uint64) error
-	trieHandlerFunc    func(t *testPeer, requestId uint64, root common.Hash, paths []TrieNodePathSet, cap uint64) error
 	codeHandlerFunc    func(t *testPeer, id uint64, hashes []common.Hash, max uint64) error
 )
 

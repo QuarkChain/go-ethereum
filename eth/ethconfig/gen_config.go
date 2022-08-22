@@ -117,6 +117,7 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		SyncMode                        *downloader.SyncMode
 		EthDiscoveryURLs                []string
 		SnapDiscoveryURLs               []string
+		SstorageDiscoveryURLs           []string
 		NoPruning                       *bool
 		NoPrefetch                      *bool
 		TxLookupLimit                   *uint64                `toml:",omitempty"`
@@ -174,6 +175,9 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	}
 	if dec.SnapDiscoveryURLs != nil {
 		c.SnapDiscoveryURLs = dec.SnapDiscoveryURLs
+	}
+	if dec.SstorageDiscoveryURLs != nil {
+		c.SstorageDiscoveryURLs = dec.SstorageDiscoveryURLs
 	}
 	if dec.NoPruning != nil {
 		c.NoPruning = *dec.NoPruning

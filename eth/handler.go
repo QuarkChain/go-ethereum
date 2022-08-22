@@ -18,7 +18,6 @@ package eth
 
 import (
 	"errors"
-	"github.com/ethereum/go-ethereum/eth/protocols/sstorage"
 	"math"
 	"math/big"
 	"sync"
@@ -35,11 +34,13 @@ import (
 	"github.com/ethereum/go-ethereum/eth/fetcher"
 	"github.com/ethereum/go-ethereum/eth/protocols/eth"
 	"github.com/ethereum/go-ethereum/eth/protocols/snap"
+	"github.com/ethereum/go-ethereum/eth/protocols/sstorage"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/p2p"
 	"github.com/ethereum/go-ethereum/params"
+	sstor "github.com/ethereum/go-ethereum/sstorage"
 )
 
 const (
@@ -100,10 +101,11 @@ type handler struct {
 	checkpointNumber uint64      // Block number for the sync progress validator to cross reference
 	checkpointHash   common.Hash // Block hash for the sync progress validator to cross reference
 
-	database ethdb.Database
-	txpool   txPool
-	chain    *core.BlockChain
-	maxPeers int
+	database                 ethdb.Database
+	txpool                   txPool
+	chain                    *core.BlockChain
+	maxPeers                 int
+	minPeersPerSstorageShard int
 
 	downloader   *downloader.Downloader
 	blockFetcher *fetcher.BlockFetcher
@@ -139,7 +141,7 @@ func newHandler(config *handlerConfig) (*handler, error) {
 		database:   config.Database,
 		txpool:     config.TxPool,
 		chain:      config.Chain,
-		peers:      newPeerSet(),
+		peers:      newPeerSet(sstor.Shards()),
 		merger:     config.Merger,
 		whitelist:  config.Whitelist,
 		quitSync:   make(chan struct{}),
@@ -347,6 +349,7 @@ func (h *handler) runEthPeer(peer *eth.Peer, handler eth.Handler) error {
 			return err
 		}
 	}
+
 	h.chainSync.handlePeerEvent(peer)
 
 	// Propagate existing transactions. new transactions appearing
@@ -468,8 +471,8 @@ func (h *handler) runSstorageExtension(peer *sstorage.Peer, handler sstorage.Han
 	h.peerWG.Add(1)
 	defer h.peerWG.Done()
 
-	if err := h.peers.registerSnapExtension(peer); err != nil {
-		peer.Log().Error("Snapshot extension registration failed", "err", err)
+	if err := h.peers.registerSstorageExtension(peer); err != nil {
+		peer.Log().Error("Sstorage extension registration failed", "err", err)
 		return err
 	}
 	return handler(peer)
@@ -506,6 +509,9 @@ func (h *handler) unregisterPeer(id string) {
 	if peer.snapExt != nil {
 		h.downloader.SnapSyncer.Unregister(id)
 	}
+	if peer.sstorageExt != nil {
+		h.downloader.SstorageSyncer.Unregister(id)
+	}
 	h.downloader.UnregisterPeer(id)
 	h.txFetcher.Drop(id)
 
@@ -516,6 +522,7 @@ func (h *handler) unregisterPeer(id string) {
 
 func (h *handler) Start(maxPeers int) {
 	h.maxPeers = maxPeers
+	h.minPeersPerSstorageShard = 15 // todo update from config
 
 	// broadcast transactions
 	h.wg.Add(1)

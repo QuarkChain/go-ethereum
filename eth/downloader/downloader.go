@@ -20,6 +20,7 @@ package downloader
 import (
 	"errors"
 	"fmt"
+	"github.com/ethereum/go-ethereum/core/state"
 	"math/big"
 	"sync"
 	"sync/atomic"
@@ -201,6 +202,8 @@ type BlockChain interface {
 
 	// Snapshots returns the blockchain snapshot tree to paused it during sync.
 	Snapshots() *snapshot.Tree
+
+	StateAt(root common.Hash) (*state.StateDB, error)
 }
 
 // New creates a new downloader to fetch hashes and blocks from remote peers.
@@ -220,7 +223,7 @@ func New(checkpoint uint64, stateDb ethdb.Database, mux *event.TypeMux, chain Bl
 		headerProcCh:   make(chan *headerTask, 1),
 		quitCh:         make(chan struct{}),
 		SnapSyncer:     snap.NewSyncer(stateDb),
-		SstorageSyncer: sstorage.NewSyncer(stateDb, sstor.Shards()),
+		SstorageSyncer: sstorage.NewSyncer(stateDb, chain, sstor.Shards()),
 		stateSyncStart: make(chan *stateSync),
 	}
 	go dl.stateFetcher()

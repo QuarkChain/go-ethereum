@@ -27,7 +27,7 @@ type Peer struct {
 	id string // Unique ID for the peer, cached
 
 	*p2p.Peer                             // The embedded P2P package peer
-	rw        p2p.MsgReadWriter           // Input/output streams for snap
+	rw        p2p.MsgReadWriter           // Input/output streams for sstorage
 	version   uint                        // Protocol version negotiated
 	shards    map[common.Address][]uint64 // shards of this node support
 
@@ -58,7 +58,11 @@ func (p *Peer) Version() uint {
 	return p.version
 }
 
-// Shards retrieves the peer's negoatiated `sstorage` protocol version.
+func (p *Peer) Shards() map[common.Address][]uint64 {
+	return p.shards
+}
+
+// IsShardExist checks whether one specific shard is supported by this peer.
 func (p *Peer) IsShardExist(contract common.Address, shardId uint64) bool {
 	if ids, ok := p.shards[contract]; ok {
 		for _, id := range ids {
@@ -71,19 +75,21 @@ func (p *Peer) IsShardExist(contract common.Address, shardId uint64) bool {
 	return false
 }
 
-// Log overrides the P2P logget with the higher level one containing only the id.
+// Log overrides the P2P logger with the higher level one containing only the id.
 func (p *Peer) Log() log.Logger {
 	return p.logger
 }
 
 // RequestChunks fetches a batch of chunks using a list of chunk index
-func (p *Peer) RequestChunks(id uint64, contract common.Address, chunkList []uint64) error {
-	p.logger.Trace("Fetching Chunks", "reqId", id, "contract", contract, "count", len(chunkList))
+func (p *Peer) RequestChunks(id uint64, contract common.Address, shardId uint64, chunkList []uint64) error {
+	p.logger.Trace("Fetching Chunks", "reqId", id, "contract",
+		"shardId", shardId, contract, "count", len(chunkList))
 
 	requestTracker.Track(p.id, p.version, GetChunksMsg, ChunksMsg, id)
 	return p2p.Send(p.rw, GetChunksMsg, &GetChunksPacket{
 		ID:        id,
 		Contract:  contract,
+		ShardId:   shardId,
 		ChunkList: chunkList,
 	})
 }

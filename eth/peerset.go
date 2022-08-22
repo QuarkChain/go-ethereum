@@ -18,6 +18,7 @@ package eth
 
 import (
 	"errors"
+	"github.com/ethereum/go-ethereum/eth/protocols/sstorage"
 	"math/big"
 	"sync"
 
@@ -54,16 +55,27 @@ type peerSet struct {
 	snapWait map[string]chan *snap.Peer // Peers connected on `eth` waiting for their snap extension
 	snapPend map[string]*snap.Peer      // Peers connected on the `snap` protocol, but not yet on `eth`
 
+	// peers for each sstorage shard
+	sstoragePeers map[common.Address]map[uint64]map[string]struct{}
+
 	lock   sync.RWMutex
 	closed bool
 }
 
 // newPeerSet creates a new peer set to track the active participants.
-func newPeerSet() *peerSet {
+func newPeerSet(shards map[common.Address][]uint64) *peerSet {
+	sstoragePeers := make(map[common.Address]map[uint64]map[string]struct{})
+	for contract, ids := range shards {
+		sstoragePeers[contract] = make(map[uint64]map[string]struct{})
+		for _, id := range ids {
+			sstoragePeers[contract][id] = make(map[string]struct{})
+		}
+	}
 	return &peerSet{
-		peers:    make(map[string]*ethPeer),
-		snapWait: make(map[string]chan *snap.Peer),
-		snapPend: make(map[string]*snap.Peer),
+		peers:         make(map[string]*ethPeer),
+		snapWait:      make(map[string]chan *snap.Peer),
+		snapPend:      make(map[string]*snap.Peer),
+		sstoragePeers: sstoragePeers,
 	}
 }
 
@@ -129,6 +141,42 @@ func (ps *peerSet) waitSnapExtension(peer *eth.Peer) (*snap.Peer, error) {
 	ps.lock.Unlock()
 
 	return <-wait, nil
+}
+
+// registerSstorageExtension unblocks an already connected `eth` peer waiting for its
+// `snap` extension, or if no such peer exists, tracks the extension for the time
+// being until the `eth` main protocol starts looking for it.
+func (ps *peerSet) registerSstorageExtension(peer *sstorage.Peer) error {
+	// Reject the peer if it advertises `snap` without `eth` as `snap` is only a
+	// satellite protocol meaningful with the chain selection of `eth`
+	if !peer.RunningCap(sstorage.ProtocolName, sstorage.ProtocolVersions) {
+		return errors.New("peer connected on sstorage without compatible eth support")
+	}
+	// Ensure nobody can double connect
+	ps.lock.Lock()
+	defer ps.lock.Unlock()
+
+	id := peer.ID()
+	if _, ok := ps.peers[id]; ok {
+		return errPeerAlreadyRegistered // avoid connections with the same id as existing ones
+	}
+	for contract, shards := range peer.Shards() {
+		_, ok := ps.sstoragePeers[contract]
+		if !ok {
+			continue
+		}
+		for _, shard := range shards {
+			_, ok = ps.sstoragePeers[contract][shard]
+			if !ok {
+				continue
+			}
+			_, ok = ps.sstoragePeers[contract][shard][peer.ID()]
+			if ok {
+				ps.sstoragePeers[contract][shard][peer.ID()] = struct{}{}
+			}
+		}
+	}
+	return nil
 }
 
 // registerPeer injects a new `eth` peer into the working set, or returns an error

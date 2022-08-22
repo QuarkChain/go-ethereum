@@ -55,8 +55,8 @@ type Backend interface {
 func MakeProtocols(backend Backend, shards map[common.Address][]uint64, dnsdisc enode.Iterator) []p2p.Protocol {
 	// Filter the discovery iterator for nodes advertising sstorage support.
 	dnsdisc = enode.Filter(dnsdisc, func(n *enode.Node) bool {
-		var snap enrEntry
-		return n.Load(&snap) == nil
+		var enr enrEntry
+		return n.Load(&enr) == nil
 	})
 
 	protocols := make([]p2p.Protocol, len(ProtocolVersions))
@@ -126,6 +126,7 @@ func HandleMessage(backend Backend, peer *Peer) error {
 		return p2p.Send(peer.rw, ChunksMsg, &ChunksPacket{
 			ID:       req.ID,
 			Contract: req.Contract,
+			ShardId:  req.ShardId,
 			Chunks:   chunks,
 		})
 
@@ -148,7 +149,8 @@ func HandleMessage(backend Backend, peer *Peer) error {
 func ServiceGetChunksQuery(chain *core.BlockChain, req *GetChunksPacket) ([]*Chunk, error) {
 	sm := sstorage.ContractToShardManager[req.Contract]
 	if sm == nil {
-		return nil, fmt.Errorf("shard manager for contract %d is not support", req.Contract.Hex())
+		return nil, fmt.Errorf("shard manager for contract %d is not support",
+			"contract", req.Contract.Hex())
 	}
 
 	res := make([]*Chunk, 0)

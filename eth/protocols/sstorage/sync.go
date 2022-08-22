@@ -17,9 +17,16 @@
 package sstorage
 
 import (
+	"bytes"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/ethereum/go-ethereum/core/state"
+	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/holiman/uint256"
+	"golang.org/x/crypto/sha3"
 	"math/rand"
 	"sync"
 	"time"
@@ -45,9 +52,11 @@ const (
 	requestTimeoutInSecond = 30 // Second
 )
 
-// ErrCancelled is returned from snap syncing if the operation was prematurely
+// ErrCancelled is returned from sstorage syncing if the operation was prematurely
 // terminated.
 var ErrCancelled = errors.New("sync cancelled")
+
+var emptyHash = common.Hash{}
 
 // chunkRequest tracks a pending chunk request to ensure responses are to
 // actual requests and to validate any security constraints.
@@ -78,13 +87,14 @@ type chunkRequest struct {
 
 // chunkResponse is an already verified remote response to a chunk request.
 type chunkResponse struct {
+	reqId    uint64         // Request ID of this response
 	task     *chunkTask     // chunkTask which this request is filling
 	contract common.Address // contract
 	shardId  uint64         // shardId
 	chunks   []*Chunk       // chunks to store into the sharded storage
 }
 
-// chunkTask represents the sync task for a chunk of the account snapshot.
+// chunkTask represents the sync task for a sstorage shard.
 type chunkTask struct {
 	// These fields get serialized to leveldb on shutdown
 	contract  common.Address   // contract address
@@ -110,9 +120,9 @@ func (t *chunkTask) getChunkIndexesForRequest() []uint64 {
 	return indexes
 }
 
-// SyncProgress is a database entry to allow suspending and resuming a snapshot state
+// SyncProgress is a database entry to allow suspending and resuming a sstorage state
 // sync. Opposed to full and fast sync, there is no way to restart a suspended
-// snap sync without prior knowledge of the suspension point.
+// sstorage sync without prior knowledge of the suspension point.
 type SyncProgress struct {
 	Tasks []*chunkTask // The suspended chunk tasks
 
@@ -132,16 +142,20 @@ type SyncPeer interface {
 	IsShardExist(contract common.Address, shardId uint64) bool
 
 	// RequestChunks fetches a batch of chunks ranging between startIdx and endIdx
-	RequestChunks(id uint64, contract common.Address, chunkList []uint64) error
+	RequestChunks(id uint64, contract common.Address, shardId uint64, chunkList []uint64) error
 
 	// Log retrieves the peer's own contextual logger.
 	Log() log.Logger
 }
 
-// Syncer is an Ethereum account and storage trie syncer based on snapshots and
-// the  snap protocol. It's purpose is to download all the accounts and storage
-// slots from remote peers and reassemble chunks of the state trie, on top of
-// which a state sync can be run to fix any gaps / overlaps.
+type BlockChain interface {
+	StateAt(root common.Hash) (*state.StateDB, error)
+
+	CurrentBlock() *types.Block
+}
+
+// Syncer is a sstorage syncer based the sstorage protocol. It's purpose is to
+// download all chunks from remote peers.
 //
 // Every network request has a variety of failure events:
 //   - The peer disconnects after task assignment, failing to send the request
@@ -150,12 +164,12 @@ type SyncPeer interface {
 //   - The peer delivers a stale response after a previous timeout
 //   - The peer delivers a refusal to serve the requested state
 type Syncer struct {
-	db ethdb.KeyValueStore // Database to store the trie nodes into (and dedup)
-
+	db    ethdb.KeyValueStore // Database to store the sync state
+	chain BlockChain
 	tasks []*chunkTask
 
 	sstorageInfo map[common.Address][]uint64 // Map for contract address to support shardIds
-	syncDone     bool                        // Flag to signal that snap phase is done
+	syncDone     bool                        // Flag to signal that sstorage phase is done
 	update       chan struct{}               // Notification channel for possible sync progression
 
 	peers map[string]SyncPeer // Currently active peers to download from
@@ -165,7 +179,7 @@ type Syncer struct {
 	rates    *msgrate.Trackers // Message throughput rates for peers
 
 	// Request tracking during syncing phase
-	statelessPeers map[string]struct{} // Peers that failed to deliver state data
+	statelessPeers map[string]struct{} // Peers that failed to deliver chunk data
 	chunkIdlers    map[string]struct{} // Peers that aren't serving chunk requests
 
 	chunkReqs map[uint64]*chunkRequest // Chunk requests currently running
@@ -176,7 +190,7 @@ type Syncer struct {
 
 	stateWriter ethdb.Batch // Shared batch writer used for persisting raw states
 
-	startTime time.Time // Time instance when snapshot sync started
+	startTime time.Time // Time instance when sstorage sync started
 	logTime   time.Time // Time instance when status was last reported
 
 	pend sync.WaitGroup // Tracks network request goroutines for graceful shutdown
@@ -184,7 +198,7 @@ type Syncer struct {
 }
 
 // NewSyncer creates a new sstorage syncer to download the sharded storage content over the sstorage protocol.
-func NewSyncer(db ethdb.KeyValueStore, sstorageInfo map[common.Address][]uint64) *Syncer {
+func NewSyncer(db ethdb.KeyValueStore, chain BlockChain, sstorageInfo map[common.Address][]uint64) *Syncer {
 	return &Syncer{
 		db: db,
 
@@ -251,13 +265,11 @@ func (s *Syncer) Unregister(id string) error {
 	return nil
 }
 
-// Sync starts (or resumes a previous) sync cycle to iterate over an state trie
-// with the given root and reconstruct the nodes based on the snapshot leaves.
-// Previously downloaded segments will not be redownloaded of fixed, rather any
-// errors will be healed after the leaves are fully accumulated.
+// Sync starts (or resumes a previous) sync cycle to iterate over all the chunks
+// for storage shards the node support and reconstruct the node storage.
+// Previously downloaded segments will not be redownloaded of fixed.
 func (s *Syncer) Sync(shards map[common.Address][]uint64, cancel chan struct{}) error {
-	// Move the trie root from any previous value, revert stateless markers for
-	// any peers and initialize the syncer if it was not yet run
+	// Revert stateless markers for any peers and initialize the syncer if it was not yet run
 	s.lock.Lock()
 
 	s.statelessPeers = make(map[string]struct{})
@@ -303,7 +315,7 @@ func (s *Syncer) Sync(shards map[common.Address][]uint64, cancel chan struct{}) 
 
 	// Create a set of unique channels for this sync cycle. We need these to be
 	// ephemeral so a data race doesn't accidentally deliver something stale on
-	// a persistent channel across syncs (yup, this happened)
+	// a persistent channel across syncs
 	var (
 		chunkReqFails = make(chan *chunkRequest)
 		chunkResps    = make(chan *chunkResponse)
@@ -346,7 +358,7 @@ func (s *Syncer) loadSyncStatus() {
 
 	if status := rawdb.ReadSstorageSyncStatus(s.db); status != nil {
 		if err := json.Unmarshal(status, &progress); err != nil {
-			log.Error("Failed to decode snap sync status", "err", err)
+			log.Error("Failed to decode sstorage sync status", "err", err)
 		} else {
 			for _, task := range progress.Tasks {
 				log.Debug("Scheduled sstorage sync task", "contract", task.contract.Hex(),
@@ -361,8 +373,7 @@ func (s *Syncer) loadSyncStatus() {
 		}
 	}
 	// Either we've failed to decode the previus state, or there was none.
-	// Start a fresh sync by chunking up the account range and scheduling
-	// them for retrieval.
+	// Start a fresh sync for retrieval.
 	s.chunkSynced, s.chunkBytes = 0, 0
 
 	for contract, shards := range s.sstorageInfo {
@@ -516,7 +527,7 @@ func (s *Syncer) assignChunkTasks(success chan *chunkResponse, fail chan *chunkR
 			defer s.pend.Done()
 
 			// Attempt to send the remote request and revert if it fails
-			if err := peer.RequestChunks(reqid, req.task.contract, req.indexes); err != nil {
+			if err := peer.RequestChunks(reqid, req.task.contract, req.shardId, req.indexes); err != nil {
 				log.Debug("Failed to request chunks", "err", err)
 				s.scheduleRevertChunkRequest(req)
 			}
@@ -588,33 +599,143 @@ func (s *Syncer) revertChunkRequest(req *chunkRequest) {
 // into the account tasks.
 func (s *Syncer) processChunkResponse(res *chunkResponse) {
 	var (
-		synced uint64
-		bytes  uint64
+		synced      uint64
+		syncedBytes uint64
 	)
 	if res.task.contract != res.contract {
-		log.Warn("Process to persist chunks", "task", res.task.contract.Hex(),
-			"res", res.contract.Hex())
+		log.Error("processChunkResponse fail: contract mismatch",
+			"task", res.task.contract.Hex(), "res", res.contract.Hex())
+		return
 	}
+	sm := sstorage.ContractToShardManager[res.contract]
+	if sm == nil {
+		log.Error("processChunkResponse fail: contract not support",
+			"res contract", res.contract.Hex())
+		return
+	}
+	state, err := s.chain.StateAt(s.chain.CurrentBlock().Hash())
+	if err != nil {
+		log.Error("processChunkResponse get state fail", "error", err)
+		return
+	}
+
+	successCount, failureCount := 0, 0
 	for _, chunk := range res.chunks {
-		// get chunk meta
-		// verify chunk
-		// if pass, write to storage
-		// if fail, set indexes[idx] = 0
+		// 1. get chunk meta
+		// 2. verify chunk
+		// 3.1. if pass, write to storage and delete(res.task.indexes, idx)
+		// 3.2. if fail, set res.task.indexes[idx] = 0
+		synced++
+		syncedBytes += uint64(len(chunk.data))
 
-		res.task.indexes[chunk.idx] = 0
-		// set peer to stateless peer if fail too much
-		// set peer to idler
+		meta, err := getSstorageMetadata(state, res.contract, chunk.idx)
+		if err != nil || meta == nil {
+			log.Warn("processChunkResponse get chunk meta fail", "error", err)
+			failureCount++
+			continue
+		}
+
+		err = verifyChunk(chunk, meta)
+		if err != nil {
+			log.Warn("processChunkResponse verify chunk fail", "error", err)
+			failureCount++
+			continue
+		}
+
+		success, err := sm.TryWrite(chunk.idx, chunk.data)
+		if !success || err != nil {
+			res.task.indexes[chunk.idx] = 0
+			failureCount++
+		} else {
+			delete(res.task.indexes, chunk.idx)
+			successCount++
+		}
 	}
 
-	s.chunkSynced += 1
-	s.chunkBytes += common.StorageSize(bytes)
-	log.Debug("Persisted set of chunks", "count", synced, "bytes", bytes)
+	// set peer to stateless peer if fail too much
+	if req, ok := res.task.req[res.reqId]; successCount == 0 && ok {
+		s.statelessPeers[req.peer] = struct{}{}
+	}
+
+	s.chunkSynced += synced
+	s.chunkBytes += common.StorageSize(syncedBytes)
+	log.Debug("Persisted set of chunks", "count", synced, "bytes", syncedBytes)
 
 	// If this delivery completed the last pending task, forward the account task
 	// to the next chunk
 	if len(res.task.indexes) == 0 {
 		res.task.done = true
 	}
+}
+
+type metadata struct {
+	kvIdx      uint64
+	kvSize     uint64
+	hashInMeta []byte
+}
+
+// verifyChunk verify chunk using metadata
+func verifyChunk(chunk *Chunk, meta *metadata) error {
+	if chunk.idx != meta.kvIdx {
+		return fmt.Errorf("verifyChunk fail: kvIdx mismatch", "chunk Idx", chunk.idx, "meta kvIdx", meta.kvIdx)
+	}
+
+	if meta.kvSize > uint64(len(chunk.data)) {
+		return fmt.Errorf("verifyChunk fail: size error", "data size", len(chunk.data), "meta kvSize", meta.kvSize)
+	}
+
+	hasher := sha3.NewLegacyKeccak256().(crypto.KeccakState)
+	hasher.Write(chunk.data[:meta.kvSize])
+	hash := common.Hash{}
+	hasher.Read(hash[:])
+
+	if bytes.Compare(hash[:24], meta.hashInMeta) != 0 {
+		return fmt.Errorf("verifyChunk fail: size error",
+			"data hash", hash.Hex(), "meta hash (24)", common.Bytes2Hex(meta.hashInMeta))
+	}
+
+	return nil
+}
+
+// getSlotHash generate slot hash to fetch data from stateDB
+func getSlotHash(slotIdx uint64, key common.Hash) common.Hash {
+	slot := uint256.NewInt(slotIdx).Bytes32()
+
+	keydata := key.Bytes()
+	slotdata := slot[:]
+	data := append(keydata, slotdata...)
+
+	hasher := sha3.NewLegacyKeccak256().(crypto.KeccakState)
+	hasher.Write(data)
+
+	hashRes := common.Hash{}
+	hasher.Read(hashRes[:])
+
+	return hashRes
+}
+
+func getSstorageMetadata(s *state.StateDB, contract common.Address, index uint64) (*metadata, error) {
+	// according to https://github.com/web3q/web3q-contracts/blob/main/contracts/DecentralizedKV.sol,
+	// it need to fetch the skey from idxMap (slot 6) using storage index,
+	// then get metadata from kvMap (slot 5) using skey. the metadata struct is as following
+	// struct PhyAddr {
+	// 	uint40 kvIdx;
+	// 	uint24 kvSize;
+	// 	bytes24 hash;
+	// }
+	key := getSlotHash(6, uint256.NewInt(index).Bytes32())
+	skey := s.GetState(contract, key)
+	if skey == emptyHash {
+		return nil, fmt.Errorf("Fail to get skey", "index", index)
+	}
+
+	key = getSlotHash(5, skey)
+	meta := s.GetState(contract, key)
+	if skey == emptyHash {
+		return nil, fmt.Errorf("Fail to get metadata", "skey", skey)
+	}
+
+	return &metadata{binary.BigEndian.Uint64(meta[:5]), binary.BigEndian.Uint64(meta[5:8]), meta[8:]}, nil
 }
 
 // OnChunks is a callback method to invoke when a batch of contract
@@ -696,6 +817,7 @@ func (s *Syncer) OnChunks(peer SyncPeer, id uint64, chunks []*Chunk) error {
 	// Response validated, send it to the scheduler for filling
 	response := &chunkResponse{
 		task:     req.task,
+		reqId:    req.id,
 		contract: req.contract,
 		shardId:  req.shardId,
 		chunks:   chunks,

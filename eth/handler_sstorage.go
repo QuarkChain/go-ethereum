@@ -36,8 +36,8 @@ func (h *sstorageHandler) RunPeer(peer *sstorage.Peer, hand sstorage.Handler) er
 // PeerInfo retrieves all known `sstorage` information about a peer.
 func (h *sstorageHandler) PeerInfo(id enode.ID) interface{} {
 	if p := h.peers.peer(id.String()); p != nil {
-		if p.snapExt != nil {
-			return p.snapExt.info()
+		if p.sstorageExt != nil {
+			return p.sstorageExt.Version()
 		}
 	}
 	return nil

@@ -22,8 +22,6 @@ import (
 
 // enrEntry is the ENR entry which advertises `sstorage` protocol on the discovery.
 type enrEntry struct {
-	ShardIds []uint64
-
 	// Ignore additional fields (for forward compatibility).
 	Rest []rlp.RawValue `rlp:"tail"`
 }

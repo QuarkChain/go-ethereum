@@ -53,7 +53,7 @@ var (
 	errBadRequest     = errors.New("bad request")
 )
 
-// Packet represents a p2p message in the `snap` protocol.
+// Packet represents a p2p message in the `sstorage` protocol.
 type Packet interface {
 	Name() string // Name returns a string corresponding to the message type.
 	Kind() byte   // Kind returns the message type.
@@ -63,6 +63,7 @@ type Packet interface {
 type GetChunksPacket struct {
 	ID        uint64         // Request ID to match up responses with
 	Contract  common.Address // Contract of the sharded storage
+	ShardId   uint64         // ShardId
 	ChunkList []uint64       // ChunkList index list to retrieve
 }
 
@@ -70,6 +71,7 @@ type GetChunksPacket struct {
 type ChunksPacket struct {
 	ID       uint64         // ID of the request this is a response for
 	Contract common.Address // Contract of the sharded storage
+	ShardId  uint64         // ShardId
 	Chunks   []*Chunk       // Merkle proofs for the *last* slot range, if it's incomplete
 }
 
