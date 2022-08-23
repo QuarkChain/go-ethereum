@@ -69,6 +69,29 @@ func (sm *ShardManager) TryRead(kvIdx uint64, readLen int) ([]byte, bool, error)
 	}
 }
 
+func (sm *ShardManager) UnmaskKV(kvIdx uint64, b []byte) ([]byte, bool, error) {
+
+}
+
+func (sm *ShardManager) TryWriteMaskedKV(kvIdx uint64, b []byte) (bool, error) {
+	shardIdx := kvIdx / sm.kvEntries
+	if ds, ok := sm.shardMap[shardIdx]; ok {
+		return true, ds.WriteMasked(kvIdx, b)
+	} else {
+		return false, nil
+	}
+}
+
+func (sm *ShardManager) TryReadMaskedKV(kvIdx uint64) ([]byte, bool, error) {
+	shardIdx := kvIdx / sm.kvEntries
+	if ds, ok := sm.shardMap[shardIdx]; ok {
+		b, err := ds.ReadMasked(kvIdx)
+		return b, true, err
+	} else {
+		return nil, false, nil
+	}
+}
+
 func (sm *ShardManager) IsComplete() error {
 	for _, ds := range sm.shardMap {
 		if !ds.IsComplete() {

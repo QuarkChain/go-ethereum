@@ -95,6 +95,34 @@ func (ds *DataShard) ReadUnmasked(kvIdx uint64, readLen int) ([]byte, error) {
 	return data, nil
 }
 
+func (ds *DataShard) WriteMasked(kvIdx uint64, b []byte) error {
+	if !ds.Contains(kvIdx) {
+		return fmt.Errorf("kv not found")
+	}
+
+	if uint64(len(b)) > ds.kvSize {
+		return fmt.Errorf("write data too large")
+	}
+
+	for i := uint64(0); i < ds.chunksPerKv; i++ {
+		off := int(i * CHUNK_SIZE)
+		if off >= len(b) {
+			break
+		}
+		writeLen := len(b) - off
+		if writeLen > int(CHUNK_SIZE) {
+			writeLen = int(CHUNK_SIZE)
+		}
+
+		chunkIdx := ds.ChunkIdx() + kvIdx*ds.chunksPerKv + i
+		err := ds.WriteChunkMasked(chunkIdx, b[off:off+writeLen])
+		if err != nil {
+			return nil
+		}
+	}
+	return nil
+}
+
 func (ds *DataShard) WriteUnmasked(kvIdx uint64, b []byte) error {
 	if !ds.Contains(kvIdx) {
 		return fmt.Errorf("kv not found")
@@ -141,6 +169,15 @@ func (ds *DataShard) WriteChunkUnmasked(chunkIdx uint64, b []byte) error {
 	for _, df := range ds.dataFiles {
 		if df.Contains(chunkIdx) {
 			return df.WriteUnmasked(chunkIdx, b)
+		}
+	}
+	return fmt.Errorf("chunk not found: the shard is not completed?")
+}
+
+func (ds *DataShard) WriteChunkMasked(chunkIdx uint64, b []byte) error {
+	for _, df := range ds.dataFiles {
+		if df.Contains(chunkIdx) {
+			return df.WriteMasked(chunkIdx, b)
 		}
 	}
 	return fmt.Errorf("chunk not found: the shard is not completed?")

@@ -164,6 +164,19 @@ func (df *DataFile) WriteUnmasked(chunkIdx uint64, b []byte) error {
 	return err
 }
 
+func (df *DataFile) WriteMasked(chunkIdx uint64, b []byte) error {
+	if !df.Contains(chunkIdx) {
+		return fmt.Errorf("chunk not found")
+	}
+
+	if len(b) > int(CHUNK_SIZE) {
+		return fmt.Errorf("write data too large")
+	}
+
+	_, err := df.file.WriteAt(b, int64(chunkIdx+1)*int64(CHUNK_SIZE))
+	return err
+}
+
 func (df *DataFile) writeHeader() error {
 	header := DataFileHeader{
 		magic:         MAGIC,
