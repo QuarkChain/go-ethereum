@@ -50,23 +50,16 @@ func (ds *DataShard) ChunkIdx() uint64 {
 	return ds.shardIdx * ds.chunksPerKv * ds.kvEntries
 }
 
-func (ds *DataShard) ReadMasked(kvIdx uint64) ([]byte, error) {
-	if !ds.Contains(kvIdx) {
-		return nil, fmt.Errorf("kv not found")
-	}
-	var data []byte
-	for i := uint64(0); i < ds.chunksPerKv; i++ {
-		chunkIdx := ds.ChunkIdx() + kvIdx*ds.chunksPerKv + i
-		cdata, err := ds.ReadChunkMasked(chunkIdx)
-		if err != nil {
-			return nil, err
+func (ds *DataShard) GetStorageFile(chunkIdx uint64) *DataFile {
+	for _, df := range ds.dataFiles {
+		if df.Contains(chunkIdx) {
+			return df
 		}
-		data = append(data, cdata...)
 	}
-	return data, nil
+	return nil
 }
 
-func (ds *DataShard) ReadUnmasked(kvIdx uint64, readLen int) ([]byte, error) {
+func (ds *DataShard) Read(kvIdx uint64, readLen int, isMasked bool) ([]byte, error) {
 	if !ds.Contains(kvIdx) {
 		return nil, fmt.Errorf("kv not found")
 	}
@@ -86,7 +79,7 @@ func (ds *DataShard) ReadUnmasked(kvIdx uint64, readLen int) ([]byte, error) {
 		readLen = readLen - chunkReadLen
 
 		chunkIdx := ds.ChunkIdx() + kvIdx*ds.chunksPerKv + i
-		cdata, err := ds.ReadChunkUnmasked(chunkIdx, chunkReadLen)
+		cdata, err := ds.ReadChunk(chunkIdx, chunkReadLen, isMasked)
 		if err != nil {
 			return nil, err
 		}
@@ -95,7 +88,7 @@ func (ds *DataShard) ReadUnmasked(kvIdx uint64, readLen int) ([]byte, error) {
 	return data, nil
 }
 
-func (ds *DataShard) WriteMasked(kvIdx uint64, b []byte) error {
+func (ds *DataShard) Write(kvIdx uint64, b []byte, isMasked bool) error {
 	if !ds.Contains(kvIdx) {
 		return fmt.Errorf("kv not found")
 	}
@@ -115,7 +108,7 @@ func (ds *DataShard) WriteMasked(kvIdx uint64, b []byte) error {
 		}
 
 		chunkIdx := ds.ChunkIdx() + kvIdx*ds.chunksPerKv + i
-		err := ds.WriteChunkMasked(chunkIdx, b[off:off+writeLen])
+		err := ds.WriteChunk(chunkIdx, b[off:off+writeLen], isMasked)
 		if err != nil {
 			return nil
 		}
@@ -123,61 +116,19 @@ func (ds *DataShard) WriteMasked(kvIdx uint64, b []byte) error {
 	return nil
 }
 
-func (ds *DataShard) WriteUnmasked(kvIdx uint64, b []byte) error {
-	if !ds.Contains(kvIdx) {
-		return fmt.Errorf("kv not found")
-	}
-
-	for i := uint64(0); i < ds.chunksPerKv; i++ {
-		off := int(i * CHUNK_SIZE)
-		if off >= len(b) {
-			break
-		}
-		writeLen := len(b) - off
-		if writeLen > int(CHUNK_SIZE) {
-			writeLen = int(CHUNK_SIZE)
-		}
-
-		chunkIdx := ds.ChunkIdx() + kvIdx*ds.chunksPerKv + i
-		err := ds.WriteChunkUnmasked(chunkIdx, b[off:off+writeLen])
-		if err != nil {
-			return nil
-		}
-	}
-	return nil
-}
-
-func (ds *DataShard) ReadChunkMasked(chunkIdx uint64) ([]byte, error) {
+func (ds *DataShard) ReadChunk(chunkIdx uint64, readLen int, isMasked bool) ([]byte, error) {
 	for _, df := range ds.dataFiles {
 		if df.Contains(chunkIdx) {
-			return df.ReadMasked(chunkIdx)
+			return df.Read(chunkIdx, readLen, isMasked)
 		}
 	}
 	return nil, fmt.Errorf("chunk not found: the shard is not completed?")
 }
 
-func (ds *DataShard) ReadChunkUnmasked(chunkIdx uint64, readLen int) ([]byte, error) {
+func (ds *DataShard) WriteChunk(chunkIdx uint64, b []byte, isMasked bool) error {
 	for _, df := range ds.dataFiles {
 		if df.Contains(chunkIdx) {
-			return df.ReadUnmasked(chunkIdx, readLen)
-		}
-	}
-	return nil, fmt.Errorf("chunk not found: the shard is not completed?")
-}
-
-func (ds *DataShard) WriteChunkUnmasked(chunkIdx uint64, b []byte) error {
-	for _, df := range ds.dataFiles {
-		if df.Contains(chunkIdx) {
-			return df.WriteUnmasked(chunkIdx, b)
-		}
-	}
-	return fmt.Errorf("chunk not found: the shard is not completed?")
-}
-
-func (ds *DataShard) WriteChunkMasked(chunkIdx uint64, b []byte) error {
-	for _, df := range ds.dataFiles {
-		if df.Contains(chunkIdx) {
-			return df.WriteMasked(chunkIdx, b)
+			return df.Write(chunkIdx, b, isMasked)
 		}
 	}
 	return fmt.Errorf("chunk not found: the shard is not completed?")

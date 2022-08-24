@@ -122,12 +122,7 @@ func runChunkRead(cmd *cobra.Command, args []string) {
 		log.Crit("open failed", "error", err)
 	}
 
-	var b []byte
-	if *readMasked {
-		b, err = df.ReadMasked(*chunkIdx)
-	} else {
-		b, err = df.ReadUnmasked(*chunkIdx, int(*readLen))
-	}
+	b, err := df.Read(*chunkIdx, int(*readLen), *readMasked)
 	if err != nil {
 		log.Crit("open failed", "error", err)
 	}
@@ -161,7 +156,7 @@ func runChunkWrite(cmd *cobra.Command, args []string) {
 		log.Crit("open failed", "error", err)
 	}
 
-	err = df.WriteUnmasked(*chunkIdx, readInputBytes())
+	err = df.Write(*chunkIdx, readInputBytes(), false)
 	if err != nil {
 		log.Crit("write failed", "error", err)
 	}
@@ -185,13 +180,7 @@ func runShardRead(cmd *cobra.Command, args []string) {
 		log.Warn("shard is not completed")
 	}
 
-	var b []byte
-	var err error
-	if *readMasked {
-		b, err = ds.ReadMasked(*kvIdx)
-	} else {
-		b, err = ds.ReadUnmasked(*kvIdx, int(*readLen))
-	}
+	b, err := ds.Read(*kvIdx, int(*readLen), *readMasked)
 	if err != nil {
 		log.Crit("read failed", "error", err)
 	}
@@ -216,7 +205,7 @@ func runShardWrite(cmd *cobra.Command, args []string) {
 		log.Warn("shard is not completed")
 	}
 
-	err := ds.WriteUnmasked(*kvIdx, readInputBytes())
+	err := ds.Write(*kvIdx, readInputBytes(), false)
 	if err != nil {
 		log.Crit("write failed", "error", err)
 	}
