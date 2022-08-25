@@ -123,6 +123,7 @@ func runChunkRead(cmd *cobra.Command, args []string) {
 		log.Crit("open failed", "error", err)
 	}
 
+	// do not have data hash, use empty hash for placeholder
 	b, err := df.Read(*chunkIdx, int(*readLen), common.Hash{}, *readMasked)
 	if err != nil {
 		log.Crit("open failed", "error", err)
@@ -181,7 +182,7 @@ func runShardRead(cmd *cobra.Command, args []string) {
 		log.Warn("shard is not completed")
 	}
 
-	// use common.Hash{}
+	// do not have data hash, use empty hash for placeholder 
 	b, err := ds.Read(*kvIdx, int(*readLen), common.Hash{}, *readMasked)
 	if err != nil {
 		log.Crit("read failed", "error", err)
