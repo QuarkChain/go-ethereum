@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/log"
 )
@@ -119,7 +120,7 @@ func (df *DataFile) ChunkIdxEnd() uint64 {
 	return df.chunkIdxStart + df.chunkIdxLen
 }
 
-func (df *DataFile) Read(chunkIdx uint64, len int, isMasked bool) ([]byte, error) {
+func (df *DataFile) Read(chunkIdx uint64, len int, hash common.Hash, isMasked bool) ([]byte, error) {
 	if !df.Contains(chunkIdx) {
 		return nil, fmt.Errorf("chunk not found")
 	}

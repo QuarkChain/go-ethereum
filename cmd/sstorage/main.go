@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/sstorage"
 	"github.com/mattn/go-colorable"
@@ -122,7 +123,7 @@ func runChunkRead(cmd *cobra.Command, args []string) {
 		log.Crit("open failed", "error", err)
 	}
 
-	b, err := df.Read(*chunkIdx, int(*readLen), *readMasked)
+	b, err := df.Read(*chunkIdx, int(*readLen), common.Hash{}, *readMasked)
 	if err != nil {
 		log.Crit("open failed", "error", err)
 	}
@@ -180,7 +181,8 @@ func runShardRead(cmd *cobra.Command, args []string) {
 		log.Warn("shard is not completed")
 	}
 
-	b, err := ds.Read(*kvIdx, int(*readLen), *readMasked)
+	// use common.Hash{}
+	b, err := ds.Read(*kvIdx, int(*readLen), common.Hash{}, *readMasked)
 	if err != nil {
 		log.Crit("read failed", "error", err)
 	}

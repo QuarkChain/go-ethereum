@@ -121,7 +121,7 @@ func (s *Database) SstorageWrite(addr common.Address, kvIdx uint64, data []byte)
 	return nil
 }
 
-func (s *Database) SstorageRead(addr common.Address, kvIdx uint64, readLen int) ([]byte, bool, error) {
+func (s *Database) SstorageRead(addr common.Address, kvIdx uint64, readLen int, hash common.Hash) ([]byte, bool, error) {
 	s.lock.RLock()
 	defer s.lock.RUnlock()
 
@@ -139,7 +139,7 @@ func (s *Database) SstorageRead(addr common.Address, kvIdx uint64, readLen int) 
 	}
 
 	if s, ok0 := s.contractToShardManager[addr]; ok0 {
-		return s.TryRead(kvIdx, readLen)
+		return s.TryRead(kvIdx, readLen, hash)
 	}
 	return nil, false, nil
 }

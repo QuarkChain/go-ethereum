@@ -1,6 +1,10 @@
 package sstorage
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/ethereum/go-ethereum/common"
+)
 
 type DataShard struct {
 	shardIdx    uint64
@@ -59,7 +63,7 @@ func (ds *DataShard) GetStorageFile(chunkIdx uint64) *DataFile {
 	return nil
 }
 
-func (ds *DataShard) Read(kvIdx uint64, readLen int, isMasked bool) ([]byte, error) {
+func (ds *DataShard) Read(kvIdx uint64, readLen int, hash common.Hash, isMasked bool) ([]byte, error) {
 	if !ds.Contains(kvIdx) {
 		return nil, fmt.Errorf("kv not found")
 	}
@@ -79,7 +83,7 @@ func (ds *DataShard) Read(kvIdx uint64, readLen int, isMasked bool) ([]byte, err
 		readLen = readLen - chunkReadLen
 
 		chunkIdx := ds.ChunkIdx() + kvIdx*ds.chunksPerKv + i
-		cdata, err := ds.ReadChunk(chunkIdx, chunkReadLen, isMasked)
+		cdata, err := ds.ReadChunk(chunkIdx, chunkReadLen, hash, isMasked)
 		if err != nil {
 			return nil, err
 		}
@@ -116,10 +120,10 @@ func (ds *DataShard) Write(kvIdx uint64, b []byte, isMasked bool) error {
 	return nil
 }
 
-func (ds *DataShard) ReadChunk(chunkIdx uint64, readLen int, isMasked bool) ([]byte, error) {
+func (ds *DataShard) ReadChunk(chunkIdx uint64, readLen int, hash common.Hash, isMasked bool) ([]byte, error) {
 	for _, df := range ds.dataFiles {
 		if df.Contains(chunkIdx) {
-			return df.Read(chunkIdx, readLen, isMasked)
+			return df.Read(chunkIdx, readLen, hash, isMasked)
 		}
 	}
 	return nil, fmt.Errorf("chunk not found: the shard is not completed?")
