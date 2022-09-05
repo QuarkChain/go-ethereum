@@ -60,13 +60,13 @@ func (task *ListenEventTask) running(co *ChainOperator) {
 			break
 		}
 		select {
-		case log := <-task.independentReceiveChan:
-			co.config.logger.Info("listen_task receives log", "listen event", task.eventName, "Log Info", log)
+		case logData := <-task.independentReceiveChan:
+			log.Info("【ListenTask】 receives log", "event name", task.eventName, "contract address", logData.Address, "tx hash", logData.TxHash)
 			if task.handleFunc != nil {
-				go task.handleFunc(log)
+				go task.handleFunc(logData)
 			}
 		case err := <-task.sub.Err():
-			co.config.logger.Error("listen_task happens error", "listen event", task.eventName, "err", err)
+			log.Error("【ListenTask】happens error", "event name", task.eventName, "err", err)
 			task.sub.Unsubscribe()
 			co.reSubscribeEvent(task)
 		case <-task.ctx.Done():
@@ -74,10 +74,10 @@ func (task *ListenEventTask) running(co *ChainOperator) {
 			task.sub.Unsubscribe()
 			task.start = false
 
-			co.config.logger.Info("listen_task quit ", "event", task.eventName)
+			log.Info("【ListenTask】 quit ", "event", task.eventName)
 			return
 		default:
-			co.config.logger.Info("listen_event working", "event", task.eventName)
+			log.Info("【ListenTask】 working", "event", task.eventName)
 			time.Sleep(10 * time.Second)
 
 		}
@@ -85,39 +85,40 @@ func (task *ListenEventTask) running(co *ChainOperator) {
 }
 
 type CommonListenTask struct {
-	name        string
-	start       bool
-	ctx         context.Context
-	cancleFunc  func()
-	receiveChan chan interface{}
-	handleFunc  func(val interface{})
-	sub         ethereum.Subscription
+	name          string
+	start         bool
+	ctx           context.Context
+	cancleFunc    func()
+	receiveChan   chan interface{}
+	handleFunc    func(val interface{})
+	sub           ethereum.Subscription
+	sleepDuration time.Duration
 }
 
-func NewCommonListenTask(name string, ctx context.Context, cf func(), receiveChan chan interface{}, sub ethereum.Subscription, handleFunc func(val interface{})) *CommonListenTask {
-	return &CommonListenTask{name: name, start: true, ctx: ctx, cancleFunc: cf, receiveChan: receiveChan, sub: sub, handleFunc: handleFunc}
+func NewCommonListenTask(name string, ctx context.Context, cf func(), receiveChan chan interface{}, sub ethereum.Subscription, sleepDuration time.Duration, handleFunc func(val interface{})) *CommonListenTask {
+	return &CommonListenTask{name: name, start: true, ctx: ctx, cancleFunc: cf, receiveChan: receiveChan, sub: sub, sleepDuration: sleepDuration, handleFunc: handleFunc}
 }
 
 func (task *CommonListenTask) running(co *ChainOperator) {
 	for {
 		select {
 		case val := <-task.receiveChan:
-			co.config.logger.Info("receive val", "task name", task.name, "val Info", val)
+			log.Info("【CommonListenTask】receive value", "task name", task.name)
 			if task.handleFunc != nil {
-				task.handleFunc(val)
+				go task.handleFunc(val)
 			}
 		case err := <-task.sub.Err():
-			co.config.logger.Error("receive error", "task name", task.name, "err", err)
+			log.Error("【CommonListenTask】receive error", "task name", task.name, "err", err)
 			task.sub.Unsubscribe()
 			return
 		case <-task.ctx.Done():
 			task.sub.Unsubscribe()
 			//task.start = false
-			co.config.logger.Info("listen task quit ", "task name", task.name)
+			log.Info("【CommonListenTask】 quit ", "task name", task.name)
 			return
 		default:
-			co.config.logger.Info("listen task working", "task name", task.name)
-			time.Sleep(10 * time.Second)
+			log.Info("【CommonListenTask】 listening", "task name", task.name)
+			time.Sleep(task.sleepDuration)
 
 		}
 	}
@@ -137,7 +138,7 @@ func (task *CommonListenTask) stop() {
 	}
 }
 
-const Web3QBlockTime = 6 * time.Second
+const Web3QBlockTime = 5 * time.Second
 
 func getLatestHeadLoop(headChan chan interface{}, w3q *ChainOperator) func(<-chan struct{}) error {
 	return func(unSubscribe <-chan struct{}) error {
@@ -155,7 +156,7 @@ func getLatestHeadLoop(headChan chan interface{}, w3q *ChainOperator) func(<-cha
 			if err != nil {
 				return err
 			}
-			w3q.config.logger.Info("getLatestHeadLoop:get latest head....", "headNumber", latestHead.Number.String())
+			log.Info("getLatestHeadLoop:get latest head", "headNumber", latestHead.Number.String())
 
 			//if latestHead.Number.Cmp(big.NewInt(0)) != 0 {
 			// store the blockNumber of lastestHeader in db
@@ -163,28 +164,30 @@ func getLatestHeadLoop(headChan chan interface{}, w3q *ChainOperator) func(<-cha
 			bn, dberr := w3q.db.Get(key)
 			if dberr != nil {
 				if dberr != leveldb.ErrNotFound {
-					w3q.config.logger.Error("getLatestHeadLoop:get db error", "error", dberr.Error())
+					log.Error("getLatestHeadLoop:get db error", "error", dberr.Error())
 					return err
 				}
 			}
 
 			//Verify whether the latest block header is stored in the database
 			if big.NewInt(0).SetBytes(bn).Cmp(latestHead.Number) < 0 {
-				w3q.config.logger.Info("getLatestHeadLoop:set latestHeader number at db", "headNumber", latestHead.Number.String())
+				log.Info("getLatestHeadLoop:set latestHeader number at db", "headNumber", latestHead.Number.String())
+				log.Warn("Entry HeadChan", "time", time.Now())
 				headChan <- latestHead
+				log.Warn("Outry HeadChan", "time", time.Now())
 				err = w3q.db.Put(key, latestHead.Number.Bytes())
 				if err != nil {
 					return err
 				}
 			}
-			w3q.config.logger.Info("getLatestHeadLoop:sleep", "headNumber", latestHead.Number.String())
+			log.Info("getLatestHeadLoop:sleep", "headNumber", latestHead.Number.String())
 
 			time.Sleep(Web3QBlockTime)
 		}
 	}
 }
 
-func CreateListeningW3qLatestBlockTask(w3q *ChainOperator, eth *ChainOperator, lightClientAddr common.Address, ctx context.Context) (*CommonListenTask, error) {
+func CreateListeningW3qLatestBlockTask(w3q *ChainOperator, eth *ChainOperator, lightClientAddr common.Address, w3qNativeAddr common.Address, w3qErc20Addr common.Address, ctx context.Context) (*CommonListenTask, error) {
 
 	subCtx, cancelFunc := context.WithCancel(ctx)
 	headChan := make(chan interface{}, 0)
@@ -193,6 +196,6 @@ func CreateListeningW3qLatestBlockTask(w3q *ChainOperator, eth *ChainOperator, l
 	subscription := event.NewSubscription(getLatestHeadLoop(headChan, w3q))
 
 	// the blockNumber should be submited to LightClient Contract
-	return NewCommonListenTask("Get W3qLatestBlock Task", subCtx, cancelFunc, headChan, subscription, eth.sendSubmitHeadTxOnce(w3q, lightClientAddr)), nil
+	return NewCommonListenTask("Get W3qLatestBlock Task", subCtx, cancelFunc, headChan, subscription, 3*time.Second, eth.SendBatchMintForBridgeTokenWhenSubmitHeaderTx(w3q, lightClientAddr, w3qNativeAddr, w3qErc20Addr)), nil
 
 }

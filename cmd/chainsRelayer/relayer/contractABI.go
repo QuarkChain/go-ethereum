@@ -13,11 +13,6 @@ const (
 				"internalType": "string",
 				"name": "symbol",
 				"type": "string"
-			},
-			{
-				"internalType": "contract LightClient",
-				"name": "proverAddr",
-				"type": "address"
 			}
 		],
 		"stateMutability": "nonpayable",
@@ -75,6 +70,101 @@ const (
 	{
 		"inputs": [
 			{
+				"internalType": "uint256",
+				"name": "height",
+				"type": "uint256"
+			},
+			{
+				"components": [
+					{
+						"internalType": "bytes",
+						"name": "value",
+						"type": "bytes"
+					},
+					{
+						"internalType": "bytes",
+						"name": "proofPath",
+						"type": "bytes"
+					},
+					{
+						"internalType": "bytes",
+						"name": "hpKey",
+						"type": "bytes"
+					}
+				],
+				"internalType": "struct ILightClient.Proof[]",
+				"name": "proofs",
+				"type": "tuple[]"
+			},
+			{
+				"internalType": "uint256[]",
+				"name": "logIdxs",
+				"type": "uint256[]"
+			}
+		],
+		"name": "batchMintForBridgeToken",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "uint256",
+				"name": "height",
+				"type": "uint256"
+			},
+			{
+				"internalType": "bytes",
+				"name": "headBytes",
+				"type": "bytes"
+			},
+			{
+				"internalType": "bytes",
+				"name": "commitBytes",
+				"type": "bytes"
+			},
+			{
+				"internalType": "bool",
+				"name": "lookByIndex",
+				"type": "bool"
+			},
+			{
+				"components": [
+					{
+						"internalType": "bytes",
+						"name": "value",
+						"type": "bytes"
+					},
+					{
+						"internalType": "bytes",
+						"name": "proofPath",
+						"type": "bytes"
+					},
+					{
+						"internalType": "bytes",
+						"name": "hpKey",
+						"type": "bytes"
+					}
+				],
+				"internalType": "struct ILightClient.Proof[]",
+				"name": "proofs",
+				"type": "tuple[]"
+			},
+			{
+				"internalType": "uint256[]",
+				"name": "logIdxs",
+				"type": "uint256[]"
+			}
+		],
+		"name": "batchMintWhenSubmitHeader",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
 				"internalType": "address",
 				"name": "account",
 				"type": "address"
@@ -85,7 +175,7 @@ const (
 				"type": "uint256"
 			}
 		],
-		"name": "burnToBridge",
+		"name": "burnFroBridgeToken",
 		"outputs": [],
 		"stateMutability": "nonpayable",
 		"type": "function"
@@ -191,7 +281,7 @@ const (
 				"type": "uint256"
 			}
 		],
-		"name": "mintToBridge",
+		"name": "mintForBridgeToken",
 		"outputs": [],
 		"stateMutability": "nonpayable",
 		"type": "function"
@@ -229,6 +319,50 @@ const (
 		"type": "event"
 	},
 	{
+		"inputs": [],
+		"name": "renounceOwnership",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "contract LightClient",
+				"name": "addr",
+				"type": "address"
+			}
+		],
+		"name": "setProver",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "address",
+				"name": "to",
+				"type": "address"
+			},
+			{
+				"internalType": "uint256",
+				"name": "amount",
+				"type": "uint256"
+			}
+		],
+		"name": "transfer",
+		"outputs": [
+			{
+				"internalType": "bool",
+				"name": "",
+				"type": "bool"
+			}
+		],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
 		"anonymous": false,
 		"inputs": [
 			{
@@ -252,6 +386,35 @@ const (
 		],
 		"name": "Transfer",
 		"type": "event"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "address",
+				"name": "from",
+				"type": "address"
+			},
+			{
+				"internalType": "address",
+				"name": "to",
+				"type": "address"
+			},
+			{
+				"internalType": "uint256",
+				"name": "amount",
+				"type": "uint256"
+			}
+		],
+		"name": "transferFrom",
+		"outputs": [
+			{
+				"internalType": "bool",
+				"name": "",
+				"type": "bool"
+			}
+		],
+		"stateMutability": "nonpayable",
+		"type": "function"
 	},
 	{
 		"anonymous": false,
@@ -315,79 +478,6 @@ const (
 		],
 		"name": "mintToken",
 		"type": "event"
-	},
-	{
-		"inputs": [],
-		"name": "renounceOwnership",
-		"outputs": [],
-		"stateMutability": "nonpayable",
-		"type": "function"
-	},
-	{
-		"inputs": [
-			{
-				"internalType": "contract LightClient",
-				"name": "addr",
-				"type": "address"
-			}
-		],
-		"name": "setProver",
-		"outputs": [],
-		"stateMutability": "nonpayable",
-		"type": "function"
-	},
-	{
-		"inputs": [
-			{
-				"internalType": "address",
-				"name": "to",
-				"type": "address"
-			},
-			{
-				"internalType": "uint256",
-				"name": "amount",
-				"type": "uint256"
-			}
-		],
-		"name": "transfer",
-		"outputs": [
-			{
-				"internalType": "bool",
-				"name": "",
-				"type": "bool"
-			}
-		],
-		"stateMutability": "nonpayable",
-		"type": "function"
-	},
-	{
-		"inputs": [
-			{
-				"internalType": "address",
-				"name": "from",
-				"type": "address"
-			},
-			{
-				"internalType": "address",
-				"name": "to",
-				"type": "address"
-			},
-			{
-				"internalType": "uint256",
-				"name": "amount",
-				"type": "uint256"
-			}
-		],
-		"name": "transferFrom",
-		"outputs": [
-			{
-				"internalType": "bool",
-				"name": "",
-				"type": "bool"
-			}
-		],
-		"stateMutability": "nonpayable",
-		"type": "function"
 	},
 	{
 		"inputs": [

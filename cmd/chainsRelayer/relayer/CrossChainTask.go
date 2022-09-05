@@ -3,10 +3,21 @@ package relayer
 import (
 	"context"
 	"fmt"
-	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/log"
 	"time"
 )
+
+func SendMintNativeTxToWeb3Q(ethChainOperator *ChainOperator, w3qChainOperator *ChainOperator, ethTxHappened uint64) *CrossChainCallTask {
+	return NewCrossChainCallTask(w3qChainOperator.Ctx, ethChainOperator, w3qChainOperator, true, make(chan struct{}), ethChainOperator.waitingExpectHeight, ethTxHappened+10)
+}
+
+func SendTxToEthereum(ethChainOperator *ChainOperator, w3qChainOperator *ChainOperator) *CrossChainCallTask {
+	return NewCrossChainCallTask(ethChainOperator.Ctx, w3qChainOperator, ethChainOperator, false, nil, nil, 0)
+}
+
+func SendTxToWeb3q(ethChainOperator *ChainOperator, w3qChainOperator *ChainOperator) *CrossChainCallTask {
+	return NewCrossChainCallTask(ethChainOperator.Ctx, ethChainOperator, w3qChainOperator, false, nil, nil, 0)
+}
 
 // 是否需要一个在监听到某个区块之后去执行的taskPool
 // 将mintNative的执行过程封装成另外一种task
@@ -30,14 +41,16 @@ func NewCrossChainCallTask(ctx context.Context, srcChainOperator *ChainOperator,
 	return &CrossChainCallTask{ctx: ctx, srcChainOperator: srcChainOperator, dstChainOperator: dstChainOperator, delay: delay, delayChan: delayChan, delayFunc: delayFunc, ExpectHeightOnETH: ethTxHappened + 10}
 }
 
-func (c *CrossChainCallTask) Doing(tx *types.Transaction) error {
+func (c *CrossChainCallTask) Doing(tx *txArg) error {
 	if c.delay {
 		go c.delayFunc(c.delayChan, c.ExpectHeightOnETH)
 		<-c.delayChan
-		return c.dstChainOperator.Executor.SendTransaction(c.ctx, tx)
+		c.dstChainOperator.SendTxArg(tx)
 	} else {
-		return c.dstChainOperator.Executor.SendTransaction(c.ctx, tx)
+		c.dstChainOperator.SendTxArg(tx)
 	}
+
+	return nil
 }
 
 func (c *ChainOperator) waitingExpectHeight(delay chan struct{}, expectHeight uint64) error {

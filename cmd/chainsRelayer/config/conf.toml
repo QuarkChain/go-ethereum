@@ -1,0 +1,29 @@
+# This is a TOML document.
+
+title = "TOML Example"
+
+[web3q]
+KeyStoreFilePath = "/Users/chenyanlong/Work/go-ethereum/cmd/geth/data_val_0/keystore/UTC--2022-06-07T04-15-42.696295000Z--96f22a48dcd4dfb99a11560b24bee02f374ca77d"
+passwd = "123"
+rpcUrl = "http://127.0.0.1:8545"
+wsUrl = "ws://127.0.0.1:8546"
+blockTime = 6
+dbFile = ""
+
+[ethereum]
+KeyStoreFilePath = "/Users/chenyanlong/Work/go-ethereum/cmd/geth/data_val_0/keystore/UTC--2022-06-07T04-15-42.696295000Z--96f22a48dcd4dfb99a11560b24bee02f374ca77d"
+passwd = "123"
+rpcUrl = "https://rinkeby.infura.io/v3/4e3e18f80d8d4ad5959b7404e85e0143"
+wsUrl = "wss://rinkeby.infura.io/ws/v3/4e3e18f80d8d4ad5959b7404e85e0143"
+blockTime = 6
+dbFile = ""
+
+[contract]
+w3qNativeContract = "0x0000000000000000000000000000000003330002"
+lightClientContract = "0xF2C3BcFB4873f2BcA6fC5622612a5521fF788272"
+w3qERC20Contract = "0x7EA6206543bB4E1EC251061Dd346b5D96DacB4Ed"
+
+[log]
+logFile = ""
+logLevel = 5
+useColor = true
