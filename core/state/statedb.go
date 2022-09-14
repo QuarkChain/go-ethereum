@@ -182,7 +182,7 @@ func (s *StateDB) SstorageWrite(addr common.Address, kvIdx uint64, data []byte) 
 	return nil
 }
 
-func (s *StateDB) SstorageRead(addr common.Address, kvIdx uint64, readLen int) ([]byte, bool, error) {
+func (s *StateDB) SstorageRead(addr common.Address, kvIdx uint64, readLen int, hash common.Hash) ([]byte, bool, error) {
 	if readLen > int(s.SstorageMaxKVSize(addr)) {
 		return nil, false, fmt.Errorf("readLen too large")
 	}
@@ -196,7 +196,7 @@ func (s *StateDB) SstorageRead(addr common.Address, kvIdx uint64, readLen int) (
 		}
 	}
 
-	return s.db.TrieDB().SstorageRead(addr, kvIdx, readLen)
+	return s.db.TrieDB().SstorageRead(addr, kvIdx, readLen, hash)
 }
 
 // StartPrefetcher initializes a new trie prefetcher to pull in nodes from the

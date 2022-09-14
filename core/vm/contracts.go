@@ -367,7 +367,7 @@ func (c *bigModExp) RequiredGas(input []byte) uint64 {
 		// def mult_complexity(x):
 		//    ceiling(x/8)^2
 		//
-		//where is x is max(length_of_MODULUS, length_of_BASE)
+		// where is x is max(length_of_MODULUS, length_of_BASE)
 		gas = gas.Add(gas, big7)
 		gas = gas.Div(gas, big8)
 		gas.Mul(gas, gas)
@@ -758,11 +758,11 @@ func (l *sstoragePisa) RunWith(env *PrecompiledContractCallEnv, input []byte) ([
 			return nil, errors.New("getRaw() must be called in JSON RPC")
 		}
 		// TODO: check hash correctness
-		// hash := new(big.Int).SetBytes(getData(input, 4, 4+32))
+		hash := common.BytesToHash(getData(input, 4, 4+32))
 		kvIdx := new(big.Int).SetBytes(getData(input, 4+32, 32)).Uint64()
 		kvOff := new(big.Int).SetBytes(getData(input, 4+64, 32)).Uint64()
 		kvLen := new(big.Int).SetBytes(getData(input, 4+96, 32)).Uint64()
-		fb, ok, err := evm.StateDB.SstorageRead(caller, kvIdx, int(kvLen+kvOff))
+		fb, ok, err := evm.StateDB.SstorageRead(caller, kvIdx, int(kvLen+kvOff), hash)
 		if err != nil {
 			return nil, err
 		}

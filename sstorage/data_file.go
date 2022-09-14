@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/log"
 )
@@ -119,38 +120,26 @@ func (df *DataFile) ChunkIdxEnd() uint64 {
 	return df.chunkIdxStart + df.chunkIdxLen
 }
 
-// Reads the raw data without unmasking
-func (df *DataFile) ReadMasked(chunkIdx uint64) ([]byte, error) {
+func (df *DataFile) Read(chunkIdx uint64, len int, hash common.Hash, isMasked bool) ([]byte, error) {
 	if !df.Contains(chunkIdx) {
 		return nil, fmt.Errorf("chunk not found")
 	}
-	md := make([]byte, CHUNK_SIZE)
+	md := make([]byte, len)
 	n, err := df.file.ReadAt(md, int64(chunkIdx+1)*int64(CHUNK_SIZE))
-	if err != nil {
-		return nil, err
-	}
-	if n != int(CHUNK_SIZE) {
-		return nil, fmt.Errorf("not full read")
-	}
-	return md, nil
-}
-
-func (df *DataFile) ReadUnmasked(chunkIdx uint64, len int) ([]byte, error) {
-	if !df.Contains(chunkIdx) {
-		return nil, fmt.Errorf("chunk not found")
-	}
-	ud := make([]byte, len)
-	n, err := df.file.ReadAt(ud, int64(chunkIdx+1)*int64(CHUNK_SIZE))
 	if err != nil {
 		return nil, err
 	}
 	if n != len {
 		return nil, fmt.Errorf("not full read")
 	}
-	return UnmaskDataInPlace(ud, getMaskData(chunkIdx, df.maskType)), nil
+	if isMasked {
+		return md, nil
+	} else {
+		return UnmaskDataInPlace(md, getMaskData(chunkIdx, df.maskType)), nil
+	}
 }
 
-func (df *DataFile) WriteUnmasked(chunkIdx uint64, b []byte) error {
+func (df *DataFile) Write(chunkIdx uint64, b []byte, isMasked bool) error {
 	if !df.Contains(chunkIdx) {
 		return fmt.Errorf("chunk not found")
 	}
@@ -159,8 +148,12 @@ func (df *DataFile) WriteUnmasked(chunkIdx uint64, b []byte) error {
 		return fmt.Errorf("write data too large")
 	}
 
-	md := MaskDataInPlace(getMaskData(chunkIdx, df.maskType), b)
-	_, err := df.file.WriteAt(md, int64(chunkIdx+1)*int64(CHUNK_SIZE))
+	if isMasked {
+		b = MaskDataInPlace(getMaskData(chunkIdx, df.maskType), b)
+	} else {
+
+	}
+	_, err := df.file.WriteAt(b, int64(chunkIdx+1)*int64(CHUNK_SIZE))
 	return err
 }
 

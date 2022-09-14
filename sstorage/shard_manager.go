@@ -57,16 +57,65 @@ func (sm *ShardManager) AddDataFile(df *DataFile) error {
 func (sm *ShardManager) TryWrite(kvIdx uint64, b []byte) (bool, error) {
 	shardIdx := kvIdx / sm.kvEntries
 	if ds, ok := sm.shardMap[shardIdx]; ok {
-		return true, ds.WriteUnmasked(kvIdx, b)
+		return true, ds.Write(kvIdx, b, false)
 	} else {
 		return false, nil
 	}
 }
 
-func (sm *ShardManager) TryRead(kvIdx uint64, readLen int) ([]byte, bool, error) {
+func (sm *ShardManager) TryRead(kvIdx uint64, readLen int, hash common.Hash) ([]byte, bool, error) {
 	shardIdx := kvIdx / sm.kvEntries
 	if ds, ok := sm.shardMap[shardIdx]; ok {
-		b, err := ds.ReadUnmasked(kvIdx, readLen)
+		b, err := ds.Read(kvIdx, readLen, hash, false)
+		return b, true, err
+	} else {
+		return nil, false, nil
+	}
+}
+
+func (sm *ShardManager) UnmaskKV(kvIdx uint64, b []byte, hash common.Hash) ([]byte, bool, error) {
+	shardIdx := kvIdx / sm.kvEntries
+	var data []byte
+	if ds, ok := sm.shardMap[shardIdx]; ok {
+		datalen := len(b)
+		for i := uint64(0); i < ds.chunksPerKv; i++ {
+			if datalen == 0 {
+				break
+			}
+
+			chunkReadLen := datalen
+			if chunkReadLen > int(CHUNK_SIZE) {
+				chunkReadLen = int(CHUNK_SIZE)
+			}
+			datalen = datalen - chunkReadLen
+
+			chunkIdx := ds.ChunkIdx() + kvIdx*ds.chunksPerKv + i
+			df := ds.GetStorageFile(chunkIdx)
+			if df == nil {
+				return nil, false, fmt.Errorf("Cannot find storage file for chunkIdx", "chunkIdx", chunkIdx)
+			}
+			cdata := UnmaskDataInPlace(b[i*CHUNK_SIZE:i*CHUNK_SIZE+uint64(chunkReadLen)], getMaskData(chunkIdx, df.maskType))
+			data = append(data, cdata...)
+		}
+		return data, true, nil
+	} else {
+		return nil, false, fmt.Errorf("Cannot find storage shard for kvIdx", "kvIdx", kvIdx)
+	}
+}
+
+func (sm *ShardManager) TryWriteMaskedKV(kvIdx uint64, b []byte) (bool, error) {
+	shardIdx := kvIdx / sm.kvEntries
+	if ds, ok := sm.shardMap[shardIdx]; ok {
+		return true, ds.Write(kvIdx, b, true)
+	} else {
+		return false, nil
+	}
+}
+
+func (sm *ShardManager) TryReadMaskedKV(kvIdx uint64, hash common.Hash) ([]byte, bool, error) {
+	shardIdx := kvIdx / sm.kvEntries
+	if ds, ok := sm.shardMap[shardIdx]; ok {
+		b, err := ds.Read(kvIdx, int(ds.kvSize), hash, true) // read all the data
 		return b, true, err
 	} else {
 		return nil, false, nil
