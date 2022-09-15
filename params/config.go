@@ -559,9 +559,6 @@ type TendermintConfig struct {
 }
 
 type ExternalCallConfig struct {
-	//Role 0 : ExternalCall disable
-	//Role 1 : Node reuses the consensus client as externalCallClient(the callRpc is not empty)
-	//Role 2 : Node without externalCallClient
 	EnableBlockNumber *big.Int `json:"enableBlockNumber"`
 	Version           uint64   `json:"version"`
 	SupportChainId    uint64   `json:"supportChainId"`
