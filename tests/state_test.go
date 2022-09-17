@@ -20,6 +20,7 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -256,7 +257,9 @@ func runBenchmark(b *testing.B, t *StateTest) {
 	}
 }
 
-var web3QStateTestDir = filepath.Join(baseDir, "Web3QTest")
+//var web3QStateTestDir = filepath.Join(baseDir, "Web3QTest/ExternalCall/")
+
+var web3QStateTestDir = filepath.Join(baseDir, "Web3QTest/")
 
 func TestWeb3QState(t *testing.T) {
 	t.Parallel()
@@ -271,13 +274,86 @@ func TestWeb3QState(t *testing.T) {
 				subtest := subtest
 				key := fmt.Sprintf("%s%d", subtest.Fork, subtest.Index)
 				t.Run(key+"/trie", func(t *testing.T) {
-					config := vm.Config{}
-					_, db, err := test.Run(subtest, config, false)
-					err = st.checkFailure(t, err)
+					vmconfig := vm.Config{}
+
+					config, eips, err := GetChainConfig(subtest.Fork)
 					if err != nil {
-						printStateTrie(db, test, t)
 						t.Error(err)
+						return
 					}
+					vmconfig.ExtraEips = eips
+
+					block := test.genesis(config).ToBlock(nil)
+					_, statedb := MakePreState(rawdb.NewMemoryDatabase(), test.json.Pre, false)
+
+					var baseFee *big.Int
+					if config.IsLondon(new(big.Int)) {
+						baseFee = test.json.Env.BaseFee
+						if baseFee == nil {
+							// Retesteth uses `0x10` for genesis baseFee. Therefore, it defaults to
+							// parent - 2 : 0xa as the basefee for 'this' context.
+							baseFee = big.NewInt(0x0a)
+						}
+					}
+					post := test.json.Post[subtest.Fork][subtest.Index]
+					msg, err := test.json.Tx.toMessage(post, baseFee)
+					if err != nil {
+						t.Error(err)
+						return
+					}
+
+					// Try to recover tx with current signer
+					if len(post.TxBytes) != 0 {
+						var ttx types.Transaction
+						err := ttx.UnmarshalBinary(post.TxBytes)
+						if err != nil {
+							t.Error(err)
+							return
+						}
+
+						if _, err := types.Sender(types.LatestSigner(config), &ttx); err != nil {
+							t.Error(err)
+							return
+						}
+					}
+
+					// Prepare the EVM.
+
+					txContext := core.NewEVMTxContext(msg)
+					context := core.NewEVMBlockContext(block.Header(), nil, &test.json.Env.Coinbase)
+					context.GetHash = vmTestBlockHash
+					context.BaseFee = baseFee
+
+					eClient, err := ethclient.Dial("https://rinkeby.infura.io/v3/4e3e18f80d8d4ad5959b7404e85e0143")
+					if err != nil {
+						panic(err)
+					}
+
+					vmconfig.ExternalCallClient = eClient
+					evm := vm.NewEVM(context, txContext, statedb, config, vmconfig)
+
+					// Execute the message.
+					snapshot := statedb.Snapshot()
+					gaspool := new(core.GasPool)
+					gaspool.AddGas(block.GasLimit())
+
+					_, err = core.ApplyMessage(evm, msg, gaspool)
+					if err != nil {
+						t.Error("EVM ERROR:", err)
+						statedb.RevertToSnapshot(snapshot)
+						printStateTrie(statedb, test, t)
+					}
+					//t.Log("evm call result:", common.Bytes2Hex(res.ReturnData))
+					// Commit block
+					statedb.Commit(config.IsEIP158(block.Number()))
+					statedb.AddBalance(block.Coinbase(), new(big.Int))
+					root := statedb.IntermediateRoot(config.IsEIP158(block.Number()))
+
+					if root != common.Hash(post.Root) {
+						t.Error(fmt.Errorf("post state root mismatch: got %x, want %x", root, post.Root))
+						printStateTrie(statedb, test, t)
+					}
+
 				})
 			}
 		})

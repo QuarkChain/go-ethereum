@@ -20,6 +20,7 @@ package eth
 import (
 	"errors"
 	"fmt"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"math/big"
 	"runtime"
 	"sync"
@@ -58,6 +59,11 @@ import (
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/rpc"
+)
+
+const (
+	NodeWithExternalCallClient    = 1
+	NodeWithoutExternalCallClient = 2
 )
 
 // Config contains the configuration options of the ETH protocol.
@@ -169,8 +175,33 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		}
 	}
 
-	log.Info("Initialised chain configuration", "config", chainConfig)
+	var externalCallClient *ethclient.Client
+	if chainConfig.ExternalCall != nil {
+		if config.ExternalCallSupportChainId != 0 {
+			chainConfig.ExternalCall.SupportChainId = config.ExternalCallSupportChainId
+		}
+		if config.ExternalCallRpc != "" {
+			chainConfig.ExternalCall.CallRpc = config.ExternalCallRpc
+		}
 
+		if config.ExternalCallEnableBlockNumber != nil {
+			chainConfig.ExternalCall.EnableBlockNumber = config.ExternalCallEnableBlockNumber
+		}
+
+		if chainConfig.ExternalCall.EnableBlockNumber != nil {
+			// initialize external call client
+			externalCallClient, err = ethclient.Dial(chainConfig.ExternalCall.CallRpc)
+			if err != nil {
+				log.Error("Failed to initialize externalCallClient", "error", err)
+				return nil, err
+			}
+		}
+
+		if chainConfig.ExternalCall.EnableBlockNumber != nil && config.IsMiner && externalCallClient == nil {
+			return nil, fmt.Errorf("VALIDATOR role must have an active external_call_client When CHAIN supports EXTERNAL_CALL")
+		}
+
+	}
 	if err := pruner.RecoverPruning(stack.ResolvePath(""), chainDb, stack.ResolvePath(config.TrieCleanCacheJournal)); err != nil {
 		log.Error("Failed to recover state", "error", err)
 	}
@@ -210,8 +241,10 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		}
 	}
 	var (
-		vmConfig = vm.Config{
+		vmConfig = &vm.Config{
 			EnablePreimageRecording: config.EnablePreimageRecording,
+			// set up the externalCall config
+			ExternalCallClient: externalCallClient,
 		}
 		cacheConfig = &core.CacheConfig{
 			TrieCleanLimit:      config.TrieCleanCache,
@@ -225,10 +258,11 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			Preimages:           config.Preimages,
 		}
 	)
-	eth.blockchain, err = core.NewBlockChain(chainDb, cacheConfig, chainConfig, eth.engine, vmConfig, eth.shouldPreserve, &config.TxLookupLimit)
+	eth.blockchain, err = core.NewBlockChain(chainDb, cacheConfig, chainConfig, eth.engine, *vmConfig, eth.shouldPreserve, &config.TxLookupLimit)
 	if err != nil {
 		return nil, err
 	}
+
 	// Rewind the chain in case of an incompatible config upgrade.
 	if compat, ok := genesisErr.(*params.ConfigCompatError); ok {
 		log.Warn("Rewinding chain to upgrade configuration", "err", compat)

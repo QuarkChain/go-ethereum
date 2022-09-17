@@ -91,10 +91,11 @@ type environment struct {
 	gasPool       *core.GasPool  // available gas used to pack transactions
 	coinbase      common.Address
 
-	header   *types.Header
-	txs      []*types.Transaction
-	receipts []*types.Receipt
-	uncles   map[common.Hash]*types.Header
+	header     *types.Header
+	txs        []*types.Transaction
+	receipts   []*types.Receipt
+	uncles     map[common.Hash]*types.Header
+	sortUncles []common.Hash
 }
 
 // copy creates a deep copy of environment.
@@ -122,15 +123,20 @@ func (env *environment) copy() *environment {
 	for hash, uncle := range env.uncles {
 		cpy.uncles[hash] = uncle
 	}
+	cpy.sortUncles = make([]common.Hash, len(env.sortUncles))
+	copy(cpy.sortUncles, env.sortUncles)
+
 	return cpy
 }
 
 // unclelist returns the contained uncles as the list format.
 func (env *environment) unclelist() []*types.Header {
 	var uncles []*types.Header
-	for _, uncle := range env.uncles {
-		uncles = append(uncles, uncle)
+
+	for _, uncleHash := range env.sortUncles {
+		uncles = append(uncles, env.uncles[uncleHash])
 	}
+
 	return uncles
 }
 
@@ -829,6 +835,20 @@ func (w *worker) commitUncle(env *environment, uncle *types.Header) error {
 	return nil
 }
 
+// commitUncleDirectly is used when submitting cross_chain_call_result
+func (w *worker) commitUncleDirectly(env *environment, uncle *types.Header) error {
+	hash := uncle.Hash()
+	if _, exist := env.uncles[hash]; exist {
+		return errors.New("uncle not unique")
+	}
+	env.uncles[hash] = uncle
+	if env.sortUncles == nil {
+		env.sortUncles = make([]common.Hash, 0)
+	}
+	env.sortUncles = append(env.sortUncles, hash)
+	return nil
+}
+
 // updateSnapshot updates pending snapshot block, receipts and state.
 func (w *worker) updateSnapshot(env *environment) {
 	w.snapshotMu.Lock()
@@ -848,11 +868,34 @@ func (w *worker) updateSnapshot(env *environment) {
 func (w *worker) commitTransaction(env *environment, tx *types.Transaction) ([]*types.Log, error) {
 	snap := env.state.Snapshot()
 
-	receipt, err := core.ApplyTransaction(w.chainConfig, w.chain, &env.coinbase, env.gasPool, env.state, env.header, tx, &env.header.GasUsed, *w.chain.GetVMConfig())
+	evmConfig := *w.chain.GetVMConfig()
+	// the evmConfig is the pointer of blockchain.evmConfig, so the externalCallClient maintains one instance of externalCallClient.
+	if w.chainConfig.ExternalCall.EnableBlockNumber != nil && env.header.Number.Cmp(w.chainConfig.ExternalCall.EnableBlockNumber) != -1 {
+		if evmConfig.ExternalCallClient == nil {
+			panic(fmt.Errorf("worker: the external_call_client from blockchain.evmConfig is nil"))
+		}
+	}
+
+	receipt, crossChainCallResult, err := core.ApplyTransaction(w.chainConfig, w.chain, &env.coinbase, env.gasPool, env.state, env.header, tx, &env.header.GasUsed, evmConfig)
 	if err != nil {
+		log.Debug("worker: transaction happen error", "txHash", tx.Hash().Hex(), "err", err.Error())
 		env.state.RevertToSnapshot(snap)
 		return nil, err
 	}
+
+	if len(crossChainCallResult) != 0 {
+		uncle := &types.Header{
+			Number: big.NewInt(int64(len(env.txs))),
+			TxHash: tx.Hash(),
+			Extra:  crossChainCallResult,
+		}
+		err = w.commitUncleDirectly(env, uncle)
+		if err != nil {
+			return nil, err
+		}
+		log.Debug("worker: transaction with cross_chain_call_result", "txIndex", len(env.txs), "txHash", tx.Hash().Hex(), "cross_chain_result", common.Bytes2Hex(crossChainCallResult))
+	}
+
 	env.txs = append(env.txs, tx)
 	env.receipts = append(env.receipts, receipt)
 

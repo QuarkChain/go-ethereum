@@ -257,8 +257,10 @@ var (
 	}
 
 	Web3QTestnetValBootnodes = []string{
-		"/ip4/68.183.157.114/udp/33333/quic/p2p/12D3KooWEZ94qZgJgUNYiLwXahknkniYgozxw5eocijZJkew6Mj5",
-		"/ip4/128.199.102.174/udp/33333/quic/p2p/12D3KooWNjKALie7Cdpb4KG8axgABA4VCCsKoBQdvYvRhVZhbtPk",
+		//"/ip4/68.183.157.114/udp/33333/quic/p2p/12D3KooWEZ94qZgJgUNYiLwXahknkniYgozxw5eocijZJkew6Mj5",
+		//"/ip4/128.199.102.174/udp/33333/quic/p2p/12D3KooWNjKALie7Cdpb4KG8axgABA4VCCsKoBQdvYvRhVZhbtPk",
+		"/ip4/127.0.0.1/udp/33333/quic/p2p/12D3KooWEZ94qZgJgUNYiLwXahknkniYgozxw5eocijZJkew6Mj5",
+		"/ip4/127.0.0.1/udp/33334/quic/p2p/12D3KooWRAPv94qoUn8dAa3NQpZGKjaBcdiaqCETrcuyo2rT2ZvV",
 	}
 
 	// Web3QTestnetChainConfig contains the chain parameters to run a node on the Web3Q test network.
@@ -277,9 +279,10 @@ var (
 		MuirGlacierBlock:    nil,
 		BerlinBlock:         big.NewInt(0),
 		LondonBlock:         big.NewInt(0),
+		PisaBlock:           big.NewInt(0),
 		ArrowGlacierBlock:   nil,
 		Tendermint: &TendermintConfig{
-			Epoch:                  1000,
+			Epoch:                  100800, // expect 6s block interval = one week
 			ValidatorContract:      "",
 			ContractChainID:        0,
 			ValidatorChangeEpochId: 0,
@@ -303,6 +306,12 @@ var (
 				DoubleSignCheckHeight:        uint64(0),
 				ConsensusSyncRequestDuration: 500 * time.Millisecond,
 			},
+		},
+		ExternalCall: &ExternalCallConfig{
+			EnableBlockNumber: big.NewInt(0),
+			Version:           1,
+			SupportChainId:    4,
+			CallRpc:           "https://rinkeby.infura.io/v3/4e3e18f80d8d4ad5959b7404e85e0143",
 		},
 	}
 
@@ -386,7 +395,7 @@ var (
 	//
 	// This configuration is intentionally not using keyed fields to force anyone
 	// adding flags to the config to also have to set these fields.
-	AllEthashProtocolChanges = &ChainConfig{big.NewInt(1337), big.NewInt(0), nil, false, big.NewInt(0), common.Hash{}, big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), nil, nil, nil, new(EthashConfig), nil, nil}
+	AllEthashProtocolChanges = &ChainConfig{big.NewInt(1337), big.NewInt(0), nil, false, big.NewInt(0), common.Hash{}, big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), nil, nil, nil, new(EthashConfig), nil, nil, nil}
 
 	// AllCliqueProtocolChanges contains every protocol change (EIPs) introduced
 	// and accepted by the Ethereum core developers into the Clique consensus.
@@ -418,8 +427,13 @@ var (
 		Tendermint:              nil,
 	}
 
-	TestChainConfig = &ChainConfig{big.NewInt(1), big.NewInt(0), nil, false, big.NewInt(0), common.Hash{}, big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), nil, nil, nil, new(EthashConfig), nil, nil}
-	TestRules       = TestChainConfig.Rules(new(big.Int), false)
+	TestChainConfig = &ChainConfig{big.NewInt(1), big.NewInt(0), nil, false, big.NewInt(0), common.Hash{}, big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), big.NewInt(0), nil, big.NewInt(0), nil, new(EthashConfig), nil, nil, &ExternalCallConfig{
+		big.NewInt(0),
+		1,
+		4,
+		"https://rinkeby.infura.io/v3/4e3e18f80d8d4ad5959b7404e85e0143",
+	}}
+	TestRules = TestChainConfig.Rules(new(big.Int), false)
 )
 
 // TrustedCheckpoint represents a set of post-processed trie roots (CHT and
@@ -510,6 +524,9 @@ type ChainConfig struct {
 	Ethash     *EthashConfig     `json:"ethash,omitempty"`
 	Clique     *CliqueConfig     `json:"clique,omitempty"`
 	Tendermint *TendermintConfig `json:"tendermint,omitempty"`
+
+	// external call config
+	ExternalCall *ExternalCallConfig `json:"externalCall,omitempty"`
 }
 
 // EthashConfig is the consensus engine configs for proof-of-work based sealing.
@@ -539,6 +556,18 @@ type TendermintConfig struct {
 	NodeName               string
 	ProposerRepetition     uint64
 	ConsensusConfig        ConsensusConfig
+}
+
+type ExternalCallConfig struct {
+	EnableBlockNumber *big.Int `json:"enableBlockNumber"`
+	Version           uint64   `json:"version"`
+	SupportChainId    uint64   `json:"supportChainId"`
+	CallRpc           string   `json:"callRpc"`
+}
+
+// String implements the stringer interface
+func (c *ExternalCallConfig) String() string {
+	return "externalCallConfig"
 }
 
 // String implements the stringer interface, returning the consensus engine details.

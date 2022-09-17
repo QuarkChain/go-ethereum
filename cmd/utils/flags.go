@@ -198,6 +198,18 @@ var (
 		Name:  "validator.rpc",
 		Usage: "rpc for Validator to update validator set",
 	}
+	ExternalCallEnableBlockNumber = cli.StringFlag{
+		Name:  "externalcall.enableblocknumber",
+		Usage: "define in which blockNumber the externalCall is supported",
+	}
+	ExternalCallRpcFlag = cli.StringFlag{
+		Name:  "externalcall.callrpc",
+		Usage: "rpc to launch independent external call client",
+	}
+	ExternalCallSupportChainId = cli.Uint64Flag{
+		Name:  "externalcall.supportchainid",
+		Usage: "chainId of the target chain of the external call",
+	}
 	DeveloperFlag = cli.BoolFlag{
 		Name:  "dev",
 		Usage: "Ephemeral proof-of-authority network with a pre-funded developer account, mining enabled",
@@ -1495,6 +1507,25 @@ func setTendermint(ctx *cli.Context, cfg *ethconfig.Config) {
 	}
 }
 
+func setExternalCall(ctx *cli.Context, cfg *ethconfig.Config) {
+	if ctx.GlobalIsSet(MiningEnabledFlag.Name) {
+		cfg.IsMiner = true
+	}
+
+	if ctx.GlobalIsSet(ExternalCallEnableBlockNumber.Name) {
+		cfg.ExternalCallEnableBlockNumber.SetString(ctx.GlobalString(ExternalCallEnableBlockNumber.Name), 10)
+	}
+
+	if ctx.GlobalIsSet(ExternalCallRpcFlag.Name) {
+		cfg.ExternalCallRpc = ctx.GlobalString(ExternalCallRpcFlag.Name)
+	}
+
+	if ctx.GlobalIsSet(ExternalCallSupportChainId.Name) {
+		cfg.ExternalCallSupportChainId = ctx.GlobalUint64(ExternalCallSupportChainId.Name)
+	}
+
+}
+
 func setMiner(ctx *cli.Context, cfg *miner.Config) {
 	if ctx.GlobalIsSet(MinerNotifyFlag.Name) {
 		cfg.Notify = strings.Split(ctx.GlobalString(MinerNotifyFlag.Name), ",")
@@ -1606,6 +1637,7 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	setTxPool(ctx, &cfg.TxPool)
 	setEthash(ctx, cfg)
 	setTendermint(ctx, cfg)
+	setExternalCall(ctx, cfg)
 	setMiner(ctx, &cfg.Miner)
 	setWhitelist(ctx, cfg)
 	setLes(ctx, cfg)

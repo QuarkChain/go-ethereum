@@ -218,6 +218,12 @@ type Config struct {
 	ValChainId             uint64
 	ValidatorChangeEpochId uint64
 
+	// ExternalCall config
+	IsMiner                       bool
+	ExternalCallEnableBlockNumber *big.Int
+	ExternalCallSupportChainId    uint64
+	ExternalCallRpc               string
+
 	// Sstorage config
 	SstorageFiles  []string `toml:",omitempty"`
 	SstorageShards []string `toml:",omitempty"`

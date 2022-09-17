@@ -59,6 +59,7 @@ func (v *BlockValidator) ValidateBody(block *types.Block) error {
 	if err := v.engine.VerifyUncles(v.bc, block); err != nil {
 		return err
 	}
+	// The process of verifying uncleHash actually verifies all external call results in this block
 	if hash := types.CalcUncleHash(block.Uncles()); hash != header.UncleHash {
 		return fmt.Errorf("uncle root hash mismatch: have %x, want %x", hash, header.UncleHash)
 	}

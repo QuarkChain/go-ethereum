@@ -273,11 +273,31 @@ func (ec *Client) TransactionInBlock(ctx context.Context, blockHash common.Hash,
 	return json.tx, err
 }
 
+type ExternalCallResult struct {
+	BlockHash          common.Hash `json:"blockHash"`
+	BlockNumber        uint64      `json:"blockNumber"`
+	TxHash             common.Hash `json:"transactionHash"`
+	TxIndex            uint64      `json:"transactionIndex"`
+	ExternalCallResult []byte      `json:"externalCallResult"`
+}
+
 // TransactionReceipt returns the receipt of a transaction by transaction hash.
 // Note that the receipt is not available for pending transactions.
 func (ec *Client) TransactionReceipt(ctx context.Context, txHash common.Hash) (*types.Receipt, error) {
 	var r *types.Receipt
 	err := ec.c.CallContext(ctx, &r, "eth_getTransactionReceipt", txHash)
+	if err == nil {
+		if r == nil {
+			return nil, ethereum.NotFound
+		}
+	}
+	return r, err
+}
+
+// ExternalCallREsult returns the externalCallResult for the given transaction hash
+func (ec *Client) ExternalCallResult(ctx context.Context, txHash common.Hash) (*ExternalCallResult, error) {
+	var r *ExternalCallResult
+	err := ec.c.CallContext(ctx, &r, "eth_getExternalCallResult", txHash)
 	if err == nil {
 		if r == nil {
 			return nil, ethereum.NotFound

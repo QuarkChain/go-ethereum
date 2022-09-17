@@ -916,23 +916,32 @@ func DoCall(ctx context.Context, b Backend, args TransactionArgs, blockNrOrHash 
 	if err != nil {
 		return nil, err
 	}
-	evm, vmError, err := b.GetEVM(ctx, msg, state, header, &vm.Config{NoBaseFee: true, IsJsonRpc: true})
+
+	// GetEvm will return the external_call_client within evmConfig when the input of evmConfig is nil
+	evm, vmError, err := b.GetEVM(ctx, msg, state, header, nil)
 	if err != nil {
 		return nil, err
 	}
+	if evm.Config.ExternalCallClient == nil && evm.EnableExternalCall() {
+		return nil, fmt.Errorf("DoCall must matain a active external_call_client when external call is active")
+	}
+	evm.Config.NoBaseFee = true
+	evm.Config.IsJsonRpc = true
+
 	// Wait for the context to be done and cancel the evm. Even if the
 	// EVM has finished, cancelling may be done (repeatedly)
 	go func() {
 		<-ctx.Done()
 		evm.Cancel()
 	}()
-
 	// Execute the message.
 	gp := new(core.GasPool).AddGas(math.MaxUint64)
 	result, err := core.ApplyMessage(evm, msg, gp)
 	if err := vmError(); err != nil {
 		return nil, err
 	}
+
+	// todo: deal with cross chain call result
 
 	// If the timer caused an abort, return an appropriate error message
 	if evm.Cancelled() {
@@ -1276,25 +1285,26 @@ func (s *PublicBlockChainAPI) rpcMarshalBlock(ctx context.Context, b *types.Bloc
 
 // RPCTransaction represents a transaction that will serialize to the RPC representation of a transaction
 type RPCTransaction struct {
-	BlockHash        *common.Hash      `json:"blockHash"`
-	BlockNumber      *hexutil.Big      `json:"blockNumber"`
-	From             common.Address    `json:"from"`
-	Gas              hexutil.Uint64    `json:"gas"`
-	GasPrice         *hexutil.Big      `json:"gasPrice"`
-	GasFeeCap        *hexutil.Big      `json:"maxFeePerGas,omitempty"`
-	GasTipCap        *hexutil.Big      `json:"maxPriorityFeePerGas,omitempty"`
-	Hash             common.Hash       `json:"hash"`
-	Input            hexutil.Bytes     `json:"input"`
-	Nonce            hexutil.Uint64    `json:"nonce"`
-	To               *common.Address   `json:"to"`
-	TransactionIndex *hexutil.Uint64   `json:"transactionIndex"`
-	Value            *hexutil.Big      `json:"value"`
-	Type             hexutil.Uint64    `json:"type"`
-	Accesses         *types.AccessList `json:"accessList,omitempty"`
-	ChainID          *hexutil.Big      `json:"chainId,omitempty"`
-	V                *hexutil.Big      `json:"v"`
-	R                *hexutil.Big      `json:"r"`
-	S                *hexutil.Big      `json:"s"`
+	BlockHash          *common.Hash      `json:"blockHash"`
+	BlockNumber        *hexutil.Big      `json:"blockNumber"`
+	From               common.Address    `json:"from"`
+	Gas                hexutil.Uint64    `json:"gas"`
+	GasPrice           *hexutil.Big      `json:"gasPrice"`
+	GasFeeCap          *hexutil.Big      `json:"maxFeePerGas,omitempty"`
+	GasTipCap          *hexutil.Big      `json:"maxPriorityFeePerGas,omitempty"`
+	Hash               common.Hash       `json:"hash"`
+	Input              hexutil.Bytes     `json:"input"`
+	Nonce              hexutil.Uint64    `json:"nonce"`
+	To                 *common.Address   `json:"to"`
+	TransactionIndex   *hexutil.Uint64   `json:"transactionIndex"`
+	Value              *hexutil.Big      `json:"value"`
+	Type               hexutil.Uint64    `json:"type"`
+	Accesses           *types.AccessList `json:"accessList,omitempty"`
+	ChainID            *hexutil.Big      `json:"chainId,omitempty"`
+	ExternalCallResult hexutil.Bytes     `json:"externalCallResult"`
+	V                  *hexutil.Big      `json:"v"`
+	R                  *hexutil.Big      `json:"r"`
+	S                  *hexutil.Big      `json:"s"`
 }
 
 // newRPCTransaction returns a transaction that will serialize to the RPC
@@ -1317,6 +1327,7 @@ func newRPCTransaction(tx *types.Transaction, blockHash common.Hash, blockNumber
 		R:        (*hexutil.Big)(r),
 		S:        (*hexutil.Big)(s),
 	}
+
 	if blockHash != (common.Hash{}) {
 		result.BlockHash = &blockHash
 		result.BlockNumber = (*hexutil.Big)(new(big.Int).SetUint64(blockNumber))
@@ -1469,11 +1480,17 @@ func AccessList(ctx context.Context, b Backend, blockNrOrHash rpc.BlockNumberOrH
 
 		// Apply the transaction with the access list tracer
 		tracer := logger.NewAccessListTracer(accessList, args.from(), to, precompiles)
-		config := vm.Config{Tracer: tracer, Debug: true, NoBaseFee: true}
-		vmenv, _, err := b.GetEVM(ctx, msg, statedb, header, &config)
+		// GetEvm will return the external_call_client within evmConfig when the input of evmConfig is nil
+		vmenv, _, err := b.GetEVM(ctx, msg, statedb, header, nil)
 		if err != nil {
 			return nil, 0, nil, err
 		}
+		if vmenv.EnableExternalCall() && vmenv.Config.ExternalCallClient == nil {
+			return nil, 0, nil, fmt.Errorf("AccessList must matain a active external_call_client when executing transaction")
+		}
+		vmenv.Config.Tracer = tracer
+		vmenv.Config.Debug = true
+		vmenv.Config.NoBaseFee = true
 		res, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(msg.Gas()))
 		if err != nil {
 			return nil, 0, nil, fmt.Errorf("failed to apply transaction: %v err: %v", args.toTransaction().Hash(), err)
@@ -1609,6 +1626,43 @@ func (s *PublicTransactionPoolAPI) GetRawTransactionByHash(ctx context.Context, 
 	return tx.MarshalBinary()
 }
 
+// GetExternalCallResult returns the externalCallResult for the given transaction hash
+func (s *PublicTransactionPoolAPI) GetExternalCallResult(ctx context.Context, hash common.Hash) (map[string]interface{}, error) {
+	_, blockHash, blockNumber, index, err := s.b.GetTransaction(ctx, hash)
+	if err != nil {
+		return nil, nil
+	}
+
+	// get external_call_result from uncles
+	block, err := s.b.BlockByHash(ctx, blockHash)
+	var externalCallResult []byte
+	var txWithExternalCallResult bool
+	if block != nil {
+		uncles := block.Uncles()
+		for _, uncle := range uncles {
+			if uncle.TxHash == hash {
+				externalCallResult = uncle.Extra
+				txWithExternalCallResult = true
+				break
+			}
+		}
+	}
+
+	if !txWithExternalCallResult {
+		return nil, fmt.Errorf("can't find the externalCallResult for the given txhash %s", hash)
+	}
+
+	fields := map[string]interface{}{
+		"blockHash":          blockHash,
+		"blockNumber":        blockNumber,
+		"transactionHash":    hash,
+		"transactionIndex":   index,
+		"externalCallResult": hexutil.Bytes(externalCallResult),
+	}
+
+	return fields, nil
+}
+
 // GetTransactionReceipt returns the transaction receipt for the given transaction hash.
 func (s *PublicTransactionPoolAPI) GetTransactionReceipt(ctx context.Context, hash common.Hash) (map[string]interface{}, error) {
 	tx, blockHash, blockNumber, index, err := s.b.GetTransaction(ctx, hash)
@@ -1623,6 +1677,18 @@ func (s *PublicTransactionPoolAPI) GetTransactionReceipt(ctx context.Context, ha
 		return nil, nil
 	}
 	receipt := receipts[index]
+
+	// get external_call_result from uncles
+	block, err := s.b.BlockByHash(ctx, blockHash)
+	var externalCallResult []byte
+	if block != nil {
+		uncles := block.Uncles()
+		for _, uncle := range uncles {
+			if uncle.TxHash == hash {
+				externalCallResult = uncle.Extra
+			}
+		}
+	}
 
 	// Derive the sender.
 	bigblock := new(big.Int).SetUint64(blockNumber)
@@ -1667,6 +1733,11 @@ func (s *PublicTransactionPoolAPI) GetTransactionReceipt(ctx context.Context, ha
 	if receipt.ContractAddress != (common.Address{}) {
 		fields["contractAddress"] = receipt.ContractAddress
 	}
+	// set the external_call_result
+	if externalCallResult != nil {
+		fields["externalCallResult"] = hexutil.Bytes(externalCallResult)
+	}
+
 	return fields, nil
 }
 

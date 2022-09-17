@@ -18,6 +18,8 @@ package vm
 
 import (
 	"bytes"
+	"context"
+
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
@@ -25,6 +27,8 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/ethereum/go-ethereum"
+	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -50,8 +54,16 @@ type PrecompiledContractCallEnv struct {
 	caller ContractRef
 }
 
+func NewPrecompiledContractCallEnv(evm *EVM, caller ContractRef) *PrecompiledContractCallEnv {
+	return &PrecompiledContractCallEnv{evm: evm, caller: caller}
+}
+
 type PrecompiledContractWithEVM interface {
 	RunWith(env *PrecompiledContractCallEnv, input []byte) ([]byte, error)
+}
+
+type PrecompiledContractToExternalCall interface {
+	RunWith(env *PrecompiledContractCallEnv, input []byte) ([]byte, uint64, error)
 }
 
 // PrecompiledContractsHomestead contains the default set of pre-compiled Ethereum
@@ -118,6 +130,7 @@ var PrecompiledContractsPisa = map[common.Address]PrecompiledContract{
 	common.BytesToAddress([]byte{9}):          &blake2F{},
 	common.BytesToAddress([]byte{3, 0x33, 1}): &systemContractDeployer{},
 	common.BytesToAddress([]byte{3, 0x33, 2}): &sstoragePisa{},
+	common.BytesToAddress([]byte{3, 0x33, 3}): &crossChainCall{},
 }
 
 // PrecompiledContractsBLS contains the set of pre-compiled Ethereum
@@ -181,7 +194,12 @@ func RunPrecompiledContract(env *PrecompiledContractCallEnv, p PrecompiledContra
 		return nil, 0, ErrOutOfGas
 	}
 	suppliedGas -= gasCost
-	if pw, ok := p.(PrecompiledContractWithEVM); ok {
+	if pw, ok := p.(PrecompiledContractToExternalCall); ok {
+		var actualGasUsed uint64
+		ret, actualGasUsed, err = pw.RunWith(env, input)
+		// gas refund
+		suppliedGas += gasCost - actualGasUsed
+	} else if pw, ok := p.(PrecompiledContractWithEVM); ok {
 		ret, err = pw.RunWith(env, input)
 	} else {
 		ret, err = p.Run(input)
@@ -1202,4 +1220,287 @@ func (c *bls12381MapG2) Run(input []byte) ([]byte, error) {
 
 	// Encode the G2 point to 256 bytes
 	return g.EncodePoint(r), nil
+}
+
+var (
+	// getLogByTxHash(uint256 chainId , bytes32 txHash, uint256 logIdx ,uint256 maxDataLen, uint256 confirms)
+	getLogByTxHashId, _ = hex.DecodeString("99e20070") // getLogByTxHash(uint256,bytes32,uint256,uint256,uint256)
+)
+
+type crossChainCall struct {
+}
+
+// RequiredGas is the maximum gas consumption that will calculate the cross_chain_call
+func (c *crossChainCall) RequiredGas(input []byte) uint64 {
+	if len(input) != 164 {
+		return 0
+	}
+
+	maxDataLen := new(big.Int).SetBytes(getData(input, 4+3*32, 32)).Uint64()
+	inputGas := uint64(len(input)) * params.ExternalCallByteGasCost
+
+	var callResultGas uint64 = (32 + 32*7) * params.ExternalCallByteGasCost // pay address and topics
+	if maxDataLen%32 != 0 {
+		maxDataLen = maxDataLen + (32 - maxDataLen%32)
+	}
+	callResultGas += maxDataLen * params.ExternalCallByteGasCost
+	gasUsed := callResultGas + inputGas + params.ExternalCallGas
+	/*
+		The gas calculation formula is as follows：
+		gas_overpay =  ExternalCallByteGasCost * (address_len + topics_len + data_len) + ExternalCallGas
+
+		address_len = 32
+		000000000000000000000000751320c36f413a6280ad54487766ae0f780b6f58
+
+		topics_len = 3 *32 + 32 * 4(consider that the max number of topics is 4)
+		0000000000000000000000000000000000000000000000000000000000000060
+		00000000000000000000000000000000000000000000000000000000000000c0
+		0000000000000000000000000000000000000000000000000000000000000002
+		dce721dc2d078c030530aeb5511eb76663a705797c2a4a4d41a70dddfb8efca9
+		0000000000000000000000000000000000000000000000000000000000000001
+
+		data_len= 32 + (32 - maxDataLen % 32) + maxDatalen
+		00000000000000000000000000000000000000000000000000000000000000c0
+		0000000000000000000000000000000000000000000000000000000000000002
+		0000000000000000000000000000000000000000000000000000000000000001
+		0000000000000000000000000000000000000000000000000000000000000060
+		0000000000000000000000000000000000000000000000000000000000000028
+		bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+		bbbbbbbbbbbbbbbb000000000000000000000000000000000000000000000000
+	*/
+
+	return gasUsed
+}
+
+func (c *crossChainCall) Run(input []byte) ([]byte, error) {
+	return nil, nil
+}
+
+func (c *crossChainCall) RunWith(env *PrecompiledContractCallEnv, input []byte) ([]byte, uint64, error) {
+	if len(input) != 164 {
+		return nil, 0, fmt.Errorf("invalid length of input")
+	}
+
+	if env.evm.ChainConfig().ExternalCall.EnableBlockNumber == nil {
+		return nil, 0, fmt.Errorf("crossChainCall: external call disable")
+	}
+
+	if env.evm.Context.BlockNumber.Cmp(env.evm.ChainConfig().ExternalCall.EnableBlockNumber) == -1 {
+		return nil, 0, fmt.Errorf("cross chain call is active when when blockNumber reaches %d \n", env.evm.ChainConfig().ExternalCall.EnableBlockNumber.Int64())
+	}
+
+	ctx := context.Background()
+	if bytes.Equal(input[0:4], getLogByTxHashId) {
+
+		client := env.evm.ExternalCallClient()
+		var list *CrossChainCallResults
+
+		if client == nil {
+			Idx := env.evm.Interpreter().CallResultIdx()
+			if Idx >= uint64(len(env.evm.Interpreter().CrossChainCallResults())) {
+				// unexpect error
+				env.evm.setCrossChainCallUnExpectErr(ErrOutOfBoundsTracePtr)
+				return nil, 0, ErrOutOfBoundsTracePtr
+			}
+			list = env.evm.Interpreter().CrossChainCallResults()[Idx]
+			env.evm.Interpreter().AddCallResultIdx()
+
+			if !list.Success {
+				return list.CallRes, list.GasUsed, ErrExecutionReverted
+			}
+
+			return list.CallRes, list.GasUsed, nil
+		} else {
+			chainId := new(big.Int).SetBytes(getData(input, 4, 32)).Uint64()
+			txHash := common.BytesToHash(getData(input, 4+32, 32))
+			logIdx := new(big.Int).SetBytes(getData(input, 4+64, 32)).Uint64()
+			maxDataLen := new(big.Int).SetBytes(getData(input, 4+96, 32)).Uint64()
+			confirms := new(big.Int).SetBytes(getData(input, 4+128, 32)).Uint64()
+
+			callres, expErr, unexpErr := GetExternalLog(ctx, env, chainId, txHash, logIdx, maxDataLen, confirms)
+
+			if unexpErr != nil {
+				env.evm.setCrossChainCallUnExpectErr(unexpErr)
+				return nil, 0, unexpErr
+			} else if expErr != nil {
+				// expect error uses the same error handling method as unexpect err
+				env.evm.setCrossChainCallUnExpectErr(expErr)
+				return nil, 0, expErr
+			} else {
+				// calculate actual cost of gas
+				actualGasUsed := callres.GasCost(params.ExternalCallByteGasCost)
+				actualGasUsed += uint64(len(input)) * params.ExternalCallByteGasCost
+				actualGasUsed += params.ExternalCallGas
+
+				resultValuePack, err := callres.ABIPack()
+				if err != nil {
+					env.evm.setCrossChainCallUnExpectErr(err)
+					return nil, 0, err
+				}
+				list = &CrossChainCallResults{
+					CallRes: resultValuePack,
+					Success: true,
+					GasUsed: actualGasUsed,
+				}
+				env.evm.Interpreter().AppendCrossChainCallResults(list)
+
+				return list.CallRes, list.GasUsed, nil
+			}
+
+		}
+
+	}
+
+	env.evm.setCrossChainCallUnExpectErr(ErrUnsupportMethod)
+	return nil, 0, ErrUnsupportMethod
+}
+
+func GetExternalLog(ctx context.Context, env *PrecompiledContractCallEnv, chainId uint64, txHash common.Hash, logIdx uint64, maxDataLen uint64, confirms uint64) (cr *GetLogByTxHash, expErr *ExpectCallErr, unExpErr error) {
+	client := env.evm.ExternalCallClient()
+
+	if chainId != env.evm.ChainConfig().ExternalCall.SupportChainId {
+		// expect error
+		expErr = NewExpectCallErr(fmt.Sprintf("CrossChainCall:chainId %d no support", chainId))
+		return nil, expErr, nil
+	}
+
+	receipt, err := client.TransactionReceipt(ctx, txHash)
+	if err != nil {
+		if err == ethereum.NotFound {
+			// expect Error
+			return nil, NewExpectCallErr(ethereum.NotFound.Error()), nil
+		}
+		// unexpect error
+		return nil, nil, err
+	}
+
+	happenedBlockNumber := receipt.BlockNumber
+	latestBlockNumber, err := client.BlockNumber(ctx)
+	if err != nil {
+		// unexpect error
+		return nil, nil, err
+	}
+
+	if latestBlockNumber-happenedBlockNumber.Uint64() < confirms {
+		// expect error
+		return nil, NewExpectCallErr("CrossChainCall:confirms no enough"), nil
+	}
+
+	if logIdx >= uint64(len(receipt.Logs)) {
+		// expect error
+		return nil, NewExpectCallErr("CrossChainCall:logIdx out-of-bound"), nil
+	}
+	log := receipt.Logs[logIdx]
+
+	var data []byte
+	var actualDataLen = uint64(len(log.Data))
+	if actualDataLen <= maxDataLen {
+		data = log.Data
+	} else {
+		data = getData(log.Data, 0, maxDataLen)
+		actualDataLen = maxDataLen
+	}
+
+	callres, err := NewGetLogByTxHash(log.Address, log.Topics, data)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return callres, nil, nil
+
+}
+
+type GetLogByTxHash struct {
+	// address of the contract that generated the event
+	Address common.Address `json:"address" gencodec:"required"`
+	// list of topics provided by the contract.
+	Topics []common.Hash `json:"topics" gencodec:"required"`
+	// supplied by the contract, usually ABI-encoded
+	//Data []byte `json:"data" gencodec:"required"`
+	Data []byte `json:"data" gencodec:"required"`
+
+	Args abi.Arguments
+}
+
+func NewGetLogByTxHash(address common.Address, topics []common.Hash, data []byte) (*GetLogByTxHash, error) {
+	arg1Type, err := abi.NewType("address", "", nil)
+	if err != nil {
+		return nil, err
+	}
+	arg2Type, err := abi.NewType("bytes32[]", "", nil)
+	if err != nil {
+		return nil, err
+	}
+	arg3Type, err := abi.NewType("bytes", "", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	arg1 := abi.Argument{Name: "address", Type: arg1Type, Indexed: false}
+	arg2 := abi.Argument{Name: "topics", Type: arg2Type, Indexed: false}
+	arg3 := abi.Argument{Name: "data", Type: arg3Type, Indexed: false}
+
+	var args = abi.Arguments{arg1, arg2, arg3}
+
+	return &GetLogByTxHash{Address: address, Topics: topics, Data: data, Args: args}, nil
+}
+
+func NewCallResultEmpty() (*GetLogByTxHash, error) {
+	arg1Type, err := abi.NewType("address", "", nil)
+	if err != nil {
+		return nil, err
+	}
+	arg2Type, err := abi.NewType("bytes32[]", "", nil)
+	if err != nil {
+		return nil, err
+	}
+	arg3Type, err := abi.NewType("bytes", "", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	arg1 := abi.Argument{Name: "address", Type: arg1Type, Indexed: false}
+	arg2 := abi.Argument{Name: "topics", Type: arg2Type, Indexed: false}
+	arg3 := abi.Argument{Name: "data", Type: arg3Type, Indexed: false}
+
+	var args = abi.Arguments{arg1, arg2, arg3}
+
+	return &GetLogByTxHash{Args: args}, nil
+}
+
+func (c *GetLogByTxHash) ABIPack() ([]byte, error) {
+	packResult, err := c.Args.Pack(c.Address, c.Topics, c.Data)
+	if err != nil {
+		return nil, err
+	}
+	return packResult, nil
+}
+
+func (c *GetLogByTxHash) GasCost(perBytePrice uint64) uint64 {
+	pack, _ := c.ABIPack()
+	return uint64(len(pack)) * perBytePrice
+}
+
+type ExpectCallErr struct {
+	ErrMsg string
+}
+
+func NewExpectCallErr(errMsg string) *ExpectCallErr {
+	return &ExpectCallErr{ErrMsg: errMsg}
+}
+
+func (c *ExpectCallErr) Error() string {
+	return fmt.Sprintf("Expect Error:%s", c.ErrMsg)
+}
+
+type CrossChainCallResults struct {
+	CallRes []byte
+	// todo
+	Success bool // judge by expect error or unexpect error? // false condition:
+	GasUsed uint64
+}
+
+type CrossChainCallResultsWithVersion struct {
+	Version uint64
+	Results []*CrossChainCallResults
 }
