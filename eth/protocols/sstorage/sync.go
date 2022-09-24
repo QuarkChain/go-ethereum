@@ -18,26 +18,26 @@ package sstorage
 
 import (
 	"bytes"
-	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/ethereum/go-ethereum/core/state"
-	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/holiman/uint256"
-	"golang.org/x/crypto/sha3"
+	"math/big"
 	"math/rand"
 	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/rawdb"
+	"github.com/ethereum/go-ethereum/core/state"
+	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/p2p/msgrate"
 	"github.com/ethereum/go-ethereum/sstorage"
+	"github.com/holiman/uint256"
+	"golang.org/x/crypto/sha3"
 )
 
 // todo
@@ -46,74 +46,83 @@ const (
 	minSstoragePeers = 16
 
 	// maxRequestSize is the maximum number of bytes to request from a remote peer.
-	// This number is used as the high cap for chunk range requests.
+	// This number is used as the high cap for kv range requests.
 	maxRequestSize = uint64(512 * 1024)
-
-	requestTimeoutInSecond = 30 // Second
 )
 
 // ErrCancelled is returned from sstorage syncing if the operation was prematurely
 // terminated.
 var ErrCancelled = errors.New("sync cancelled")
 
-var emptyHash = common.Hash{}
+var (
+	emptyHash = common.Hash{}
 
-// chunkRequest tracks a pending chunk request to ensure responses are to
+	requestTimeoutInMillisecond = 10000 * time.Millisecond // Millisecond
+)
+
+// kvRequest tracks a pending kv request to ensure responses are to
 // actual requests and to validate any security constraints.
 //
-// Concurrency note: chunk requests and responses are handled concurrently from
+// Concurrency note: kv requests and responses are handled concurrently from
 // the main runloop to allow Keccak256 hash verifications on the peer's thread and
-// to drop on invalid response. The request struct must contain all the data to
+// to drop on invalid response. The request struct must contain all the Data to
 // construct the response without accessing runloop internals (i.e. task). That
 // is only included to allow the runloop to match a response to the task being
 // synced without having yet another set of maps.
-type chunkRequest struct {
+type kvRequest struct {
 	peer string    // Peer to which this request is assigned
 	id   uint64    // Request ID of this request
 	time time.Time // Timestamp when the request was sent
 
-	deliver chan *chunkResponse // Channel to deliver successful response on
-	revert  chan *chunkRequest  // Channel to deliver request failure on
-	cancel  chan struct{}       // Channel to track sync cancellation
-	timeout *time.Timer         // Timer to track delivery timeout
-	stale   chan struct{}       // Channel to signal the request was dropped
+	deliver chan *kvResponse // Channel to deliver successful response on
+	revert  chan *kvRequest  // Channel to deliver request failure on
+	cancel  chan struct{}    // Channel to track sync cancellation
+	timeout *time.Timer      // Timer to track delivery timeout
+	stale   chan struct{}    // Channel to signal the request was dropped
 
 	contract common.Address
 	shardId  uint64
 	indexes  []uint64
 
-	task *chunkTask // chunkTask which this request is filling (only access fields through the runloop!!)
+	task *kvTask // kvTask which this request is filling (only access fields through the runloop!!)
 }
 
-// chunkResponse is an already verified remote response to a chunk request.
-type chunkResponse struct {
+// kvResponse is an already verified remote response to a kv request.
+type kvResponse struct {
 	reqId    uint64         // Request ID of this response
-	task     *chunkTask     // chunkTask which this request is filling
+	task     *kvTask        // kvTask which this request is filling
 	contract common.Address // contract
 	shardId  uint64         // shardId
-	chunks   []*Chunk       // chunks to store into the sharded storage
+	kvs      []*KV          // kvs to store into the sharded storage
 }
 
-// chunkTask represents the sync task for a sstorage shard.
-type chunkTask struct {
+// kvTask represents the sync task for a sstorage shard.
+type kvTask struct {
 	// These fields get serialized to leveldb on shutdown
 	contract  common.Address   // contract address
 	shardId   uint64           // shardId
-	indexes   map[uint64]int64 // indexes chunk index to sync time map
+	indexes   map[uint64]int64 // indexes kv index to sync time map
 	batchSize uint64
 
+	statelessPeers map[string]struct{} // Peers that failed to deliver kv Data
+
 	// These fields are internals used during runtime
-	req map[uint64]*chunkRequest  // Pending request to fill this task
-	res map[uint64]*chunkResponse // Validate response filling this task
+	req map[uint64]*kvRequest  // Pending request to fill this task
+	res map[uint64]*kvResponse // Validate response filling this task
 
 	done bool // Flag whether the task can be removed
 }
 
-func (t *chunkTask) getChunkIndexesForRequest() []uint64 {
+func (t *kvTask) getKVIndexesForRequest(batch uint64) []uint64 {
 	indexes := make([]uint64, 0)
-	for idx, t := range t.indexes {
-		if time.Now().Unix()-t > requestTimeoutInSecond {
+	l := uint64(0)
+	for idx, tm := range t.indexes {
+		if time.Now().UnixMilli()-tm > requestTimeoutInMillisecond.Milliseconds() {
 			indexes = append(indexes, idx)
+			l++
+		}
+		if l >= batch {
+			break
 		}
 	}
 
@@ -124,11 +133,11 @@ func (t *chunkTask) getChunkIndexesForRequest() []uint64 {
 // sync. Opposed to full and fast sync, there is no way to restart a suspended
 // sstorage sync without prior knowledge of the suspension point.
 type SyncProgress struct {
-	Tasks []*chunkTask // The suspended chunk tasks
+	Tasks []*kvTask // The suspended kv tasks
 
 	// Status report during syncing phase
-	ChunkSynced uint64             // Number of chunks downloaded
-	ChunkBytes  common.StorageSize // Number of chunk bytes downloaded
+	KVSynced uint64             // Number of kvs downloaded
+	KVBytes  common.StorageSize // Number of kv bytes downloaded
 }
 
 // SyncPeer abstracts out the methods required for a peer to be synced against
@@ -141,8 +150,8 @@ type SyncPeer interface {
 	// IsShardExist is the peer support this shardId
 	IsShardExist(contract common.Address, shardId uint64) bool
 
-	// RequestChunks fetches a batch of chunks ranging between startIdx and endIdx
-	RequestChunks(id uint64, contract common.Address, shardId uint64, chunkList []uint64) error
+	// RequestKVs fetches a batch of kvs ranging between startIdx and endIdx
+	RequestKVs(id uint64, contract common.Address, shardId uint64, kvList []uint64) error
 
 	// Log retrieves the peer's own contextual logger.
 	Log() log.Logger
@@ -155,7 +164,7 @@ type BlockChain interface {
 }
 
 // Syncer is a sstorage syncer based the sstorage protocol. It's purpose is to
-// download all chunks from remote peers.
+// download all kvs from remote peers.
 //
 // Every network request has a variety of failure events:
 //   - The peer disconnects after task assignment, failing to send the request
@@ -166,7 +175,7 @@ type BlockChain interface {
 type Syncer struct {
 	db    ethdb.KeyValueStore // Database to store the sync state
 	chain BlockChain
-	tasks []*chunkTask
+	tasks []*kvTask
 
 	sstorageInfo map[common.Address][]uint64 // Map for contract address to support shardIds
 	syncDone     bool                        // Flag to signal that sstorage phase is done
@@ -179,16 +188,12 @@ type Syncer struct {
 	rates    *msgrate.Trackers // Message throughput rates for peers
 
 	// Request tracking during syncing phase
-	statelessPeers map[string]struct{} // Peers that failed to deliver chunk data
-	chunkIdlers    map[string]struct{} // Peers that aren't serving chunk requests
+	kvIdlers map[string]struct{}   // Peers that aren't serving kv requests
+	kvReqs   map[uint64]*kvRequest // KV requests currently running
 
-	chunkReqs map[uint64]*chunkRequest // Chunk requests currently running
-
-	chunkSynced  uint64             // Number of chunks downloaded
-	chunkBytes   common.StorageSize // Number of chunk bytes downloaded
-	chunkSyncing uint64             // Number of chunks downloading
-
-	stateWriter ethdb.Batch // Shared batch writer used for persisting raw states
+	kvSynced  uint64             // Number of kvs downloaded
+	kvBytes   common.StorageSize // Number of kv bytes downloaded
+	kvSyncing uint64             // Number of kvs downloading
 
 	startTime time.Time // Time instance when sstorage sync started
 	logTime   time.Time // Time instance when status was last reported
@@ -202,8 +207,9 @@ func NewSyncer(db ethdb.KeyValueStore, chain BlockChain, sstorageInfo map[common
 	return &Syncer{
 		db: db,
 
-		tasks:        make([]*chunkTask, 0),
+		tasks:        make([]*kvTask, 0),
 		sstorageInfo: sstorageInfo,
+		chain:        chain,
 
 		peers:    make(map[string]SyncPeer),
 		peerJoin: new(event.Feed),
@@ -211,13 +217,12 @@ func NewSyncer(db ethdb.KeyValueStore, chain BlockChain, sstorageInfo map[common
 		rates:    msgrate.NewTrackers(log.New("proto", "sstorage")),
 		update:   make(chan struct{}, 1),
 
-		chunkIdlers: make(map[string]struct{}),
-		chunkReqs:   make(map[uint64]*chunkRequest),
-		stateWriter: db.NewBatch(),
+		kvIdlers: make(map[string]struct{}),
+		kvReqs:   make(map[uint64]*kvRequest),
 	}
 }
 
-// Register injects a new data source into the syncer's peerset.
+// Register injects a new Data source into the syncer's peerset.
 func (s *Syncer) Register(peer SyncPeer) error {
 	// Make sure the peer is not registered yet
 	id := peer.ID()
@@ -233,15 +238,15 @@ func (s *Syncer) Register(peer SyncPeer) error {
 	s.rates.Track(id, msgrate.NewTracker(s.rates.MeanCapacities(), s.rates.MedianRoundTrip()))
 
 	// Mark the peer as idle, even if no sync is running
-	s.chunkIdlers[id] = struct{}{}
+	s.kvIdlers[id] = struct{}{}
 	s.lock.Unlock()
 
-	// Notify any active syncs that a new peer can be assigned data
+	// Notify any active syncs that a new peer can be assigned Data
 	s.peerJoin.Send(id)
 	return nil
 }
 
-// Unregister injects a new data source into the syncer's peerset.
+// Unregister injects a new Data source into the syncer's peerset.
 func (s *Syncer) Unregister(id string) error {
 	// Remove all traces of the peer from the registry
 	s.lock.Lock()
@@ -255,9 +260,11 @@ func (s *Syncer) Unregister(id string) error {
 	s.rates.Untrack(id)
 
 	// Remove status markers, even if no sync is running
-	delete(s.statelessPeers, id)
+	for _, task := range s.tasks {
+		delete(task.statelessPeers, id)
+	}
 
-	delete(s.chunkIdlers, id)
+	delete(s.kvIdlers, id)
 	s.lock.Unlock()
 
 	// Notify any active syncs that pending requests need to be reverted
@@ -265,16 +272,10 @@ func (s *Syncer) Unregister(id string) error {
 	return nil
 }
 
-// Sync starts (or resumes a previous) sync cycle to iterate over all the chunks
+// Sync starts (or resumes a previous) sync cycle to iterate over all the kvs
 // for storage shards the node support and reconstruct the node storage.
 // Previously downloaded segments will not be redownloaded of fixed.
-func (s *Syncer) Sync(shards map[common.Address][]uint64, cancel chan struct{}) error {
-	// Revert stateless markers for any peers and initialize the syncer if it was not yet run
-	s.lock.Lock()
-
-	s.statelessPeers = make(map[string]struct{})
-	s.lock.Unlock()
-
+func (s *Syncer) Sync(cancel chan struct{}) error {
 	if s.startTime == (time.Time{}) {
 		s.startTime = time.Now()
 	}
@@ -285,24 +286,20 @@ func (s *Syncer) Sync(shards map[common.Address][]uint64, cancel chan struct{}) 
 		return nil
 	}
 	defer func() { // Persist any progress, independent of failure
-		s.cleanChunkTasks()
+		s.cleanKVTasks()
 		s.saveSyncStatus()
 	}()
 
-	for addr, ids := range shards {
+	for addr, ids := range s.sstorageInfo {
 		log.Debug("Starting Sstorage sync cycle", "contract", addr.Hex(), "shards", ids)
 	}
 
-	defer s.report(true)
-
 	// Whether sync completed or not, disregard any future packets
 	defer func() {
-		for addr, ids := range shards {
-			log.Debug("Terminating Sstorage sync cycle", "contract", addr.Hex(), "shards", ids)
-		}
 		s.lock.Lock()
-		s.chunkReqs = make(map[uint64]*chunkRequest)
+		s.kvReqs = make(map[uint64]*kvRequest)
 		s.lock.Unlock()
+		s.report(true)
 	}()
 	// Keep scheduling sync tasks
 	peerJoin := make(chan string, 16)
@@ -314,23 +311,26 @@ func (s *Syncer) Sync(shards map[common.Address][]uint64, cancel chan struct{}) 
 	defer peerDropSub.Unsubscribe()
 
 	// Create a set of unique channels for this sync cycle. We need these to be
-	// ephemeral so a data race doesn't accidentally deliver something stale on
+	// ephemeral so a Data race doesn't accidentally deliver something stale on
 	// a persistent channel across syncs
 	var (
-		chunkReqFails = make(chan *chunkRequest)
-		chunkResps    = make(chan *chunkResponse)
+		kvReqFails = make(chan *kvRequest)
+		kvResps    = make(chan *kvResponse)
+		i          = 0
 	)
 	for {
 		// Remove all completed tasks and terminate sync if everything's done
-		s.cleanChunkTasks()
+		s.cleanKVTasks()
 		if len(s.tasks) == 0 {
 			return nil
 		}
-		// Assign all the data retrieval tasks to any free peers
-		s.assignChunkTasks(chunkResps, chunkReqFails, cancel)
+		// Assign all the Data retrieval tasks to any free peers
+		s.assignKVTasks(kvResps, kvReqFails, cancel)
 
 		// Wait for something to happen
 		select {
+		case <-time.After(requestTimeoutInMillisecond):
+
 		case <-s.update:
 			// Something happened (new peer, delivery, timeout), recheck tasks
 		case <-peerJoin:
@@ -340,14 +340,15 @@ func (s *Syncer) Sync(shards map[common.Address][]uint64, cancel chan struct{}) 
 		case <-cancel:
 			return ErrCancelled
 
-		case req := <-chunkReqFails:
-			s.revertChunkRequest(req)
+		case req := <-kvReqFails:
+			s.revertKVRequest(req)
 
-		case res := <-chunkResps:
-			s.processChunkResponse(res)
+		case res := <-kvResps:
+			s.processKVResponse(res)
 		}
 		// Report stats if something meaningful happened
 		s.report(false)
+		i++
 	}
 }
 
@@ -367,29 +368,47 @@ func (s *Syncer) loadSyncStatus() {
 			s.tasks = progress.Tasks
 			s.syncDone = len(s.tasks) == 0
 
-			s.chunkSynced = progress.ChunkSynced
-			s.chunkBytes = progress.ChunkBytes
+			s.kvSynced = progress.KVSynced
+			s.kvBytes = progress.KVBytes
 			return
 		}
 	}
 	// Either we've failed to decode the previus state, or there was none.
 	// Start a fresh sync for retrieval.
-	s.chunkSynced, s.chunkBytes = 0, 0
+	s.kvSynced, s.kvBytes = 0, 0
 
+	stateDB, err := s.chain.StateAt(s.chain.CurrentBlock().Hash())
+	if err != nil {
+		log.Error("load syc status failed, fail to get state DB.", "err", err.Error())
+	}
 	for contract, shards := range s.sstorageInfo {
-		for _, id := range shards {
+		for _, sid := range shards {
 			sm := sstorage.ContractToShardManager[contract]
-			task := chunkTask{
-				contract:  contract,
-				shardId:   id,
-				batchSize: maxRequestSize / sm.MaxKvSize(),
-				indexes:   make(map[uint64]int64),
+			task := kvTask{
+				contract:       contract,
+				shardId:        sid,
+				batchSize:      maxRequestSize / sm.MaxKvSize(),
+				indexes:        make(map[uint64]int64),
+				statelessPeers: make(map[string]struct{}),
 			}
-			for i := sm.KvEntries() * id; i < sm.KvEntries()*(id+1); i++ {
+			for i := sm.KvEntries() * sid; i < sm.KvEntries()*(sid+1); i++ {
+				meta, err := getSstorageMetadata(stateDB, contract, i)
+				if err != nil {
+					continue
+				}
+				if data, ok, err := sm.TryRead(i, int(sm.MaxKvSize()), common.BytesToHash(meta.hashInMeta)); ok && err == nil {
+					kv := KV{i, data}
+					err := verifyKV(sm, &kv, meta)
+					if err == nil {
+						continue
+					}
+				}
 				task.indexes[i] = 0
 			}
 
-			s.tasks = append(s.tasks, &task)
+			if len(task.indexes) > 0 {
+				s.tasks = append(s.tasks, &task)
+			}
 		}
 	}
 }
@@ -398,9 +417,9 @@ func (s *Syncer) loadSyncStatus() {
 func (s *Syncer) saveSyncStatus() {
 	// Store the actual progress markers
 	progress := &SyncProgress{
-		Tasks:       s.tasks,
-		ChunkSynced: s.chunkSynced,
-		ChunkBytes:  s.chunkBytes,
+		Tasks:    s.tasks,
+		KVSynced: s.kvSynced,
+		KVBytes:  s.kvBytes,
 	}
 	status, err := json.Marshal(progress)
 	if err != nil {
@@ -409,20 +428,20 @@ func (s *Syncer) saveSyncStatus() {
 	rawdb.WriteSstorageSyncStatus(s.db, status)
 }
 
-// Progress returns the snap sync status statistics.
+// Progress returns the sstorage sync status statistics.
 func (s *Syncer) Progress() (*SyncProgress, uint64) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
 	progress := &SyncProgress{
-		ChunkSynced: s.chunkSynced,
-		ChunkBytes:  s.chunkBytes,
+		KVSynced: s.kvSynced,
+		KVBytes:  s.kvBytes,
 	}
-	return progress, s.chunkSyncing
+	return progress, s.kvSyncing
 }
 
-// cleanChunkTasks removes chunk range retrieval tasks that have already been completed.
-func (s *Syncer) cleanChunkTasks() {
+// cleanKVTasks removes kv range retrieval tasks that have already been completed.
+func (s *Syncer) cleanKVTasks() {
 	// If the sync was already done before, don't even bother
 	if len(s.tasks) == 0 {
 		return
@@ -445,47 +464,54 @@ func (s *Syncer) cleanChunkTasks() {
 	}
 }
 
-// assignChunkTasks attempts to match idle peers to pending code retrievals.
-func (s *Syncer) assignChunkTasks(success chan *chunkResponse, fail chan *chunkRequest, cancel chan struct{}) {
+// assignKVTasks attempts to match idle peers to pending code retrievals.
+func (s *Syncer) assignKVTasks(success chan *kvResponse, fail chan *kvRequest, cancel chan struct{}) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
-	// Sort the peers by download capacity to use faster ones if many available
-	idlers := make([]string, 0, len(s.chunkIdlers))
-	for id := range s.chunkIdlers {
-		if _, ok := s.statelessPeers[id]; ok {
-			continue
-		}
-		idlers = append(idlers, id)
-	}
-	if len(idlers) == 0 {
+	if len(s.kvIdlers) == 0 {
 		return
+	}
+	idlers := make([]string, 0, len(s.kvIdlers))
+	for id := range s.kvIdlers {
+		idlers = append(idlers, id)
 	}
 
 	// Iterate over all the tasks and try to find a pending one
 	for _, task := range s.tasks {
-		// All the chunks are downloading, wait for request time or success
-		indexes := task.getChunkIndexesForRequest()
+		// All the kvs are downloading, wait for request time or success
+		batch := maxRequestSize / sstorage.ContractToShardManager[task.contract].MaxKvSize()
+		indexes := task.getKVIndexesForRequest(batch)
 		if len(indexes) == 0 {
 			continue
 		}
-		// chunkTask pending retrieval, try to find an idle peer. If no such peer
+		// kvTask pending retrieval, try to find an idle peer. If no such peer
 		// exists, we probably assigned tasks for all (or they are stateless).
 		// Abort the entire assignment mechanism.
 		if len(idlers) == 0 {
 			return
 		}
-
 		var (
-			idle = idlers[0]
-			peer = s.peers[idle]
+			peer SyncPeer = nil
 		)
 		for i, id := range idlers {
 			p := s.peers[id]
+			if _, ok := task.statelessPeers[id]; ok {
+				continue
+			}
 			if p.IsShardExist(task.contract, task.shardId) {
 				peer = p
-				idlers = append(idlers[:i], idlers[i+1:]...)
+				if i < len(idlers)-1 {
+					idlers = append(idlers[:i], idlers[i+1:]...)
+				} else { // last one
+					idlers = idlers[:i]
+				}
+				break
 			}
+		}
+		if peer == nil {
+			log.Info("peer for request no found", "contract", task.contract.Hex(), "shard id", task.shardId)
+			return
 		}
 
 		// Matched a pending task to an idle peer, allocate a unique request id
@@ -495,14 +521,14 @@ func (s *Syncer) assignChunkTasks(success chan *chunkResponse, fail chan *chunkR
 			if reqid == 0 {
 				continue
 			}
-			if _, ok := s.chunkReqs[reqid]; ok {
+			if _, ok := s.kvReqs[reqid]; ok {
 				continue
 			}
 			break
 		}
 
-		req := &chunkRequest{
-			peer:     idle,
+		req := &kvRequest{
+			peer:     peer.ID(),
 			id:       reqid,
 			contract: task.contract,
 			shardId:  task.shardId,
@@ -515,23 +541,26 @@ func (s *Syncer) assignChunkTasks(success chan *chunkResponse, fail chan *chunkR
 			task:     task,
 		}
 		req.timeout = time.AfterFunc(s.rates.TargetTimeout(), func() {
-			peer.Log().Debug("Chunk request timed out", "reqid", reqid)
-			s.rates.Update(idle, ChunksMsg, 0, 0)
-			s.scheduleRevertChunkRequest(req)
+			peer.Log().Debug("KV request timed out", "reqid", reqid)
+			s.rates.Update(peer.ID(), KVsMsg, 0, 0)
+			s.scheduleRevertKVRequest(req)
 		})
-		s.chunkReqs[reqid] = req
-		delete(s.chunkIdlers, idle)
+		s.kvReqs[reqid] = req
+		delete(s.kvIdlers, peer.ID())
 
 		s.pend.Add(1)
 		go func() {
 			defer s.pend.Done()
 
 			// Attempt to send the remote request and revert if it fails
-			if err := peer.RequestChunks(reqid, req.task.contract, req.shardId, req.indexes); err != nil {
-				log.Debug("Failed to request chunks", "err", err)
-				s.scheduleRevertChunkRequest(req)
+			if err := peer.RequestKVs(reqid, req.task.contract, req.shardId, req.indexes); err != nil {
+				log.Debug("Failed to request kvs", "err", err)
+				s.scheduleRevertKVRequest(req)
 			}
 		}()
+		for _, idx := range indexes {
+			task.indexes[idx] = time.Now().UnixMilli()
+		}
 	}
 }
 
@@ -540,23 +569,23 @@ func (s *Syncer) assignChunkTasks(success chan *chunkResponse, fail chan *chunkR
 func (s *Syncer) revertRequests(peer string) {
 	// Gather the requests first, revertals need the lock too
 	s.lock.Lock()
-	var chunkReqs []*chunkRequest
-	for _, req := range s.chunkReqs {
+	var kvReqs []*kvRequest
+	for _, req := range s.kvReqs {
 		if req.peer == peer {
-			chunkReqs = append(chunkReqs, req)
+			kvReqs = append(kvReqs, req)
 		}
 	}
 	s.lock.Unlock()
 
 	// Revert all the requests matching the peer
-	for _, req := range chunkReqs {
-		s.revertChunkRequest(req)
+	for _, req := range kvReqs {
+		s.revertKVRequest(req)
 	}
 }
 
-// scheduleRevertChunkRequest asks the event loop to clean up a chunk request
+// scheduleRevertKVRequest asks the event loop to clean up a kv request
 // and return all failed retrieval tasks to the scheduler for reassignment.
-func (s *Syncer) scheduleRevertChunkRequest(req *chunkRequest) {
+func (s *Syncer) scheduleRevertKVRequest(req *kvRequest) {
 	select {
 	case req.revert <- req:
 		// Sync event loop notified
@@ -567,16 +596,16 @@ func (s *Syncer) scheduleRevertChunkRequest(req *chunkRequest) {
 	}
 }
 
-// revertChunkRequest cleans up a chunk request and returns all failed
+// revertKVRequest cleans up a kv request and returns all failed
 // retrieval tasks to the scheduler for reassignment.
 //
 // Note, this needs to run on the event runloop thread to reschedule to idle peers.
-// On peer threads, use scheduleRevertChunkRequest.
-func (s *Syncer) revertChunkRequest(req *chunkRequest) {
-	log.Debug("Reverting chunk request", "peer", req.peer)
+// On peer threads, use scheduleRevertKVRequest.
+func (s *Syncer) revertKVRequest(req *kvRequest) {
+	log.Debug("Reverting kv request", "peer", req.peer)
 	select {
 	case <-req.stale:
-		log.Trace("Chunk request already reverted", "peer", req.peer, "reqid", req.id)
+		log.Trace("KV request already reverted", "peer", req.peer, "reqid", req.id)
 		return
 	default:
 	}
@@ -584,7 +613,7 @@ func (s *Syncer) revertChunkRequest(req *chunkRequest) {
 
 	// Remove the request from the tracked set
 	s.lock.Lock()
-	delete(s.chunkReqs, req.id)
+	delete(s.kvReqs, req.id)
 	s.lock.Unlock()
 
 	// If there's a timeout timer still running, abort it and mark the code
@@ -595,77 +624,79 @@ func (s *Syncer) revertChunkRequest(req *chunkRequest) {
 	}
 }
 
-// processChunkResponse integrates an already validated chunk response
+// processKVResponse integrates an already validated kv response
 // into the account tasks.
-func (s *Syncer) processChunkResponse(res *chunkResponse) {
+func (s *Syncer) processKVResponse(res *kvResponse) {
 	var (
 		synced      uint64
 		syncedBytes uint64
 	)
 	if res.task.contract != res.contract {
-		log.Error("processChunkResponse fail: contract mismatch",
+		log.Error("processKVResponse fail: contract mismatch",
 			"task", res.task.contract.Hex(), "res", res.contract.Hex())
 		return
 	}
 	sm := sstorage.ContractToShardManager[res.contract]
 	if sm == nil {
-		log.Error("processChunkResponse fail: contract not support",
+		log.Error("processKVResponse fail: contract not support",
 			"res contract", res.contract.Hex())
 		return
 	}
 	state, err := s.chain.StateAt(s.chain.CurrentBlock().Hash())
 	if err != nil {
-		log.Error("processChunkResponse get state fail", "error", err)
+		log.Error("processKVResponse get state fail", "error", err)
 		return
 	}
 
 	successCount, failureCount := 0, 0
-	for _, chunk := range res.chunks {
-		// 1. get chunk meta
-		// 2. verify chunk
-		// 3.1. if pass, write to storage and delete(res.task.indexes, idx)
-		// 3.2. if fail, set res.task.indexes[idx] = 0
+	for _, kv := range res.kvs {
+		// 1. get kv meta
+		// 2. verify kv
+		// 3.1. if pass, write to storage and delete(res.task.indexes, Idx)
+		// 3.2. if fail, set res.task.indexes[Idx] = 0
 		synced++
-		syncedBytes += uint64(len(chunk.data))
+		syncedBytes += uint64(len(kv.Data))
 
-		meta, err := getSstorageMetadata(state, res.contract, chunk.idx)
+		meta, err := getSstorageMetadata(state, res.contract, kv.Idx)
 		if err != nil || meta == nil {
-			log.Warn("processChunkResponse get chunk meta fail", "error", err)
+			log.Warn("processKVResponse get kv meta fail", "error", err)
 			failureCount++
 			continue
 		}
 
-		err = verifyChunk(chunk, meta)
+		err = verifyKV(sm, kv, meta)
 		if err != nil {
-			log.Warn("processChunkResponse verify chunk fail", "error", err)
+			log.Warn("processKVResponse verify kv fail", "error", err)
 			failureCount++
 			continue
 		}
 
-		success, err := sm.TryWrite(chunk.idx, chunk.data)
+		success, err := sm.TryWriteMaskedKV(kv.Idx, kv.Data)
 		if !success || err != nil {
-			res.task.indexes[chunk.idx] = 0
+			res.task.indexes[kv.Idx] = 0
 			failureCount++
 		} else {
-			delete(res.task.indexes, chunk.idx)
+			delete(res.task.indexes, kv.Idx)
 			successCount++
 		}
 	}
 
 	// set peer to stateless peer if fail too much
-	if req, ok := res.task.req[res.reqId]; successCount == 0 && ok {
-		s.statelessPeers[req.peer] = struct{}{}
+	req, ok := res.task.req[res.reqId]
+	if successCount == 0 && ok {
+		res.task.statelessPeers[req.peer] = struct{}{}
 	}
 
-	s.chunkSynced += synced
-	s.chunkBytes += common.StorageSize(syncedBytes)
-	log.Debug("Persisted set of chunks", "count", synced, "bytes", syncedBytes)
+	s.kvSynced += synced
+	s.kvBytes += common.StorageSize(syncedBytes)
+	log.Debug("Persisted set of kvs", "count", synced, "bytes", syncedBytes)
 
 	// If this delivery completed the last pending task, forward the account task
-	// to the next chunk
+	// to the next kv
 	if len(res.task.indexes) == 0 {
 		res.task.done = true
 	}
+	log.Debug("", "remain index for sync", len(res.task.indexes))
 }
 
 type metadata struct {
@@ -674,30 +705,38 @@ type metadata struct {
 	hashInMeta []byte
 }
 
-// verifyChunk verify chunk using metadata
-func verifyChunk(chunk *Chunk, meta *metadata) error {
-	if chunk.idx != meta.kvIdx {
-		return fmt.Errorf("verifyChunk fail: kvIdx mismatch", "chunk Idx", chunk.idx, "meta kvIdx", meta.kvIdx)
+// verifyKV verify kv using metadata
+func verifyKV(sm *sstorage.ShardManager, kv *KV, meta *metadata) error {
+	if kv.Idx != meta.kvIdx {
+		return fmt.Errorf("verifyKV fail: kvIdx mismatch; kv Idx: %d; meta kvIdx: %d", kv.Idx, meta.kvIdx)
 	}
 
-	if meta.kvSize > uint64(len(chunk.data)) {
-		return fmt.Errorf("verifyChunk fail: size error", "data size", len(chunk.data), "meta kvSize", meta.kvSize)
+	if sm == nil {
+		return fmt.Errorf("empty sm to verify KV")
+	}
+	data, r, err := sm.UnmaskKV(meta.kvIdx, kv.Data[:meta.kvSize], common.BytesToHash(meta.hashInMeta))
+	if !r || err != nil {
+		return fmt.Errorf("Unmask KV fail, err: %v", err)
+	}
+
+	if meta.kvSize > uint64(len(data)) {
+		return fmt.Errorf("verifyKV fail: size error; Data size: %d; meta kvSize: %d", len(kv.Data), meta.kvSize)
 	}
 
 	hasher := sha3.NewLegacyKeccak256().(crypto.KeccakState)
-	hasher.Write(chunk.data[:meta.kvSize])
+	hasher.Write(data[:meta.kvSize])
 	hash := common.Hash{}
 	hasher.Read(hash[:])
 
 	if bytes.Compare(hash[:24], meta.hashInMeta) != 0 {
-		return fmt.Errorf("verifyChunk fail: size error",
-			"data hash", hash.Hex(), "meta hash (24)", common.Bytes2Hex(meta.hashInMeta))
+		return fmt.Errorf("verifyKV fail: size error; Data hash: %s; meta hash (24): %s",
+			hash.Hex(), common.Bytes2Hex(meta.hashInMeta))
 	}
 
 	return nil
 }
 
-// getSlotHash generate slot hash to fetch data from stateDB
+// getSlotHash generate slot hash to fetch Data from stateDB
 func getSlotHash(slotIdx uint64, key common.Hash) common.Hash {
 	slot := uint256.NewInt(slotIdx).Bytes32()
 
@@ -726,49 +765,55 @@ func getSstorageMetadata(s *state.StateDB, contract common.Address, index uint64
 	key := getSlotHash(6, uint256.NewInt(index).Bytes32())
 	skey := s.GetState(contract, key)
 	if skey == emptyHash {
-		return nil, fmt.Errorf("Fail to get skey", "index", index)
+		return nil, fmt.Errorf("fail to get skey for index %d", index)
 	}
 
 	key = getSlotHash(5, skey)
 	meta := s.GetState(contract, key)
 	if skey == emptyHash {
-		return nil, fmt.Errorf("Fail to get metadata", "skey", skey)
+		return nil, fmt.Errorf("fail to get metadata for skey %s", skey.Hex())
 	}
 
-	return &metadata{binary.BigEndian.Uint64(meta[:5]), binary.BigEndian.Uint64(meta[5:8]), meta[8:]}, nil
+	return &metadata{
+			new(big.Int).SetBytes(meta[:5]).Uint64(),
+			new(big.Int).SetBytes(meta[5:8]).Uint64(),
+			meta[8:]},
+		nil
 }
 
-// OnChunks is a callback method to invoke when a batch of contract
+// OnKVs is a callback method to invoke when a batch of contract
 // bytes codes are received from a remote peer.
-func (s *Syncer) OnChunks(peer SyncPeer, id uint64, chunks []*Chunk) error {
+func (s *Syncer) OnKVs(peer SyncPeer, id uint64, kvs []*KV) error {
 	var size common.StorageSize
-	for _, chunk := range chunks {
-		size += common.StorageSize(len(chunk.data))
+	for _, kv := range kvs {
+		if kv != nil {
+			size += common.StorageSize(len(kv.Data))
+		}
 	}
 	logger := peer.Log().New("reqid", id)
-	logger.Trace("Delivering set of chunks", "chunks", len(chunks), "bytes", size)
+	logger.Trace("Delivering set of kvs", "kvs", len(kvs), "bytes", size)
 
 	// Whether or not the response is valid, we can mark the peer as idle and
 	// notify the scheduler to assign a new task. If the response is invalid,
 	// we'll drop the peer in a bit.
 	s.lock.Lock()
 	if _, ok := s.peers[peer.ID()]; ok {
-		s.chunkIdlers[peer.ID()] = struct{}{}
+		s.kvIdlers[peer.ID()] = struct{}{}
 	}
 	select {
 	case s.update <- struct{}{}:
 	default:
 	}
 	// Ensure the response is for a valid request
-	req, ok := s.chunkReqs[id]
+	req, ok := s.kvReqs[id]
 	if !ok {
 		// Request stale, perhaps the peer timed out but came through in the end
-		logger.Warn("Unexpected chunk packet")
+		logger.Warn("Unexpected kv packet")
 		s.lock.Unlock()
 		return nil
 	}
-	delete(s.chunkReqs, id)
-	s.rates.Update(peer.ID(), ChunksMsg, time.Since(req.time), len(chunks))
+	delete(s.kvReqs, id)
+	s.rates.Update(peer.ID(), KVsMsg, time.Since(req.time), len(kvs))
 
 	// Clean up the request timeout timer, we'll see how to proceed further based
 	// on the actual delivered content
@@ -781,46 +826,46 @@ func (s *Syncer) OnChunks(peer SyncPeer, id uint64, chunks []*Chunk) error {
 	// get id range and check range
 	sm := sstorage.ContractToShardManager[req.contract]
 	if sm == nil {
-		logger.Debug("Peer rejected chunk request")
-		s.statelessPeers[peer.ID()] = struct{}{}
+		logger.Debug("Peer rejected kv request")
+		req.task.statelessPeers[peer.ID()] = struct{}{}
 		s.lock.Unlock()
 
 		// Signal this request as failed, and ready for rescheduling
-		s.scheduleRevertChunkRequest(req)
+		s.scheduleRevertKVRequest(req)
 		return nil
 	}
 	startIdx, endIdx := sm.KvEntries()*req.shardId, sm.KvEntries()*(req.shardId+1)-1
-	chunkInRange := make([]*Chunk, 0)
-	for _, chunk := range chunks {
-		if startIdx <= chunk.idx && endIdx >= chunk.idx {
-			chunkInRange = append(chunkInRange, chunk)
+	kvInRange := make([]*KV, 0)
+	for _, kv := range kvs {
+		if startIdx <= kv.Idx && endIdx >= kv.Idx {
+			kvInRange = append(kvInRange, kv)
 		}
 	}
-	if len(chunks) > len(chunkInRange) {
-		logger.Warn("Drop unexpected chunks", "count", len(chunks)-len(chunkInRange))
+	if len(kvs) > len(kvInRange) {
+		logger.Warn("Drop unexpected kvs", "count", len(kvs)-len(kvInRange))
 	}
 
 	// Response is valid, but check if peer is signalling that it does not have
-	// the requested data. For chunk range queries that means the peer is not
+	// the requested Data. For kv range queries that means the peer is not
 	// yet synced.
-	if len(chunkInRange) == 0 {
-		logger.Debug("Peer rejected chunk request")
-		s.statelessPeers[peer.ID()] = struct{}{}
+	if len(kvInRange) == 0 {
+		logger.Debug("Peer rejected kv request")
+		req.task.statelessPeers[peer.ID()] = struct{}{}
 		s.lock.Unlock()
 
 		// Signal this request as failed, and ready for rescheduling
-		s.scheduleRevertChunkRequest(req)
+		s.scheduleRevertKVRequest(req)
 		return nil
 	}
 	s.lock.Unlock()
 
 	// Response validated, send it to the scheduler for filling
-	response := &chunkResponse{
+	response := &kvResponse{
 		task:     req.task,
 		reqId:    req.id,
 		contract: req.contract,
 		shardId:  req.shardId,
-		chunks:   chunks,
+		kvs:      kvs,
 	}
 	select {
 	case req.deliver <- response:
@@ -833,28 +878,28 @@ func (s *Syncer) OnChunks(peer SyncPeer, id uint64, chunks []*Chunk) error {
 // report calculates various status reports and provides it to the user.
 func (s *Syncer) report(force bool) {
 	// Don't report all the events, just occasionally
-	if !force && time.Since(s.logTime) < 8*time.Second {
+	/*if !force && time.Since(s.logTime) < 8*time.Second {
 		return
-	}
+	}*/
 	// Don't report anything until we have a meaningful progress
-	synced := s.chunkSynced
+	synced := s.kvSynced
 	if synced == 0 {
 		return
 	}
-	chunksToSync := uint64(0)
+	kvsToSync := uint64(0)
 	for _, task := range s.tasks {
-		chunksToSync = chunksToSync + uint64(len(task.indexes))
+		kvsToSync = kvsToSync + uint64(len(task.indexes))
 	}
 	s.logTime = time.Now()
 
 	elapsed := time.Since(s.startTime)
-	estTime := elapsed / time.Duration(synced) * time.Duration(chunksToSync+synced)
+	estTime := elapsed / time.Duration(synced) * time.Duration(kvsToSync+synced)
 
 	// Create a mega progress report
 	var (
-		progress = fmt.Sprintf("%.2f%%", float64(synced)*100/float64(chunksToSync+synced))
-		chunk    = fmt.Sprintf("%v@%v", log.FormatLogfmtUint64(s.chunkSynced), s.chunkBytes.TerminalString())
+		progress = fmt.Sprintf("%.2f%%", float64(synced)*100/float64(kvsToSync+synced))
+		kv       = fmt.Sprintf("%v@%v", log.FormatLogfmtUint64(s.kvSynced), s.kvBytes.TerminalString())
 	)
 	log.Info("State sync in progress", "synced", progress, "state", synced,
-		"chunk", chunk, "eta", common.PrettyDuration(estTime-elapsed))
+		"kv", kv, "eta", common.PrettyDuration(estTime-elapsed))
 }

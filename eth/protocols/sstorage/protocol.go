@@ -42,8 +42,8 @@ var protocolLengths = map[uint]uint64{SSTORAGE1: 2}
 const maxMessageSize = 10 * 1024 * 1024
 
 const (
-	GetChunksMsg = 0x00
-	ChunksMsg    = 0x01
+	GetKVsMsg = 0x00
+	KVsMsg    = 0x01
 )
 
 var (
@@ -59,29 +59,29 @@ type Packet interface {
 	Kind() byte   // Kind returns the message type.
 }
 
-// GetChunksPacket represents an account query.
-type GetChunksPacket struct {
-	ID        uint64         // Request ID to match up responses with
-	Contract  common.Address // Contract of the sharded storage
-	ShardId   uint64         // ShardId
-	ChunkList []uint64       // ChunkList index list to retrieve
+// GetKVsPacket represents an account query.
+type GetKVsPacket struct {
+	ID       uint64         // Request ID to match up responses with
+	Contract common.Address // Contract of the sharded storage
+	ShardId  uint64         // ShardId
+	KVList   []uint64       // KVList index list to retrieve
 }
 
-// ChunksPacket represents a shard storage slot query response.
-type ChunksPacket struct {
+// KVsPacket represents a shard storage slot query response.
+type KVsPacket struct {
 	ID       uint64         // ID of the request this is a response for
 	Contract common.Address // Contract of the sharded storage
 	ShardId  uint64         // ShardId
-	Chunks   []*Chunk       // Merkle proofs for the *last* slot range, if it's incomplete
+	KVs      []*KV          // Merkle proofs for the *last* slot range, if it's incomplete
 }
 
-type Chunk struct {
-	idx  uint64
-	data []byte
+type KV struct {
+	Idx  uint64
+	Data []byte
 }
 
-func (*GetChunksPacket) Name() string { return "GetChunksMsg" }
-func (*GetChunksPacket) Kind() byte   { return GetChunksMsg }
+func (*GetKVsPacket) Name() string { return "GetKVsMsg" }
+func (*GetKVsPacket) Kind() byte   { return GetKVsMsg }
 
-func (*ChunksPacket) Name() string { return "ChunksMsg" }
-func (*ChunksPacket) Kind() byte   { return ChunksMsg }
+func (*KVsPacket) Name() string { return "KVsMsg" }
+func (*KVsPacket) Kind() byte   { return KVsMsg }

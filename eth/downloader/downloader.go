@@ -1627,8 +1627,9 @@ func (d *Downloader) DeliverSnapPacket(peer *snap.Peer, packet snap.Packet) erro
 // data packet for the local node to consume.
 func (d *Downloader) DeliverSstoragePacket(peer *sstorage.Peer, packet sstorage.Packet) error {
 	switch packet := packet.(type) {
-	case *sstorage.ChunksPacket:
-		return d.SstorageSyncer.OnChunks(peer, packet.ID, packet.Chunks)
+	case *sstorage.KVsPacket:
+		fmt.Println(packet)
+		return d.SstorageSyncer.OnKVs(peer, packet.ID, packet.KVs)
 
 	default:
 		return fmt.Errorf("unexpected snap packet type: %T", packet)

@@ -80,16 +80,16 @@ func (p *Peer) Log() log.Logger {
 	return p.logger
 }
 
-// RequestChunks fetches a batch of chunks using a list of chunk index
-func (p *Peer) RequestChunks(id uint64, contract common.Address, shardId uint64, chunkList []uint64) error {
-	p.logger.Trace("Fetching Chunks", "reqId", id, "contract",
-		"shardId", shardId, contract, "count", len(chunkList))
+// RequestKVs fetches a batch of kvs using a list of kv index
+func (p *Peer) RequestKVs(id uint64, contract common.Address, shardId uint64, kvList []uint64) error {
+	p.logger.Trace("Fetching KVs", "reqId", id, "contract", contract,
+		"shardId", shardId, "count", len(kvList))
 
-	requestTracker.Track(p.id, p.version, GetChunksMsg, ChunksMsg, id)
-	return p2p.Send(p.rw, GetChunksMsg, &GetChunksPacket{
-		ID:        id,
-		Contract:  contract,
-		ShardId:   shardId,
-		ChunkList: chunkList,
+	requestTracker.Track(p.id, p.version, GetKVsMsg, KVsMsg, id)
+	return p2p.Send(p.rw, GetKVsMsg, &GetKVsPacket{
+		ID:       id,
+		Contract: contract,
+		ShardId:  shardId,
+		KVList:   kvList,
 	})
 }

@@ -30,10 +30,10 @@ import (
 // exchanges have passed.
 type Handler func(peer *Peer) error
 
-// Backend defines the data retrieval methods to serve remote requests and the
+// Backend defines the Data retrieval methods to serve remote requests and the
 // callback methods to invoke on remote deliveries.
 type Backend interface {
-	// Chain retrieves the blockchain object to serve data.
+	// Chain retrieves the blockchain object to serve Data.
 	Chain() *core.BlockChain
 
 	// RunPeer is invoked when a peer joins on the `eth` protocol. The handler
@@ -45,7 +45,7 @@ type Backend interface {
 	// PeerInfo retrieves all known `sstorage` information about a peer.
 	PeerInfo(id enode.ID) interface{}
 
-	// Handle is a callback to be invoked when a data packet is received from
+	// Handle is a callback to be invoked when a Data packet is received from
 	// the remote peer. Only packets not consumed by the protocol handler will
 	// be forwarded to the backend.
 	Handle(peer *Peer, packet Packet) error
@@ -111,28 +111,28 @@ func HandleMessage(backend Backend, peer *Peer) error {
 	defer msg.Discard()
 	// Handle the message depending on its contents
 	switch {
-	case msg.Code == GetChunksMsg:
+	case msg.Code == GetKVsMsg:
 		// Decode trie node retrieval request
-		var req GetChunksPacket
+		var req GetKVsPacket
 		if err := msg.Decode(&req); err != nil {
 			return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 		}
 		// Service the request, potentially returning nothing in case of errors
-		chunks, err := ServiceGetChunksQuery(backend.Chain(), &req)
+		kvs, err := ServiceGetKVsQuery(backend.Chain(), &req)
 		if err != nil {
 			return err
 		}
 		// Send back anything accumulated (or empty in case of errors)
-		return p2p.Send(peer.rw, ChunksMsg, &ChunksPacket{
+		return p2p.Send(peer.rw, KVsMsg, &KVsPacket{
 			ID:       req.ID,
 			Contract: req.Contract,
 			ShardId:  req.ShardId,
-			Chunks:   chunks,
+			KVs:      kvs,
 		})
 
-	case msg.Code == ChunksMsg:
-		// A batch of trie chunks arrived to one of our previous requests
-		res := new(ChunksPacket)
+	case msg.Code == KVsMsg:
+		// A batch of trie kvs arrived to one of our previous requests
+		res := new(KVsPacket)
 		if err := msg.Decode(res); err != nil {
 			return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 		}
@@ -144,20 +144,28 @@ func HandleMessage(backend Backend, peer *Peer) error {
 	}
 }
 
-// ServiceGetChunksQuery assembles the response to a chunks query.
+// ServiceGetKVsQuery assembles the response to a kvs query.
 // It is exposed to allow external packages to test protocol behavior.
-func ServiceGetChunksQuery(chain *core.BlockChain, req *GetChunksPacket) ([]*Chunk, error) {
+func ServiceGetKVsQuery(chain *core.BlockChain, req *GetKVsPacket) ([]*KV, error) {
 	sm := sstorage.ContractToShardManager[req.Contract]
 	if sm == nil {
-		return nil, fmt.Errorf("shard manager for contract %d is not support",
-			"contract", req.Contract.Hex())
+		return nil, fmt.Errorf("shard manager for contract %s is not support", req.Contract.Hex())
 	}
 
-	res := make([]*Chunk, 0)
-	for _, idx := range req.ChunkList {
-		if data, ok, err := sm.TryRead(idx, int(sm.MaxKvSize())); ok && err == nil {
-			chunk := Chunk{idx, data}
-			res = append(res, &chunk)
+	stateDB, err := chain.StateAt(chain.CurrentBlock().Hash())
+	if err != nil {
+		return nil, err
+	}
+	res := make([]*KV, 0)
+	for _, idx := range req.KVList {
+		meta, err := getSstorageMetadata(stateDB, req.Contract, idx)
+		if err != nil {
+			continue
+		}
+		data, ok, err := sm.TryReadMaskedKV(idx, int(sm.MaxKvSize()), common.BytesToHash(meta.hashInMeta))
+		if ok && err == nil {
+			kv := KV{idx, data}
+			res = append(res, &kv)
 		}
 	}
 
