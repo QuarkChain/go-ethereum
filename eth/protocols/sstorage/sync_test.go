@@ -20,6 +20,12 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"math/rand"
+	"os"
+	"sync"
+	"testing"
+	"time"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/state"
@@ -30,11 +36,6 @@ import (
 	"github.com/ethereum/go-ethereum/sstorage"
 	"github.com/holiman/uint256"
 	"golang.org/x/crypto/sha3"
-	"math/rand"
-	"os"
-	"sync"
-	"testing"
-	"time"
 )
 
 var (
