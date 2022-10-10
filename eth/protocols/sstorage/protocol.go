@@ -18,7 +18,6 @@ package sstorage
 
 import (
 	"errors"
-
 	"github.com/ethereum/go-ethereum/common"
 )
 
