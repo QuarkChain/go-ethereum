@@ -40,11 +40,7 @@ import (
 	"golang.org/x/crypto/sha3"
 )
 
-// todo
 const (
-	// minSstoragePeer is the minimum number of peers for each shard.
-	minSstoragePeers = 16
-
 	// maxRequestSize is the maximum number of bytes to request from a remote peer.
 	// This number is used as the high cap for kv range requests.
 	maxRequestSize = uint64(512 * 1024)

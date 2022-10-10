@@ -278,7 +278,7 @@ func newHandler(config *handlerConfig) (*handler, error) {
 	return h, nil
 }
 
-// runEthPeer registers an eth peer into the joint eth/snap peerset, adds it to
+// runEthPeer registers an eth peer into the joint eth/snap/sstorage peerset, adds it to
 // various subsistems and starts handling messages.
 func (h *handler) runEthPeer(peer *eth.Peer, handler eth.Handler) error {
 	// If the peer has a `snap` extension, wait for it to connect so we can have
@@ -286,6 +286,11 @@ func (h *handler) runEthPeer(peer *eth.Peer, handler eth.Handler) error {
 	snap, err := h.peers.waitSnapExtension(peer)
 	if err != nil {
 		peer.Log().Error("Snapshot extension barrier failed", "err", err)
+		return err
+	}
+	sstor, err := h.peers.waitSstorageExtension(peer)
+	if err != nil {
+		peer.Log().Error("Sstorage extension barrier failed", "err", err)
 		return err
 	}
 	// TODO(karalabe): Not sure why this is needed
@@ -321,14 +326,14 @@ func (h *handler) runEthPeer(peer *eth.Peer, handler eth.Handler) error {
 	}
 	// Ignore maxPeers if this is a trusted peer
 	if !peer.Peer.Info().Network.Trusted {
-		if reject || h.peers.len() >= h.maxPeers { // todo add peer for shard
+		if reject || (h.peers.len() >= h.maxPeers && !h.peers.needThisPeer(sstor)) {
 			return p2p.DiscTooManyPeers
 		}
 	}
 	peer.Log().Debug("Ethereum peer connected", "name", peer.Name())
 
 	// Register the peer locally
-	if err := h.peers.registerPeer(peer, snap); err != nil {
+	if err := h.peers.registerPeer(peer, snap, sstor); err != nil {
 		peer.Log().Error("Ethereum peer registration failed", "err", err)
 		return err
 	}
@@ -346,6 +351,12 @@ func (h *handler) runEthPeer(peer *eth.Peer, handler eth.Handler) error {
 	if snap != nil {
 		if err := h.downloader.SnapSyncer.Register(snap); err != nil {
 			peer.Log().Error("Failed to register peer in snap syncer", "err", err)
+			return err
+		}
+	}
+	if sstor != nil {
+		if err := h.downloader.SstorageSyncer.Register(sstor); err != nil {
+			peer.Log().Error("Failed to register peer in sstorage syncer", "err", err)
 			return err
 		}
 	}
@@ -463,8 +474,8 @@ func (h *handler) runSnapExtension(peer *snap.Peer, handler snap.Handler) error 
 	return handler(peer)
 }
 
-// runSstorageExtension registers a `snap` peer into the joint eth/snap peerset and
-// starts handling inbound messages. As `snap` is only a satellite protocol to
+// runSstorageExtension registers a `sstorage` peer into the joint eth/sstorage peerset and
+// starts handling inbound messages. As `sstorage` is only a satellite protocol to
 // `eth`, all subsystem registrations and lifecycle management will be done by
 // the main `eth` handler to prevent strange races.
 func (h *handler) runSstorageExtension(peer *sstorage.Peer, handler sstorage.Handler) error {
@@ -509,7 +520,7 @@ func (h *handler) unregisterPeer(id string) {
 	if peer.snapExt != nil {
 		h.downloader.SnapSyncer.Unregister(id)
 	}
-	if peer.sstorageExt != nil {
+	if peer.sstorExt != nil {
 		h.downloader.SstorageSyncer.Unregister(id)
 	}
 	h.downloader.UnregisterPeer(id)

@@ -18,14 +18,19 @@ package eth
 
 import (
 	"errors"
-	"github.com/ethereum/go-ethereum/eth/protocols/sstorage"
 	"math/big"
 	"sync"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/eth/protocols/eth"
 	"github.com/ethereum/go-ethereum/eth/protocols/snap"
+	"github.com/ethereum/go-ethereum/eth/protocols/sstorage"
 	"github.com/ethereum/go-ethereum/p2p"
+)
+
+var (
+	// minSstoragePeer is the minimum number of peers for each shard.
+	minSstoragePeers = 15
 )
 
 var (
@@ -56,7 +61,10 @@ type peerSet struct {
 	snapPend map[string]*snap.Peer      // Peers connected on the `snap` protocol, but not yet on `eth`
 
 	// peers for each sstorage shard
-	sstoragePeers map[common.Address]map[uint64]map[string]struct{}
+	sstorPeers map[common.Address]map[uint64]map[string]struct{}
+
+	sstorWait map[string]chan *sstorage.Peer // Peers connected on `eth` waiting for their sstorage extension
+	sstorPend map[string]*sstorage.Peer      // Peers connected on the `sstorage` protocol, but not yet on `eth`
 
 	lock   sync.RWMutex
 	closed bool
@@ -72,10 +80,12 @@ func newPeerSet(shards map[common.Address][]uint64) *peerSet {
 		}
 	}
 	return &peerSet{
-		peers:         make(map[string]*ethPeer),
-		snapWait:      make(map[string]chan *snap.Peer),
-		snapPend:      make(map[string]*snap.Peer),
-		sstoragePeers: sstoragePeers,
+		peers:      make(map[string]*ethPeer),
+		snapWait:   make(map[string]chan *snap.Peer),
+		snapPend:   make(map[string]*snap.Peer),
+		sstorWait:  make(map[string]chan *sstorage.Peer),
+		sstorPend:  make(map[string]*sstorage.Peer),
+		sstorPeers: sstoragePeers,
 	}
 }
 
@@ -144,12 +154,12 @@ func (ps *peerSet) waitSnapExtension(peer *eth.Peer) (*snap.Peer, error) {
 }
 
 // registerSstorageExtension unblocks an already connected `eth` peer waiting for its
-// `snap` extension, or if no such peer exists, tracks the extension for the time
+// `sstorage` extension, or if no such peer exists, tracks the extension for the time
 // being until the `eth` main protocol starts looking for it.
 func (ps *peerSet) registerSstorageExtension(peer *sstorage.Peer) error {
-	// Reject the peer if it advertises `snap` without `eth` as `snap` is only a
+	// Reject the peer if it advertises `sstorage` without `eth` as `sstorage` is only a
 	// satellite protocol meaningful with the chain selection of `eth`
-	if !peer.RunningCap(sstorage.ProtocolName, sstorage.ProtocolVersions) {
+	if !peer.RunningCap(eth.ProtocolName, eth.ProtocolVersions) {
 		return errors.New("peer connected on sstorage without compatible eth support")
 	}
 	// Ensure nobody can double connect
@@ -160,28 +170,56 @@ func (ps *peerSet) registerSstorageExtension(peer *sstorage.Peer) error {
 	if _, ok := ps.peers[id]; ok {
 		return errPeerAlreadyRegistered // avoid connections with the same id as existing ones
 	}
-	for contract, shards := range peer.Shards() {
-		_, ok := ps.sstoragePeers[contract]
-		if !ok {
-			continue
-		}
-		for _, shard := range shards {
-			_, ok = ps.sstoragePeers[contract][shard]
-			if !ok {
-				continue
-			}
-			_, ok = ps.sstoragePeers[contract][shard][peer.ID()]
-			if ok {
-				ps.sstoragePeers[contract][shard][peer.ID()] = struct{}{}
-			}
-		}
+	if _, ok := ps.sstorPend[id]; ok {
+		return errPeerAlreadyRegistered // avoid connections with the same id as pending ones
 	}
+	// Inject the peer into an `eth` counterpart is available, otherwise save for later
+	if wait, ok := ps.sstorWait[id]; ok {
+		delete(ps.sstorWait, id)
+		wait <- peer
+		return nil
+	}
+	ps.sstorPend[id] = peer
 	return nil
+}
+
+// waitExtensions blocks until all satellite protocols are connected and tracked
+// by the peerset.
+func (ps *peerSet) waitSstorageExtension(peer *eth.Peer) (*sstorage.Peer, error) {
+	// If the peer does not support a compatible `sstorage`, don't wait
+	if !peer.RunningCap(sstorage.ProtocolName, sstorage.ProtocolVersions) {
+		return nil, nil
+	}
+	// Ensure nobody can double connect
+	ps.lock.Lock()
+
+	id := peer.ID()
+	if _, ok := ps.peers[id]; ok {
+		ps.lock.Unlock()
+		return nil, errPeerAlreadyRegistered // avoid connections with the same id as existing ones
+	}
+	if _, ok := ps.sstorWait[id]; ok {
+		ps.lock.Unlock()
+		return nil, errPeerAlreadyRegistered // avoid connections with the same id as pending ones
+	}
+	// If `sstorage` already connected, retrieve the peer from the pending set
+	if sstor, ok := ps.sstorPend[id]; ok {
+		delete(ps.sstorPend, id)
+
+		ps.lock.Unlock()
+		return sstor, nil
+	}
+	// Otherwise wait for `sstorage` to connect concurrently
+	wait := make(chan *sstorage.Peer)
+	ps.sstorWait[id] = wait
+	ps.lock.Unlock()
+
+	return <-wait, nil
 }
 
 // registerPeer injects a new `eth` peer into the working set, or returns an error
 // if the peer is already known.
-func (ps *peerSet) registerPeer(peer *eth.Peer, ext *snap.Peer) error {
+func (ps *peerSet) registerPeer(peer *eth.Peer, ext *snap.Peer, sstorExt *sstorage.Peer) error {
 	// Start tracking the new peer
 	ps.lock.Lock()
 	defer ps.lock.Unlock()
@@ -200,6 +238,22 @@ func (ps *peerSet) registerPeer(peer *eth.Peer, ext *snap.Peer) error {
 		eth.snapExt = &snapPeer{ext}
 		ps.snapPeers++
 	}
+	if sstorExt != nil {
+		eth.sstorExt = &sstoragePeer{sstorExt}
+		for contract, shards := range sstorExt.Shards() {
+			cPeers, ok := ps.sstorPeers[contract]
+			if !ok {
+				continue
+			}
+			for _, shard := range shards {
+				_, ok = cPeers[shard]
+				if !ok {
+					continue
+				}
+				cPeers[shard][peer.ID()] = struct{}{}
+			}
+		}
+	}
 	ps.peers[id] = eth
 	return nil
 }
@@ -217,6 +271,22 @@ func (ps *peerSet) unregisterPeer(id string) error {
 	delete(ps.peers, id)
 	if peer.snapExt != nil {
 		ps.snapPeers--
+	}
+	if peer.sstorExt != nil {
+		sstorExt := peer.sstorExt.Peer
+		for contract, shards := range sstorExt.Shards() {
+			cPeers, ok := ps.sstorPeers[contract]
+			if !ok {
+				continue
+			}
+			for _, shard := range shards {
+				sPeers, ok := cPeers[shard]
+				if !ok {
+					continue
+				}
+				delete(sPeers, peer.ID())
+			}
+		}
 	}
 	return nil
 }
@@ -277,7 +347,7 @@ func (ps *peerSet) snapLen() int {
 	return ps.snapPeers
 }
 
-// peerWithHighestTD retrieves the known peer with the currently highest total
+// peerWithHighestTD retrieves the known peer with the current highest total
 // difficulty.
 func (ps *peerSet) peerWithHighestTD() *eth.Peer {
 	ps.lock.RLock()
@@ -304,4 +374,24 @@ func (ps *peerSet) close() {
 		p.Disconnect(p2p.DiscQuitting)
 	}
 	ps.closed = true
+}
+
+func (ps *peerSet) needThisPeer(peer *sstorage.Peer) bool {
+	for contract, shards := range peer.Shards() {
+		_, ok := ps.sstorPeers[contract]
+		if !ok {
+			continue
+		}
+		for _, shard := range shards {
+			pl, ok := ps.sstorPeers[contract][shard]
+			if !ok {
+				continue
+			}
+			if len(pl) < minSstoragePeers {
+				return true
+			}
+		}
+	}
+
+	return false
 }

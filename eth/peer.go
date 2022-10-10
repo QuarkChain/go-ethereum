@@ -36,9 +36,9 @@ type ethPeerInfo struct {
 // ethPeer is a wrapper around eth.Peer to maintain a few extra metadata.
 type ethPeer struct {
 	*eth.Peer
-	snapExt     *snapPeer     // Satellite `snap` connection
-	snapWait    chan struct{} // Notification channel for snap connections
-	sstorageExt *sstoragePeer
+	snapExt  *snapPeer     // Satellite `snap` connection
+	snapWait chan struct{} // Notification channel for snap connections
+	sstorExt *sstoragePeer
 }
 
 // info gathers and returns some `eth` protocol metadata known about a peer.

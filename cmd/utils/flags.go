@@ -1842,7 +1842,7 @@ func SetDNSDiscoveryDefaults(cfg *ethconfig.Config, genesis common.Hash) {
 	if url := params.KnownDNSNetwork(genesis, protocol); url != "" {
 		cfg.EthDiscoveryURLs = []string{url}
 		cfg.SnapDiscoveryURLs = cfg.EthDiscoveryURLs
-		cfg.SstorageDiscoveryURLs = cfg.SstorageDiscoveryURLs
+		cfg.SstorageDiscoveryURLs = cfg.EthDiscoveryURLs
 	}
 }
 
