@@ -19,7 +19,7 @@ type ShardInfo struct {
 
 // TODO: move to chain specific config?
 var ShardInfos = []*ShardInfo{
-	{common.HexToAddress("0x0000000000000000000000000000000003330001"), 4 * 1024, 256 * 1024},
+	{common.HexToAddress("0x0000000000000000000000000000000003330001"), 4 * 1024, 100 /*256 * 1024*/},
 }
 
 func InitializeConfig() {

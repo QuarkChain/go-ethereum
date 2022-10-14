@@ -257,8 +257,8 @@ var (
 	}
 
 	Web3QTestnetValBootnodes = []string{
-		"/ip4/68.183.157.114/udp/33333/quic/p2p/12D3KooWEZ94qZgJgUNYiLwXahknkniYgozxw5eocijZJkew6Mj5",
-		"/ip4/128.199.102.174/udp/33333/quic/p2p/12D3KooWNjKALie7Cdpb4KG8axgABA4VCCsKoBQdvYvRhVZhbtPk",
+		"/ip4/147.182.142.140/udp/31330/quic/p2p/12D3KooWEZ94qZgJgUNYiLwXahknkniYgozxw5eocijZJkew6Mj5",
+		"/ip4/147.182.142.140/udp/31331/quic/p2p/12D3KooWNjKALie7Cdpb4KG8axgABA4VCCsKoBQdvYvRhVZhbtPk",
 	}
 
 	// Web3QTestnetChainConfig contains the chain parameters to run a node on the Web3Q test network.
