@@ -45,6 +45,7 @@ import (
 	"github.com/ethereum/go-ethereum/eth/gasprice"
 	"github.com/ethereum/go-ethereum/eth/protocols/eth"
 	"github.com/ethereum/go-ethereum/eth/protocols/snap"
+	sstorprotocol "github.com/ethereum/go-ethereum/eth/protocols/sstorage"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/internal/ethapi"
@@ -58,6 +59,7 @@ import (
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/rpc"
+	"github.com/ethereum/go-ethereum/sstorage"
 )
 
 // Config contains the configuration options of the ETH protocol.
@@ -69,12 +71,13 @@ type Ethereum struct {
 	config *ethconfig.Config
 
 	// Handlers
-	txPool             *core.TxPool
-	blockchain         *core.BlockChain
-	handler            *handler
-	ethDialCandidates  enode.Iterator
-	snapDialCandidates enode.Iterator
-	merger             *consensus.Merger
+	txPool              *core.TxPool
+	blockchain          *core.BlockChain
+	handler             *handler
+	ethDialCandidates   enode.Iterator
+	snapDialCandidates  enode.Iterator
+	sstorDialCandidates enode.Iterator
+	merger              *consensus.Merger
 
 	// DB interfaces
 	chainDb ethdb.Database // Block chain database
@@ -283,6 +286,10 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		return nil, err
 	}
 	eth.snapDialCandidates, err = dnsclient.NewIterator(eth.config.SnapDiscoveryURLs...)
+	if err != nil {
+		return nil, err
+	}
+	eth.sstorDialCandidates, err = dnsclient.NewIterator(eth.config.SstorageDiscoveryURLs...)
 	if err != nil {
 		return nil, err
 	}
@@ -571,6 +578,9 @@ func (s *Ethereum) Protocols() []p2p.Protocol {
 	if s.config.SnapshotCache > 0 {
 		protos = append(protos, snap.MakeProtocols((*snapHandler)(s.handler), s.snapDialCandidates)...)
 	}
+	if len(sstorage.Shards()) > 0 {
+		protos = append(protos, sstorprotocol.MakeProtocols((*sstorageHandler)(s.handler), sstorage.Shards(), s.sstorDialCandidates)...)
+	}
 	return protos
 }
 
@@ -604,6 +614,7 @@ func (s *Ethereum) Stop() error {
 	// Stop all the peer-related stuff first.
 	s.ethDialCandidates.Close()
 	s.snapDialCandidates.Close()
+	s.sstorDialCandidates.Close()
 	s.handler.Stop()
 
 	// Then stop everything else.

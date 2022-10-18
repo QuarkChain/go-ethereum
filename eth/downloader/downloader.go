@@ -28,14 +28,17 @@ import (
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/rawdb"
+	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/state/snapshot"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/eth/protocols/eth"
 	"github.com/ethereum/go-ethereum/eth/protocols/snap"
+	"github.com/ethereum/go-ethereum/eth/protocols/sstorage"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
+	sstor "github.com/ethereum/go-ethereum/sstorage"
 )
 
 var (
@@ -129,7 +132,9 @@ type Downloader struct {
 
 	snapSync       bool         // Whether to run state sync over the snap protocol
 	SnapSyncer     *snap.Syncer // TODO(karalabe): make private! hack for now
+	SstorageSyncer *sstorage.Syncer
 	stateSyncStart chan *stateSync
+	sstorStart     chan struct{}
 
 	// Cancellation and termination
 	cancelPeer string         // Identifier of the peer currently being used as the master (cancel on drop)
@@ -198,6 +203,8 @@ type BlockChain interface {
 
 	// Snapshots returns the blockchain snapshot tree to paused it during sync.
 	Snapshots() *snapshot.Tree
+
+	StateAt(root common.Hash) (*state.StateDB, error)
 }
 
 // New creates a new downloader to fetch hashes and blocks from remote peers.
@@ -217,9 +224,12 @@ func New(checkpoint uint64, stateDb ethdb.Database, mux *event.TypeMux, chain Bl
 		headerProcCh:   make(chan *headerTask, 1),
 		quitCh:         make(chan struct{}),
 		SnapSyncer:     snap.NewSyncer(stateDb),
+		SstorageSyncer: sstorage.NewSyncer(stateDb, chain, sstor.Shards()),
 		stateSyncStart: make(chan *stateSync),
+		sstorStart:     make(chan struct{}),
 	}
 	go dl.stateFetcher()
+	go dl.sstorageFetcher()
 	return dl
 }
 
@@ -322,6 +332,9 @@ func (d *Downloader) UnregisterPeer(id string) error {
 // adding various sanity checks as well as wrapping it with various log entries.
 func (d *Downloader) Synchronise(id string, head common.Hash, td *big.Int, mode SyncMode) error {
 	err := d.synchronise(id, head, td, mode)
+	if err == nil {
+		d.sstorStart <- struct{}{}
+	}
 
 	switch err {
 	case nil, errBusy, errCanceled:
@@ -1610,6 +1623,19 @@ func (d *Downloader) DeliverSnapPacket(peer *snap.Peer, packet snap.Packet) erro
 
 	case *snap.TrieNodesPacket:
 		return d.SnapSyncer.OnTrieNodes(peer, packet.ID, packet.Nodes)
+
+	default:
+		return fmt.Errorf("unexpected snap packet type: %T", packet)
+	}
+}
+
+// DeliverSstoragePacket is invoked from a peer's message handler when it transmits a
+// data packet for the local node to consume.
+func (d *Downloader) DeliverSstoragePacket(peer *sstorage.Peer, packet sstorage.Packet) error {
+	switch packet := packet.(type) {
+	case *sstorage.KVsPacket:
+		fmt.Println(packet)
+		return d.SstorageSyncer.OnKVs(peer, packet.ID, packet.KVs)
 
 	default:
 		return fmt.Errorf("unexpected snap packet type: %T", packet)
