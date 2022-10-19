@@ -334,6 +334,11 @@ func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
 		ret, st.gas, vmerr = st.evm.Call(sender, st.to(), st.data, st.gas, st.value)
 	}
 
+	// If an unexpected error occurs during evm, return immediately
+	if st.evm.CrossChainCallUnExpectErr() != nil {
+		return nil, st.evm.CrossChainCallUnExpectErr()
+	}
+
 	if !london {
 		// Before EIP-3529: refunds were capped to gasUsed / 2
 		st.refundGas(params.RefundQuotient)
