@@ -766,7 +766,7 @@ func getSstorageMetadata(s *state.StateDB, contract common.Address, index uint64
 
 	key = getSlotHash(5, skey)
 	meta := s.GetState(contract, key)
-	if skey == emptyHash {
+	if meta == emptyHash {
 		return nil, fmt.Errorf("fail to get metadata for skey %s", skey.Hex())
 	}
 
