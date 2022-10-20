@@ -68,7 +68,7 @@ func MakeProtocols(backend Backend, shards map[common.Address][]uint64, dnsdisc 
 			Version: version,
 			Length:  protocolLengths[version],
 			Run: func(p *p2p.Peer, rw p2p.MsgReadWriter) error {
-				return backend.RunPeer(NewPeer(version, shards, p, rw), func(peer *Peer) error {
+				return backend.RunPeer(NewPeer(version, p, rw), func(peer *Peer) error {
 					return Handle(backend, peer)
 				})
 			},
