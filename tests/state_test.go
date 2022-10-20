@@ -423,8 +423,8 @@ func addPrefix0(str string) string {
 
 func TestCrossChainCallPrecompile(t *testing.T) {
 
+	// Successful external call transaction
 	{
-		// Successful external call transaction
 		rec, client, err := newMuskBlockChain()
 		if err != nil {
 			t.Fatal(err)
