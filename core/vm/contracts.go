@@ -53,6 +53,10 @@ type PrecompiledContractCallEnv struct {
 	caller ContractRef
 }
 
+func NewPrecompiledContractCallEnv(evm *EVM, caller ContractRef) *PrecompiledContractCallEnv {
+	return &PrecompiledContractCallEnv{evm: evm, caller: caller}
+}
+
 type PrecompiledContractWithEVM interface {
 	RunWith(env *PrecompiledContractCallEnv, input []byte) ([]byte, error)
 }

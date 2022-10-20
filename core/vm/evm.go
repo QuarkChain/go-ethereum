@@ -175,8 +175,10 @@ func (evm *EVM) SetCrossChainCallResults(result []byte) {
 
 // EnableExternalCall returns true if the external-call module is active, otherwise returns false
 func (evm *EVM) EnableExternalCall() bool {
-	if evm.ChainConfig().ExternalCall.EnableBlockNumber != nil && evm.Context.BlockNumber.Cmp(evm.ChainConfig().ExternalCall.EnableBlockNumber) != -1 {
-		return true
+	if evm.ChainConfig().ExternalCall != nil {
+		if evm.ChainConfig().ExternalCall.EnableBlockNumber != nil && evm.Context.BlockNumber.Cmp(evm.ChainConfig().ExternalCall.EnableBlockNumber) != -1 {
+			return true
+		}
 	}
 	return false
 }
