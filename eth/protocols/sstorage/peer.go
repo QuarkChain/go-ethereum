@@ -36,14 +36,13 @@ type Peer struct {
 
 // NewPeer create a wrapper for a network connection and negotiated  protocol
 // version.
-func NewPeer(version uint, shards map[common.Address][]uint64, p *p2p.Peer, rw p2p.MsgReadWriter) *Peer {
+func NewPeer(version uint, p *p2p.Peer, rw p2p.MsgReadWriter) *Peer {
 	id := p.ID().String()
 	return &Peer{
 		id:      id,
 		Peer:    p,
 		rw:      rw,
 		version: version,
-		shards:  shards,
 		logger:  log.New("peer", id[:8]),
 	}
 }
@@ -60,6 +59,10 @@ func (p *Peer) Version() uint {
 
 func (p *Peer) Shards() map[common.Address][]uint64 {
 	return p.shards
+}
+
+func (p *Peer) SetShards(shards map[common.Address][]uint64) {
+	p.shards = shards
 }
 
 // IsShardExist checks whether one specific shard is supported by this peer.
