@@ -1234,7 +1234,8 @@ const CrossChainCallInputLength = 164
 // RequiredGas is the maximum gas consumption that will calculate the cross_chain_call
 func (c *crossChainCall) RequiredGas(input []byte) uint64 {
 	if len(input) != CrossChainCallInputLength {
-		return 0
+		// change a high gas when an error occurs to avoid DOS attack
+		return 20000
 	}
 
 	maxDataLen := new(big.Int).SetBytes(getData(input, 4+3*32, 32)).Uint64()
