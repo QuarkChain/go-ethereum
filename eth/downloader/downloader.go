@@ -132,9 +132,9 @@ type Downloader struct {
 
 	snapSync       bool         // Whether to run state sync over the snap protocol
 	SnapSyncer     *snap.Syncer // TODO(karalabe): make private! hack for now
-	SstorageSyncer *sstorage.Syncer
+	SstorSyncer    *sstorage.Syncer
 	stateSyncStart chan *stateSync
-	sstorStart     chan struct{}
+	sstorSyncStart chan *sstorSync
 
 	// Cancellation and termination
 	cancelPeer string         // Identifier of the peer currently being used as the master (cancel on drop)
@@ -224,9 +224,9 @@ func New(checkpoint uint64, stateDb ethdb.Database, mux *event.TypeMux, chain Bl
 		headerProcCh:   make(chan *headerTask, 1),
 		quitCh:         make(chan struct{}),
 		SnapSyncer:     snap.NewSyncer(stateDb),
-		SstorageSyncer: sstorage.NewSyncer(stateDb, chain, sstor.Shards()),
+		SstorSyncer:    sstorage.NewSyncer(stateDb, chain, sstor.Shards()),
 		stateSyncStart: make(chan *stateSync),
-		sstorStart:     make(chan struct{}),
+		sstorSyncStart: make(chan *sstorSync),
 	}
 	go dl.stateFetcher()
 	go dl.sstorageFetcher()
@@ -333,7 +333,7 @@ func (d *Downloader) UnregisterPeer(id string) error {
 func (d *Downloader) Synchronise(id string, head common.Hash, td *big.Int, mode SyncMode) error {
 	err := d.synchronise(id, head, td, mode)
 	if err == nil {
-		d.sstorStart <- struct{}{}
+		d.sstorState()
 	}
 
 	switch err {
@@ -1635,7 +1635,7 @@ func (d *Downloader) DeliverSstoragePacket(peer *sstorage.Peer, packet sstorage.
 	switch packet := packet.(type) {
 	case *sstorage.KVsPacket:
 		fmt.Println(packet)
-		return d.SstorageSyncer.OnKVs(peer, packet.ID, packet.KVs)
+		return d.SstorSyncer.OnKVs(peer, packet.ID, packet.KVs)
 
 	default:
 		return fmt.Errorf("unexpected snap packet type: %T", packet)

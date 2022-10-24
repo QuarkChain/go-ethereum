@@ -74,19 +74,6 @@ func (d *Downloader) runStateSync(s *stateSync) *stateSync {
 	}
 }
 
-// sstorageFetcher manages the active sstorage sync and accepts requests
-// on its behalf.
-func (d *Downloader) sstorageFetcher() {
-	for {
-		select {
-		case <-d.sstorStart:
-			go d.SstorageSyncer.Sync(d.cancelCh)
-		case <-d.quitCh:
-			return
-		}
-	}
-}
-
 // stateSync schedules requests for downloading a particular state trie defined
 // by a given state root.
 type stateSync struct {

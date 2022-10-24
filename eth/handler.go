@@ -309,7 +309,7 @@ func (h *handler) runEthPeer(peer *eth.Peer, handler eth.Handler) error {
 		td      = h.chain.GetTd(hash, number)
 	)
 	forkID := forkid.NewID(h.chain.Config(), h.chain.Genesis().Hash(), h.chain.CurrentHeader().Number.Uint64())
-	if err := peer.Handshake(h.networkID, td, hash, genesis.Hash(), forkID, h.forkFilter); err != nil {
+	if err := peer.Handshake(h.networkID, td, hash, genesis.Hash(), forkID, h.forkFilter, sstor); err != nil {
 		peer.Log().Debug("Ethereum handshake failed", "err", err)
 		return err
 	}
@@ -355,7 +355,7 @@ func (h *handler) runEthPeer(peer *eth.Peer, handler eth.Handler) error {
 		}
 	}
 	if sstor != nil {
-		if err := h.downloader.SstorageSyncer.Register(sstor); err != nil {
+		if err := h.downloader.SstorSyncer.Register(sstor); err != nil {
 			peer.Log().Error("Failed to register peer in sstorage syncer", "err", err)
 			return err
 		}
@@ -521,7 +521,7 @@ func (h *handler) unregisterPeer(id string) {
 		h.downloader.SnapSyncer.Unregister(id)
 	}
 	if peer.sstorExt != nil {
-		h.downloader.SstorageSyncer.Unregister(id)
+		h.downloader.SstorSyncer.Unregister(id)
 	}
 	h.downloader.UnregisterPeer(id)
 	h.txFetcher.Drop(id)
@@ -533,7 +533,6 @@ func (h *handler) unregisterPeer(id string) {
 
 func (h *handler) Start(maxPeers int) {
 	h.maxPeers = maxPeers
-	h.minPeersPerSstorageShard = 15 // todo update from config
 
 	// broadcast transactions
 	h.wg.Add(1)
