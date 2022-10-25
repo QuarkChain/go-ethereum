@@ -113,7 +113,7 @@ func HandleMessage(backend Backend, peer *Peer) error {
 	switch {
 	case msg.Code == GetShardListMsg:
 		// Decode trie node retrieval request
-		var req map[common.Address][]uint64
+		var req ShardListPacket
 		if err := msg.Decode(&req); err != nil {
 			return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 		}
@@ -121,11 +121,11 @@ func HandleMessage(backend Backend, peer *Peer) error {
 
 	case msg.Code == ShardListMsg:
 		// A batch of trie kvs arrived to one of our previous requests
-		res := make(map[common.Address][]uint64)
+		res := new(ShardListPacket)
 		if err := msg.Decode(res); err != nil {
 			return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 		}
-		peer.SetShards(res)
+		peer.SetShards(convertShardList(res))
 		return nil
 	case msg.Code == GetKVsMsg:
 		// Decode trie node retrieval request

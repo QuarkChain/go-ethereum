@@ -82,6 +82,37 @@ type KV struct {
 	Data []byte
 }
 
+type ShardListPacket struct {
+	ContractShardsList []*ContractShards
+}
+
+type ContractShards struct {
+	Contract   common.Address
+	ShardIndex []uint64
+}
+
+func newShardListPacket(shards map[common.Address][]uint64) *ShardListPacket {
+	shardListPacket := ShardListPacket{make([]*ContractShards, 0)}
+	for contract, indexes := range shards {
+		shardListPacket.ContractShardsList = append(shardListPacket.ContractShardsList, &ContractShards{contract, indexes})
+	}
+
+	return &shardListPacket
+}
+
+func convertShardList(shardList *ShardListPacket) map[common.Address][]uint64 {
+	if shardList == nil {
+		return nil
+	}
+
+	shards := make(map[common.Address][]uint64)
+	for _, cs := range shardList.ContractShardsList {
+		shards[cs.Contract] = cs.ShardIndex
+	}
+	
+	return shards
+}
+
 func (*GetKVsPacket) Name() string { return "GetKVsMsg" }
 func (*GetKVsPacket) Kind() byte   { return GetKVsMsg }
 
