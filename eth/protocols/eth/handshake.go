@@ -23,9 +23,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/forkid"
-	sstor "github.com/ethereum/go-ethereum/eth/protocols/sstorage"
 	"github.com/ethereum/go-ethereum/p2p"
-	"github.com/ethereum/go-ethereum/sstorage"
 )
 
 const (
@@ -36,7 +34,7 @@ const (
 
 // Handshake executes the eth protocol handshake, negotiating version number,
 // network IDs, difficulties, head and genesis blocks.
-func (p *Peer) Handshake(network uint64, td *big.Int, head common.Hash, genesis common.Hash, forkID forkid.ID, forkFilter forkid.Filter, sstorPeer *sstor.Peer) error {
+func (p *Peer) Handshake(network uint64, td *big.Int, head common.Hash, genesis common.Hash, forkID forkid.ID, forkFilter forkid.Filter) error {
 	// Send out own handshake in a new thread
 	errc := make(chan error, 2)
 
@@ -50,11 +48,10 @@ func (p *Peer) Handshake(network uint64, td *big.Int, head common.Hash, genesis 
 			Head:            head,
 			Genesis:         genesis,
 			ForkID:          forkID,
-			Shards:          sstorage.Shards(),
 		})
 	}()
 	go func() {
-		errc <- p.readStatus(network, &status, genesis, forkFilter, sstorPeer)
+		errc <- p.readStatus(network, &status, genesis, forkFilter)
 	}()
 	timeout := time.NewTimer(handshakeTimeout)
 	defer timeout.Stop()
@@ -79,7 +76,7 @@ func (p *Peer) Handshake(network uint64, td *big.Int, head common.Hash, genesis 
 }
 
 // readStatus reads the remote handshake message.
-func (p *Peer) readStatus(network uint64, status *StatusPacket, genesis common.Hash, forkFilter forkid.Filter, sstorPeer *sstor.Peer) error {
+func (p *Peer) readStatus(network uint64, status *StatusPacket, genesis common.Hash, forkFilter forkid.Filter) error {
 	msg, err := p.rw.ReadMsg()
 	if err != nil {
 		return err
@@ -105,9 +102,6 @@ func (p *Peer) readStatus(network uint64, status *StatusPacket, genesis common.H
 	}
 	if err := forkFilter(status.ForkID); err != nil {
 		return fmt.Errorf("%w: %v", errForkIDRejected, err)
-	}
-	if sstorPeer != nil {
-		sstorPeer.SetShards(status.Shards)
 	}
 	return nil
 }
