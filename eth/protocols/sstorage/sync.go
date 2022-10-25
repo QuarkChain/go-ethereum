@@ -146,8 +146,11 @@ type SyncPeer interface {
 	// IsShardExist is the peer support this shardId
 	IsShardExist(contract common.Address, shardId uint64) bool
 
-	// RequestKVs fetches a batch of kvs ranging between startIdx and endIdx
+	// RequestKVs fetches a batch of kvs with a kv list
 	RequestKVs(id uint64, contract common.Address, shardId uint64, kvList []uint64) error
+
+	// RequestShardList fetches shard list support by the peer
+	RequestShardList(shards map[common.Address][]uint64) error
 
 	// Log retrieves the peer's own contextual logger.
 	Log() log.Logger

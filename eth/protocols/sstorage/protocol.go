@@ -42,8 +42,10 @@ var protocolLengths = map[uint]uint64{SSTORAGE1: 2}
 const maxMessageSize = 10 * 1024 * 1024
 
 const (
-	GetKVsMsg = 0x00
-	KVsMsg    = 0x01
+	GetShardListMsg = 0x00
+	ShardListMsg    = 0x01
+	GetKVsMsg       = 0x02
+	KVsMsg          = 0x03
 )
 
 var (
@@ -59,7 +61,7 @@ type Packet interface {
 	Kind() byte   // Kind returns the message type.
 }
 
-// GetKVsPacket represents an account query.
+// GetKVsPacket represents a KVs query.
 type GetKVsPacket struct {
 	ID       uint64         // Request ID to match up responses with
 	Contract common.Address // Contract of the sharded storage
@@ -67,7 +69,7 @@ type GetKVsPacket struct {
 	KVList   []uint64       // KVList index list to retrieve
 }
 
-// KVsPacket represents a shard storage slot query response.
+// KVsPacket represents a KVs query response.
 type KVsPacket struct {
 	ID       uint64         // ID of the request this is a response for
 	Contract common.Address // Contract of the sharded storage

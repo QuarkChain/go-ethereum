@@ -96,3 +96,10 @@ func (p *Peer) RequestKVs(id uint64, contract common.Address, shardId uint64, kv
 		KVList:   kvList,
 	})
 }
+
+// RequestShardList fetches shard list support by the peer
+func (p *Peer) RequestShardList(shards map[common.Address][]uint64) error {
+	p.logger.Trace("Fetching Shard list", "shards", shards)
+
+	return p2p.Send(p.rw, GetShardListMsg, shards)
+}
