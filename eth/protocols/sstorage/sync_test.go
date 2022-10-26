@@ -112,6 +112,14 @@ func (t *testPeer) RequestKVs(id uint64, contract common.Address, shardId uint64
 	return nil
 }
 
+// RequestShardList fetches shard list support by the peer
+func (p *testPeer) RequestShardList(shards map[common.Address][]uint64) error {
+	p.logger.Trace("Fetching Shard list", "shards", shards)
+	//	p.remote
+
+	return nil
+}
+
 func delayRandomTime(max uint64, duration time.Duration) {
 	d := time.Duration(rand.Uint64() % max)
 	time.Sleep(d * duration)

@@ -113,10 +113,11 @@ func HandleMessage(backend Backend, peer *Peer) error {
 	switch {
 	case msg.Code == GetShardListMsg:
 		// Decode trie node retrieval request
-		var req ShardListPacket
-		if err := msg.Decode(&req); err != nil {
+		req := new(ShardListPacket)
+		if err := msg.Decode(req); err != nil {
 			return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 		}
+		peer.SetShards(convertShardList(req))
 		return p2p.Send(peer.rw, ShardListMsg, sstorage.Shards())
 
 	case msg.Code == ShardListMsg:
