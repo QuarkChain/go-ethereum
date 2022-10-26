@@ -288,7 +288,7 @@ func (h *handler) runEthPeer(peer *eth.Peer, handler eth.Handler) error {
 		peer.Log().Error("Snapshot extension barrier failed", "err", err)
 		return err
 	}
-	sstor, err := h.peers.waitSstorageExtension(peer)
+	sstorExt, err := h.peers.waitSstorageExtension(peer)
 	if err != nil {
 		peer.Log().Error("Sstorage extension barrier failed", "err", err)
 		return err
@@ -324,19 +324,19 @@ func (h *handler) runEthPeer(peer *eth.Peer, handler eth.Handler) error {
 			}
 		}
 	}
-	if sstor != nil {
-		sstor.RequestShardList(sstor.Shards())
+	if sstorExt != nil {
+		sstorExt.RequestShardList(sstor.Shards())
 	}
 	// Ignore maxPeers if this is a trusted peer
 	if !peer.Peer.Info().Network.Trusted {
-		if reject || (h.peers.len() >= h.maxPeers && !h.peers.needThisPeer(sstor)) {
+		if reject || (h.peers.len() >= h.maxPeers && !h.peers.needThisPeer(sstorExt)) {
 			return p2p.DiscTooManyPeers
 		}
 	}
 	peer.Log().Debug("Ethereum peer connected", "name", peer.Name())
 
 	// Register the peer locally
-	if err := h.peers.registerPeer(peer, snap, sstor); err != nil {
+	if err := h.peers.registerPeer(peer, snap, sstorExt); err != nil {
 		peer.Log().Error("Ethereum peer registration failed", "err", err)
 		return err
 	}
@@ -357,8 +357,8 @@ func (h *handler) runEthPeer(peer *eth.Peer, handler eth.Handler) error {
 			return err
 		}
 	}
-	if sstor != nil {
-		if err := h.downloader.SstorSyncer.Register(sstor); err != nil {
+	if sstorExt != nil {
+		if err := h.downloader.SstorSyncer.Register(sstorExt); err != nil {
 			peer.Log().Error("Failed to register peer in sstorage syncer", "err", err)
 			return err
 		}
