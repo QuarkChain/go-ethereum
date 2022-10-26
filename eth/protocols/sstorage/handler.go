@@ -118,6 +118,7 @@ func HandleMessage(backend Backend, peer *Peer) error {
 			return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 		}
 		peer.SetShards(convertShardList(req))
+		peer.logger.Warn("HandleMessage: GetShardListMsg", "peer", peer.ID(), "shards", peer.shards)
 		return p2p.Send(peer.rw, ShardListMsg, sstorage.Shards())
 
 	case msg.Code == ShardListMsg:
@@ -127,6 +128,7 @@ func HandleMessage(backend Backend, peer *Peer) error {
 			return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 		}
 		peer.SetShards(convertShardList(res))
+		peer.logger.Warn("HandleMessage: ShardListMsg", "peer", peer.ID(), "shards", peer.shards)
 		return nil
 	case msg.Code == GetKVsMsg:
 		// Decode trie node retrieval request
