@@ -309,7 +309,7 @@ func (h *handler) runEthPeer(peer *eth.Peer, handler eth.Handler) error {
 		td      = h.chain.GetTd(hash, number)
 	)
 	forkID := forkid.NewID(h.chain.Config(), h.chain.Genesis().Hash(), h.chain.CurrentHeader().Number.Uint64())
-	if err := peer.Handshake(h.networkID, td, hash, genesis.Hash(), forkID, h.forkFilter, sstor); err != nil {
+	if err := peer.Handshake(h.networkID, td, hash, genesis.Hash(), forkID, h.forkFilter); err != nil {
 		peer.Log().Debug("Ethereum handshake failed", "err", err)
 		return err
 	}
@@ -323,6 +323,9 @@ func (h *handler) runEthPeer(peer *eth.Peer, handler eth.Handler) error {
 				reject = true
 			}
 		}
+	}
+	if sstor != nil {
+		sstor.RequestShardList(sstor.Shards())
 	}
 	// Ignore maxPeers if this is a trusted peer
 	if !peer.Peer.Info().Network.Trusted {

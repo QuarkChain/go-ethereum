@@ -91,7 +91,6 @@ type StatusPacket struct {
 	Head            common.Hash
 	Genesis         common.Hash
 	ForkID          forkid.ID
-	Shards          map[common.Address][]uint64
 }
 
 // NewBlockHashesPacket is the network packet for the block announcements.
