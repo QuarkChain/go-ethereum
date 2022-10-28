@@ -829,13 +829,6 @@ func (q *queue) deliverWithPivot(id string, taskPool map[common.Hash]*types.Head
 	reqTimer.UpdateSince(request.Time)
 	resInMeter.Mark(int64(results))
 
-	// Assemble each of the results with their headers and retrieved data parts
-	var (
-		accepted int
-		failure  error
-		i        int
-	)
-
 	nilFy := func(result *fetchResult, header *types.Header, reason string) {
 		hash := header.Hash()
 		log.Info("nilFy", "number", header.Number.Uint64(), "hash", hash, "reason", reason)
@@ -844,20 +837,41 @@ func (q *queue) deliverWithPivot(id string, taskPool map[common.Hash]*types.Head
 		delete(taskPool, hash)
 	}
 
-LOOP:
-	for {
-		// Short circuit assembly if no more fetch results are found
-		if i >= results {
+	// Assemble each of the results with their headers and retrieved data parts
+	var (
+		accepted int
+		failure  error
+		i        int
+		hashes   []common.Hash
+	)
 
-			break
+	if results == 0 {
+		for _, header := range request.Headers {
+			if header.Number.Uint64() < pivot {
+				if res, stale, err := q.resultCache.GetDeliverySlot(header.Number.Uint64()); err == nil && !stale {
+					nilFy(res, header, "tail nilFy")
+				} else {
+					// else: betweeen here and above, some other peer filled this result,
+					// or it was indeed a no-op. This should not happen, but if it does it's
+					// not something to panic about
+					log.Error("Delivery stale", "stale", stale, "number", header.Number.Uint64(), "err", err)
 
+					// Clean up a successful fetch
+					delete(taskPool, header.Hash())
+				}
+				accepted++
+			} else {
+				// If no data items were retrieved, mark them as unavailable for the origin peer if under pivot
+				request.Peer.MarkLacking(header.Hash())
+			}
 		}
+	} else {
 
-		matched := false
-		for j := accepted; j < len(request.Headers); j++ {
+		for j := 0; j < len(request.Headers); j++ {
+
 			header := request.Headers[j]
 			// Validate the fields
-			if failure = validate(i, header); failure != nil {
+			if failure = validate(0, header); failure != nil {
 				if header.Number.Uint64() >= pivot {
 					break
 				}
@@ -873,16 +887,16 @@ LOOP:
 					failure = errStaleDelivery
 				}
 
-				for k := accepted; k < j; k++ {
+				for k := 0; k < j; k++ {
 					header := request.Headers[k]
 					if res, stale, err := q.resultCache.GetDeliverySlot(header.Number.Uint64()); err == nil && !stale {
-						nilFy(res, header, "gap nilFy")
+						nilFy(res, header, "front nilFy")
 					} else {
 						// else: betweeen here and above, some other peer filled this result,
 						// or it was indeed a no-op. This should not happen, but if it does it's
 						// not something to panic about
 						log.Error("Delivery stale", "stale", stale, "number", header.Number.Uint64(), "err", err)
-
+						failure = errStaleDelivery
 						// Clean up a successful fetch
 						delete(taskPool, header.Hash())
 					}
@@ -891,57 +905,47 @@ LOOP:
 				// Clean up a successful fetch
 				delete(taskPool, header.Hash())
 
-				matched = true
 				accepted = j + 1
-				if accepted >= len(request.Headers) {
-					break LOOP
-				}
+				i = 1
+
 				break
 			}
+
 		}
 
-		// result i doesn't match any header
-		if !matched {
+	}
+
+	doneI := i
+
+	for _, header := range request.Headers[accepted:] {
+		// Short circuit assembly if no more fetch results are found
+		if i >= results {
 			break
 		}
-
-		// match success, advance to the next result
-		i++
-
-	}
-
-	// only do "tail nilFy" if no one is accepted
-	if accepted == 0 {
-		for j := 0; j < len(request.Headers); j++ {
-			// accept those below pivot
-			header := request.Headers[j]
-			if header.Number.Uint64() < pivot {
-				if res, stale, err := q.resultCache.GetDeliverySlot(header.Number.Uint64()); err == nil && !stale {
-					nilFy(res, header, "tail nilFy")
-				} else {
-					// else: betweeen here and above, some other peer filled this result,
-					// or it was indeed a no-op. This should not happen, but if it does it's
-					// not something to panic about
-					log.Error("Delivery stale", "stale", stale, "number", header.Number.Uint64(), "err", err)
-					failure = errStaleDelivery
-
-					// Clean up a successful fetch
-					delete(taskPool, header.Hash())
-				}
-				accepted++
-			} else {
-				request.Peer.MarkLacking(header.Hash())
-				for k := j + 1; k < len(request.Headers); j++ {
-					if request.Headers[k].Number.Uint64() >= pivot {
-						request.Peer.MarkLacking(request.Headers[k].Hash())
-					}
-				}
-				break
-			}
+		// Validate the fields
+		if err := validate(i, header); err != nil {
+			failure = err
+			break
 		}
+		hashes = append(hashes, header.Hash())
+		i++
 	}
 
-	resDropMeter.Mark(int64(results - i))
+	for j, header := range request.Headers[accepted : accepted+i-doneI] {
+		if res, stale, err := q.resultCache.GetDeliverySlot(header.Number.Uint64()); err == nil {
+			reconstruct(accepted, res)
+		} else {
+			// else: betweeen here and above, some other peer filled this result,
+			// or it was indeed a no-op. This should not happen, but if it does it's
+			// not something to panic about
+			log.Error("Delivery stale", "stale", stale, "number", header.Number.Uint64(), "err", err)
+			failure = errStaleDelivery
+		}
+		// Clean up a successful fetch
+		delete(taskPool, hashes[j])
+		accepted++
+	}
+	resDropMeter.Mark(int64(results - accepted))
 
 	// Return all failed or missing fetches to the queue
 	for _, header := range request.Headers[accepted:] {
