@@ -847,12 +847,13 @@ func (q *queue) deliverWithPivot(id string, taskPool map[common.Hash]*types.Head
 
 	// Assemble each of the results with their headers and retrieved data parts
 	var (
-		accepted int
-		failure  error
+		accepted     int
+		failure      error
+		searchFailed bool
 	)
 
 	// The results that are expected to be contiguous
-	// Search the first result (if available) that matches the header
+	// Search the first result (if available) that matches the header and <= pivot
 	for ; accepted < len(request.Headers); accepted++ {
 		header := request.Headers[accepted]
 		if results > 0 {
@@ -863,10 +864,6 @@ func (q *queue) deliverWithPivot(id string, taskPool map[common.Hash]*types.Head
 			}
 		}
 
-		// If no data items were retrieved, mark them as unavailable for the origin peer if above pivot
-		request.Peer.MarkLacking(header.Hash())
-
-		// Complete the header if it is below pivot
 		if header.Number.Uint64() < pivot {
 			// The result of the header is not found, but the header is below pivot.
 			// Still accept the result.
@@ -881,7 +878,17 @@ func (q *queue) deliverWithPivot(id string, taskPool map[common.Hash]*types.Head
 				// Clean up a successful fetch
 				delete(taskPool, header.Hash())
 			}
+		} else {
+			// If no data items were retrieved, mark them as unavailable for the origin peer if above pivot
+			request.Peer.MarkLacking(header.Hash())
+			// Mark search failed, but we will keep searching the matched result and mark the headers before as lacking
+			searchFailed = true
 		}
+	}
+
+	if searchFailed {
+		// No results can be delivered as some results from pivot are missing
+		results = 0
 	}
 
 	return q.deliverWithHeaders(request.Headers[accepted:], results, validate, reconstruct, taskPool, resDropMeter, request, taskQueue, failure)
