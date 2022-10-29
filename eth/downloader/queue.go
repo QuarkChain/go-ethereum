@@ -863,25 +863,24 @@ func (q *queue) deliverWithPivot(id string, taskPool map[common.Hash]*types.Head
 			}
 		}
 
-		if header.Number.Uint64() >= pivot {
-			break
-		}
-
 		// If no data items were retrieved, mark them as unavailable for the origin peer if above pivot
 		request.Peer.MarkLacking(header.Hash())
 
-		// The result of the header is not found, but the header is below pivot.
-		// Still accept the result.
-		if res, stale, err := q.resultCache.GetDeliverySlot(header.Number.Uint64()); err == nil && !stale {
-			nilFy(res, header, "front nilFy")
-		} else {
-			// else: betweeen here and above, some other peer filled this result,
-			// or it was indeed a no-op. This should not happen, but if it does it's
-			// not something to panic about
-			log.Error("Delivery stale", "stale", stale, "number", header.Number.Uint64(), "err", err)
-			failure = errStaleDelivery
-			// Clean up a successful fetch
-			delete(taskPool, header.Hash())
+		// Complete the header if it is below pivot
+		if header.Number.Uint64() < pivot {
+			// The result of the header is not found, but the header is below pivot.
+			// Still accept the result.
+			if res, stale, err := q.resultCache.GetDeliverySlot(header.Number.Uint64()); err == nil && !stale {
+				nilFy(res, header, "front nilFy")
+			} else {
+				// else: betweeen here and above, some other peer filled this result,
+				// or it was indeed a no-op. This should not happen, but if it does it's
+				// not something to panic about
+				log.Error("Delivery stale", "stale", stale, "number", header.Number.Uint64(), "err", err)
+				failure = errStaleDelivery
+				// Clean up a successful fetch
+				delete(taskPool, header.Hash())
+			}
 		}
 	}
 
