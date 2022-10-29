@@ -889,9 +889,9 @@ func (q *queue) deliverWithPivot(id string, taskPool map[common.Hash]*types.Head
 	if searchFailed {
 		// No results can be delivered as some results from pivot are missing
 		results = 0
-		return q.deliverWithHeaders(request.Headers[accepted:], results, validate, reconstruct, taskPool, resDropMeter, request, taskQueue, failure)
+		return q.deliverWithHeaders(request.Headers[accepted:], results, validate, reconstruct, taskPool, resDropMeter, taskQueue, failure)
 	} else {
-		accepted0, err := q.deliverWithHeaders(request.Headers[accepted:], results, validate, reconstruct, taskPool, resDropMeter, request, taskQueue, failure)
+		accepted0, err := q.deliverWithHeaders(request.Headers[accepted:], results, validate, reconstruct, taskPool, resDropMeter, taskQueue, failure)
 		return accepted0 + accepted, err
 	}
 }
@@ -925,12 +925,12 @@ func (q *queue) deliver(id string, taskPool map[common.Hash]*types.Header,
 		}
 	}
 
-	return q.deliverWithHeaders(request.Headers, results, validate, reconstruct, taskPool, resDropMeter, request, taskQueue, nil)
+	return q.deliverWithHeaders(request.Headers, results, validate, reconstruct, taskPool, resDropMeter, taskQueue, nil)
 }
 
 func (q *queue) deliverWithHeaders(headers []*types.Header, results int,
 	validate func(index int, header *types.Header) error, reconstruct func(index int, result *fetchResult),
-	taskPool map[common.Hash]*types.Header, resDropMeter metrics.Meter, request *fetchRequest, taskQueue *prque.Prque, failure error) (int, error) {
+	taskPool map[common.Hash]*types.Header, resDropMeter metrics.Meter, taskQueue *prque.Prque, failure error) (int, error) {
 	var (
 		accepted int
 		i        int
@@ -967,7 +967,7 @@ func (q *queue) deliverWithHeaders(headers []*types.Header, results int,
 	resDropMeter.Mark(int64(results - accepted))
 
 	// Return all failed or missing fetches to the queue
-	for _, header := range request.Headers[accepted:] {
+	for _, header := range headers[accepted:] {
 		taskQueue.Push(header, -int64(header.Number.Uint64()))
 	}
 	// Wake up Results
