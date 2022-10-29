@@ -891,7 +891,8 @@ func (q *queue) deliverWithPivot(id string, taskPool map[common.Hash]*types.Head
 	if failedIndex >= 0 {
 		// No results can be delivered as some results from pivot are missing
 		results = 0
-		return q.deliverWithHeaders(request.Headers[failedIndex:], results, validate, reconstruct, taskPool, resDropMeter, taskQueue, failure)
+		accepted0, err := q.deliverWithHeaders(request.Headers[failedIndex:], results, validate, reconstruct, taskPool, resDropMeter, taskQueue, failure)
+		return accepted0 + failedIndex, err
 	} else {
 		accepted0, err := q.deliverWithHeaders(request.Headers[accepted:], results, validate, reconstruct, taskPool, resDropMeter, taskQueue, failure)
 		return accepted0 + accepted, err
