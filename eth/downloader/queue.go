@@ -889,9 +889,11 @@ func (q *queue) deliverWithPivot(id string, taskPool map[common.Hash]*types.Head
 	if searchFailed {
 		// No results can be delivered as some results from pivot are missing
 		results = 0
+		return q.deliverWithHeaders(request.Headers[accepted:], results, validate, reconstruct, taskPool, resDropMeter, request, taskQueue, failure)
+	} else {
+		accepted0, err := q.deliverWithHeaders(request.Headers[accepted:], results, validate, reconstruct, taskPool, resDropMeter, request, taskQueue, failure)
+		return accepted0 + accepted, err
 	}
-
-	return q.deliverWithHeaders(request.Headers[accepted:], results, validate, reconstruct, taskPool, resDropMeter, request, taskQueue, failure)
 }
 
 // deliver injects a data retrieval response into the results queue.
