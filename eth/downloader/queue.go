@@ -847,9 +847,9 @@ func (q *queue) deliverWithPivot(id string, taskPool map[common.Hash]*types.Head
 
 	// Assemble each of the results with their headers and retrieved data parts
 	var (
-		accepted     int
-		failure      error
-		searchFailed bool
+		accepted    int
+		failure     error
+		failedIndex int = -1
 	)
 
 	// The results that are expected to be contiguous
@@ -881,15 +881,17 @@ func (q *queue) deliverWithPivot(id string, taskPool map[common.Hash]*types.Head
 		} else {
 			// If no data items were retrieved, mark them as unavailable for the origin peer if above pivot
 			request.Peer.MarkLacking(header.Hash())
-			// Mark search failed, but we will keep searching the matched result and mark the headers before as lacking
-			searchFailed = true
+			// Set the failed index, and we will keep searching the matched result and mark the headers before as lacking
+			if failedIndex != -1 {
+				failedIndex = accepted
+			}
 		}
 	}
 
-	if searchFailed {
+	if failedIndex >= 0 {
 		// No results can be delivered as some results from pivot are missing
 		results = 0
-		return q.deliverWithHeaders(request.Headers[accepted:], results, validate, reconstruct, taskPool, resDropMeter, taskQueue, failure)
+		return q.deliverWithHeaders(request.Headers[failedIndex:], results, validate, reconstruct, taskPool, resDropMeter, taskQueue, failure)
 	} else {
 		accepted0, err := q.deliverWithHeaders(request.Headers[accepted:], results, validate, reconstruct, taskPool, resDropMeter, taskQueue, failure)
 		return accepted0 + accepted, err
