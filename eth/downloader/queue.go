@@ -950,7 +950,7 @@ func (q *queue) deliverWithHeaders(headers []*types.Header, results int,
 		i++
 	}
 
-	for _, header := range headers {
+	for _, header := range headers[:i] {
 		if res, stale, err := q.resultCache.GetDeliverySlot(header.Number.Uint64()); err == nil {
 			reconstruct(accepted, res)
 		} else {
