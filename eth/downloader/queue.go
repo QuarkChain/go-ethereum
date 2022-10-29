@@ -812,6 +812,14 @@ func (q *queue) DeliverReceipts(id string, receiptList [][]*types.Receipt, recei
 		receiptReqTimer, receiptInMeter, receiptDropMeter, len(receiptList), validate, reconstruct)
 }
 
+// deliverWithPivot injects a data retrieval response into the results queue.
+//
+// Note, this method expects the queue lock to be already held for writing. The
+// reason this lock is not obtained in here is because the parameters already need
+// to access the queue, so they already need a lock anyway.
+//
+// Note, the method will complete a header even the result is missing as long as
+// the header is below pivot.
 func (q *queue) deliverWithPivot(id string, taskPool map[common.Hash]*types.Header,
 	taskQueue *prque.Prque, pendPool map[string]*fetchRequest,
 	reqTimer metrics.Timer, resInMeter metrics.Meter, resDropMeter metrics.Meter,
@@ -841,128 +849,43 @@ func (q *queue) deliverWithPivot(id string, taskPool map[common.Hash]*types.Head
 	var (
 		accepted int
 		failure  error
-		i        int
-		hashes   []common.Hash
 	)
 
-	if results == 0 {
-		for _, header := range request.Headers {
-			if header.Number.Uint64() < pivot {
-				if res, stale, err := q.resultCache.GetDeliverySlot(header.Number.Uint64()); err == nil && !stale {
-					nilFy(res, header, "tail nilFy")
-				} else {
-					// else: betweeen here and above, some other peer filled this result,
-					// or it was indeed a no-op. This should not happen, but if it does it's
-					// not something to panic about
-					log.Error("Delivery stale", "stale", stale, "number", header.Number.Uint64(), "err", err)
-
-					// Clean up a successful fetch
-					delete(taskPool, header.Hash())
-				}
-				accepted++
-			} else {
-				// If no data items were retrieved, mark them as unavailable for the origin peer if under pivot
-				request.Peer.MarkLacking(header.Hash())
-			}
-		}
-	} else {
-
-		for j := 0; j < len(request.Headers); j++ {
-
-			header := request.Headers[j]
+	// The results that are expected to be contiguous
+	// Search the first result (if available) that matches the header
+	for ; accepted < len(request.Headers); accepted++ {
+		header := request.Headers[accepted]
+		if results > 0 {
 			// Validate the fields
-			if failure = validate(0, header); failure != nil {
-				if header.Number.Uint64() >= pivot {
-					break
-				}
-			} else {
-				if res, stale, err := q.resultCache.GetDeliverySlot(header.Number.Uint64()); err == nil && !stale {
-					failure = nil
-					reconstruct(j, res)
-				} else {
-					// else: betweeen here and above, some other peer filled this result,
-					// or it was indeed a no-op. This should not happen, but if it does it's
-					// not something to panic about
-					log.Error("Delivery stale", "stale", stale, "number", header.Number.Uint64(), "err", err)
-					failure = errStaleDelivery
-				}
-
-				for k := 0; k < j; k++ {
-					header := request.Headers[k]
-					if res, stale, err := q.resultCache.GetDeliverySlot(header.Number.Uint64()); err == nil && !stale {
-						nilFy(res, header, "front nilFy")
-					} else {
-						// else: betweeen here and above, some other peer filled this result,
-						// or it was indeed a no-op. This should not happen, but if it does it's
-						// not something to panic about
-						log.Error("Delivery stale", "stale", stale, "number", header.Number.Uint64(), "err", err)
-						failure = errStaleDelivery
-						// Clean up a successful fetch
-						delete(taskPool, header.Hash())
-					}
-				}
-
-				// Clean up a successful fetch
-				delete(taskPool, header.Hash())
-
-				accepted = j + 1
-				i = 1
-
+			if failure = validate(0, header); failure == nil {
+				// Found a header that matches the first result
 				break
 			}
-
 		}
 
-	}
-
-	doneI := i
-
-	for _, header := range request.Headers[accepted:] {
-		// Short circuit assembly if no more fetch results are found
-		if i >= results {
+		if header.Number.Uint64() >= pivot {
 			break
 		}
-		// Validate the fields
-		if err := validate(i, header); err != nil {
-			failure = err
-			break
-		}
-		hashes = append(hashes, header.Hash())
-		i++
-	}
 
-	for j, header := range request.Headers[accepted : accepted+i-doneI] {
-		if res, stale, err := q.resultCache.GetDeliverySlot(header.Number.Uint64()); err == nil {
-			reconstruct(accepted, res)
+		// If no data items were retrieved, mark them as unavailable for the origin peer if above pivot
+		request.Peer.MarkLacking(header.Hash())
+
+		// The result of the header is not found, but the header is below pivot.
+		// Still accept the result.
+		if res, stale, err := q.resultCache.GetDeliverySlot(header.Number.Uint64()); err == nil && !stale {
+			nilFy(res, header, "front nilFy")
 		} else {
 			// else: betweeen here and above, some other peer filled this result,
 			// or it was indeed a no-op. This should not happen, but if it does it's
 			// not something to panic about
 			log.Error("Delivery stale", "stale", stale, "number", header.Number.Uint64(), "err", err)
 			failure = errStaleDelivery
+			// Clean up a successful fetch
+			delete(taskPool, header.Hash())
 		}
-		// Clean up a successful fetch
-		delete(taskPool, hashes[j])
-		accepted++
 	}
-	resDropMeter.Mark(int64(results - accepted))
 
-	// Return all failed or missing fetches to the queue
-	for _, header := range request.Headers[accepted:] {
-		taskQueue.Push(header, -int64(header.Number.Uint64()))
-	}
-	// Wake up Results
-	if accepted > 0 {
-		q.active.Signal()
-	}
-	if failure == nil {
-		return accepted, nil
-	}
-	// If none of the data was good, it's a stale delivery
-	if accepted > 0 {
-		return accepted, fmt.Errorf("partial failure: %v", failure)
-	}
-	return accepted, fmt.Errorf("%w: %v", failure, errStaleDelivery)
+	return q.deliverWithHeaders(request.Headers[accepted:], results, validate, reconstruct, taskPool, resDropMeter, request, taskQueue, failure)
 }
 
 // deliver injects a data retrieval response into the results queue.
@@ -993,14 +916,19 @@ func (q *queue) deliver(id string, taskPool map[common.Hash]*types.Header,
 			request.Peer.MarkLacking(header.Hash())
 		}
 	}
-	// Assemble each of the results with their headers and retrieved data parts
+
+	return q.deliverWithHeaders(request.Headers, results, validate, reconstruct, taskPool, resDropMeter, request, taskQueue, nil)
+}
+
+func (q *queue) deliverWithHeaders(headers []*types.Header, results int,
+	validate func(index int, header *types.Header) error, reconstruct func(index int, result *fetchResult),
+	taskPool map[common.Hash]*types.Header, resDropMeter metrics.Meter, request *fetchRequest, taskQueue *prque.Prque, failure error) (int, error) {
 	var (
 		accepted int
-		failure  error
 		i        int
 		hashes   []common.Hash
 	)
-	for _, header := range request.Headers {
+	for _, header := range headers {
 		// Short circuit assembly if no more fetch results are found
 		if i >= results {
 			break
@@ -1014,7 +942,7 @@ func (q *queue) deliver(id string, taskPool map[common.Hash]*types.Header,
 		i++
 	}
 
-	for _, header := range request.Headers[:i] {
+	for _, header := range headers {
 		if res, stale, err := q.resultCache.GetDeliverySlot(header.Number.Uint64()); err == nil {
 			reconstruct(accepted, res)
 		} else {
