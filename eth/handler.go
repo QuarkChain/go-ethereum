@@ -325,7 +325,7 @@ func (h *handler) runEthPeer(peer *eth.Peer, handler eth.Handler) error {
 		}
 	}
 	if sstorExt != nil {
-		log.Warn("request shard list", "peer", peer.ID(), "shards", sstor.Shards())
+		sstorExt.Log().Warn("request shard list", "peer", peer.Node().URLv4(), "shards", sstor.Shards())
 		sstorExt.RequestShardList(sstor.Shards())
 	}
 	// Ignore maxPeers if this is a trusted peer
