@@ -36,7 +36,7 @@ var ProtocolVersions = []uint{SSTORAGE1}
 
 // protocolLengths are the number of implemented message corresponding to
 // different protocol versions.
-var protocolLengths = map[uint]uint64{SSTORAGE1: 2}
+var protocolLengths = map[uint]uint64{SSTORAGE1: 4}
 
 // maxMessageSize is the maximum cap on the size of a protocol message.
 const maxMessageSize = 10 * 1024 * 1024
@@ -109,7 +109,7 @@ func convertShardList(shardList *ShardListPacket) map[common.Address][]uint64 {
 	for _, cs := range shardList.ContractShardsList {
 		shards[cs.Contract] = cs.ShardIndex
 	}
-	
+
 	return shards
 }
 
