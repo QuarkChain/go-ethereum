@@ -18,7 +18,6 @@ package sstorage
 
 import (
 	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
@@ -27,7 +26,6 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -106,7 +104,8 @@ type kvTask struct {
 	req map[uint64]*kvRequest  // Pending request to fill this task
 	res map[uint64]*kvResponse // Validate response filling this task
 
-	done bool // Flag whether the task can be removed
+	filled bool // Flag whether the task has been filled
+	done   bool // Flag whether the task can be removed
 }
 
 func (t *kvTask) getKVIndexesForRequest(batch uint64) []uint64 {
@@ -286,7 +285,6 @@ func (s *Syncer) Sync(cancel chan struct{}) error {
 	}
 	defer func() { // Persist any progress, independent of failure
 		s.cleanKVTasks()
-		s.saveSyncStatus()
 	}()
 
 	for addr, ids := range s.sstorageInfo {
@@ -354,44 +352,39 @@ func (s *Syncer) Sync(cancel chan struct{}) error {
 // loadSyncStatus retrieves a previously aborted sync status from the database,
 // or generates a fresh one if none is available.
 func (s *Syncer) loadSyncStatus() {
-	var progress SyncProgress
-
-	if status := rawdb.ReadSstorageSyncStatus(s.db); status != nil {
-		if err := json.Unmarshal(status, &progress); err != nil {
-			log.Error("Failed to decode sstorage sync status", "err", err)
-		} else {
-			for _, task := range progress.Tasks {
-				log.Debug("Scheduled sstorage sync task", "contract", task.contract.Hex(),
-					"shard", task.shardId, "count", len(task.indexes))
-			}
-			s.tasks = progress.Tasks
-			s.syncDone = len(s.tasks) == 0
-
-			s.kvSynced = progress.KVSynced
-			s.kvBytes = progress.KVBytes
-			return
-		}
-	}
-	// Either we've failed to decode the previus state, or there was none.
 	// Start a fresh sync for retrieval.
 	s.kvSynced, s.kvBytes = 0, 0
 
-	stateDB, err := s.chain.StateAt(s.chain.CurrentBlock().Hash())
-	if err != nil {
-		log.Error("load syc status failed, fail to get state DB.", "err", err.Error())
-	}
+	// create tasks
 	for contract, shards := range s.sstorageInfo {
+		sm := sstorage.ContractToShardManager[contract]
 		for _, sid := range shards {
-			sm := sstorage.ContractToShardManager[contract]
 			task := kvTask{
 				contract:       contract,
 				shardId:        sid,
 				batchSize:      maxRequestSize / sm.MaxKvSize(),
 				indexes:        make(map[uint64]int64),
 				statelessPeers: make(map[string]struct{}),
+				filled:         false,
+				done:           false,
 			}
-			for i := sm.KvEntries() * sid; i < sm.KvEntries()*(sid+1); i++ {
-				meta, err := getSstorageMetadata(stateDB, contract, i)
+
+			if len(task.indexes) > 0 {
+				s.tasks = append(s.tasks, &task)
+			}
+		}
+	}
+
+	// fill in tasks async
+	go func() {
+		stateDB, err := s.chain.StateAt(s.chain.CurrentBlock().Hash())
+		if err != nil {
+			log.Error("load syc status failed, fail to get state DB.", "err", err.Error())
+		}
+		for _, task := range s.tasks {
+			sm := sstorage.ContractToShardManager[task.contract]
+			for i := sm.KvEntries() * task.shardId; i < sm.KvEntries()*(task.shardId+1); i++ {
+				meta, err := getSstorageMetadata(stateDB, task.contract, i)
 				if err != nil {
 					continue
 				}
@@ -404,27 +397,9 @@ func (s *Syncer) loadSyncStatus() {
 				}
 				task.indexes[i] = 0
 			}
-
-			if len(task.indexes) > 0 {
-				s.tasks = append(s.tasks, &task)
-			}
+			task.filled = true
 		}
-	}
-}
-
-// saveSyncStatus marshals the remaining sync tasks into leveldb.
-func (s *Syncer) saveSyncStatus() {
-	// Store the actual progress markers
-	progress := &SyncProgress{
-		Tasks:    s.tasks,
-		KVSynced: s.kvSynced,
-		KVBytes:  s.kvBytes,
-	}
-	status, err := json.Marshal(progress)
-	if err != nil {
-		panic(err) // This can only fail during implementation
-	}
-	rawdb.WriteSstorageSyncStatus(s.db, status)
+	}()
 }
 
 // Progress returns the sstorage sync status statistics.
@@ -692,7 +667,7 @@ func (s *Syncer) processKVResponse(res *kvResponse) {
 
 	// If this delivery completed the last pending task, forward the account task
 	// to the next kv
-	if len(res.task.indexes) == 0 {
+	if len(res.task.indexes) == 0 && res.task.filled {
 		res.task.done = true
 	}
 	log.Debug("", "remain index for sync", len(res.task.indexes))
