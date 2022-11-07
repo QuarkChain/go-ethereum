@@ -263,7 +263,7 @@ var (
 
 	// Web3QTestnetChainConfig contains the chain parameters to run a node on the Web3Q test network.
 	Web3QTestnetChainConfig = &ChainConfig{
-		ChainID:             big.NewInt(3333),
+		ChainID:             big.NewInt(3335),
 		HomesteadBlock:      big.NewInt(0),
 		DAOForkBlock:        nil,
 		DAOForkSupport:      true,
