@@ -369,9 +369,7 @@ func (s *Syncer) loadSyncStatus() {
 				done:           false,
 			}
 
-			if len(task.indexes) > 0 {
-				s.tasks = append(s.tasks, &task)
-			}
+			s.tasks = append(s.tasks, &task)
 		}
 	}
 
@@ -400,6 +398,7 @@ func (s *Syncer) loadSyncStatus() {
 			task.filled = true
 		}
 	}()
+	time.Sleep(100 * time.Millisecond)
 }
 
 // Progress returns the sstorage sync status statistics.
