@@ -324,7 +324,7 @@ func (h *handler) runEthPeer(peer *eth.Peer, handler eth.Handler) error {
 			}
 		}
 	}
-	if sstorExt != nil {
+	if sstorExt != nil && sstorExt.Shards() != nil {
 		sstorExt.Log().Warn("request shard list", "peer", peer.Node().URLv4(), "shards", sstor.Shards())
 		sstorExt.RequestShardList(sstor.Shards())
 	}
