@@ -87,8 +87,8 @@ type ShardListPacket struct {
 }
 
 type ContractShards struct {
-	Contract   common.Address
-	ShardIndex []uint64
+	Contract common.Address
+	ShardIds []uint64
 }
 
 func newShardListPacket(shards map[common.Address][]uint64) *ShardListPacket {
@@ -107,7 +107,7 @@ func convertShardList(shardList *ShardListPacket) map[common.Address][]uint64 {
 
 	shards := make(map[common.Address][]uint64)
 	for _, cs := range shardList.ContractShardsList {
-		shards[cs.Contract] = cs.ShardIndex
+		shards[cs.Contract] = cs.ShardIds
 	}
 
 	return shards
