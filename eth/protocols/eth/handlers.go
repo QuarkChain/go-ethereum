@@ -421,6 +421,7 @@ func handleReceipts66(backend Backend, msg Decoder, peer *Peer) error {
 		peer.Log().Warn("ReceiptsPacket66Complete decode failed", "err", err)
 		return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 	}
+	// TODO: Fallback to original packet66, which should be removed once we restart new testnet
 	res := new(ReceiptsPacket66)
 	res.RequestId = resComplete.RequestId
 	res.ReceiptsPacket = make([][]*types.Receipt, 0, len(resComplete.ReceiptsPacket))
