@@ -375,27 +375,33 @@ func (s *Syncer) loadSyncStatus() {
 
 	// fill in tasks async
 	go func() {
-		stateDB, err := s.chain.StateAt(s.chain.CurrentBlock().Hash())
-		if err != nil {
-			log.Error("load syc status failed, fail to get state DB.", "err", err.Error())
-		}
-		for _, task := range s.tasks {
-			sm := sstorage.ContractToShardManager[task.contract]
-			for i := sm.KvEntries() * task.shardId; i < sm.KvEntries()*(task.shardId+1); i++ {
-				meta, err := getSstorageMetadata(stateDB, task.contract, i)
-				if err != nil {
-					continue
-				}
-				if data, ok, err := sm.TryRead(i, int(sm.MaxKvSize()), common.BytesToHash(meta.hashInMeta)); ok && err == nil {
-					kv := KV{i, data}
-					err := verifyKV(sm, &kv, meta)
-					if err == nil {
+		for true {
+			stateDB, err := s.chain.StateAt(s.chain.CurrentBlock().Hash())
+			if err != nil {
+				log.Error("load syc status failed, fail to get state DB.",
+					"block number", s.chain.CurrentBlock().NumberU64(), "err", err.Error())
+				time.Sleep(30 * time.Second)
+				continue
+			}
+			for _, task := range s.tasks {
+				sm := sstorage.ContractToShardManager[task.contract]
+				for i := sm.KvEntries() * task.shardId; i < sm.KvEntries()*(task.shardId+1); i++ {
+					meta, err := getSstorageMetadata(stateDB, task.contract, i)
+					if err != nil {
 						continue
 					}
+					if data, ok, err := sm.TryRead(i, int(sm.MaxKvSize()), common.BytesToHash(meta.hashInMeta)); ok && err == nil {
+						kv := KV{i, data}
+						err := verifyKV(sm, &kv, meta)
+						if err == nil {
+							continue
+						}
+					}
+					task.indexes[i] = 0
 				}
-				task.indexes[i] = 0
+				task.filled = true
 			}
-			task.filled = true
+			break
 		}
 	}()
 	time.Sleep(100 * time.Millisecond)
