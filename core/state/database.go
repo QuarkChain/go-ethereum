@@ -209,6 +209,12 @@ func (db *cachingDB) ContractCodeSize(addrHash, codeHash common.Hash) (int, erro
 	if cached, ok := db.codeSizeCache.Get(codeHash); ok {
 		return cached.(int), nil
 	}
+
+	size := rawdb.ReadCodeSize(db.db.DiskDB(), codeHash)
+	if size != 0 {
+		return size, nil
+	}
+
 	code, err := db.ContractCode(addrHash, codeHash)
 	return len(code), err
 }
