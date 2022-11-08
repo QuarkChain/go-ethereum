@@ -332,7 +332,7 @@ func (d *Downloader) UnregisterPeer(id string) error {
 // adding various sanity checks as well as wrapping it with various log entries.
 func (d *Downloader) Synchronise(id string, head common.Hash, td *big.Int, mode SyncMode) error {
 	err := d.synchronise(id, head, td, mode)
-	if err == nil {
+	if err == nil && len(sstor.Shards()) > 0 {
 		d.sstorState()
 	}
 
