@@ -376,7 +376,7 @@ func (s *Syncer) loadSyncStatus() {
 	// fill in tasks async
 	go func() {
 		for true {
-			stateDB, err := s.chain.StateAt(s.chain.CurrentBlock().Hash())
+			stateDB, err := s.chain.StateAt(s.chain.CurrentBlock().Root())
 			if err != nil {
 				log.Error("load syc status failed, fail to get state DB.",
 					"block number", s.chain.CurrentBlock().NumberU64(), "err", err.Error())
