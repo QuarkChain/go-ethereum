@@ -893,6 +893,9 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 			}
 		}
 		if needDerive {
+			// Try to derive the receipt fields from body
+			// This happens when the node addresses the response from an old client that returns both bodies and old receipts
+			// TODO: Remove the code when running in new testnet
 			if err := receiptChain[i].DeriveFields(bc.chainConfig, blockChain[i].Hash(), blockChain[i].NumberU64(), blockChain[i].Transactions()); err != nil {
 				return 0, fmt.Errorf("DeriveFields failed:%v", err)
 			}

@@ -439,10 +439,10 @@ func ReadBodyRLP(db ethdb.Reader, hash common.Hash, number uint64) rlp.RawValue 
 		// Check if the data is in ancients
 		if isCanon(reader, number, hash) {
 			data, _ = reader.Ancient(freezerBodiesTable, number)
+			// we will prune ancient except genesis block
 			if len(data) > 0 {
 				return nil
 			}
-			// special case for genesis block
 		}
 		// If not, try reading from leveldb
 		data, _ = db.Get(blockBodyKey(number, hash))
@@ -635,12 +635,16 @@ func ReadReceipts(db ethdb.Reader, hash common.Hash, number uint64, config *para
 	}
 	body := ReadBody(db, hash, number)
 	if body == nil {
+		// body is pruned
 		if err := receipts.DeriveFieldsNoBody(hash, number); err != nil {
 			log.Error("Failed to derive block receipts fields without body", "hash", hash, "number", number, "err", err)
 			return nil
 		}
 		return receipts
 	}
+	// The old db format may return an old receipt without sufficient info.
+	// This should not happen on a new client running on a fresh db.
+	// TODO: we should remove the following code when starting in a new testnet
 	if err := receipts.DeriveFields(config, hash, number, body.Transactions); err != nil {
 		log.Error("Failed to derive block receipts fields", "hash", hash, "number", number, "err", err)
 		return nil
@@ -758,14 +762,11 @@ func ReadLogs(db ethdb.Reader, hash common.Hash, number uint64, config *params.C
 			log.Error("Missing body but have incomplete receipt", "hash", hash, "number", number, "err", err)
 			return nil
 		}
-
-		goto END
-	}
-	if err := deriveLogFields(receipts, hash, number, body.Transactions); err != nil {
+	} else if err := deriveLogFields(receipts, hash, number, body.Transactions); err != nil {
 		log.Error("Failed to derive block receipts fields", "hash", hash, "number", number, "err", err)
 		return nil
 	}
-END:
+
 	logs := make([][]*types.Log, len(receipts))
 	for i, receipt := range receipts {
 		logs[i] = receipt.Logs

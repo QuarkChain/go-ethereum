@@ -689,6 +689,8 @@ func (f *freezer) freezeRange(nfdb *nofreezedb, number, limit uint64) (hashes []
 			if len(body) == 0 {
 				return fmt.Errorf("block body missing, can't freeze block %d", number)
 			}
+			// TODO: if the client runs on a fresh db, the recipets should be ReceiptForStorage by default
+			// we can directly store receipt rlp directly in new testnet.
 			receipts := ReadReceipts(nfdb, hash, number, f.chainConfig)
 			if len(receipts) == 0 {
 				if len(ReadReceiptsRLP(nfdb, hash, number)) == 0 {
