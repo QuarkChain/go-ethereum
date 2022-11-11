@@ -388,12 +388,17 @@ func (s *Syncer) loadSyncStatus() {
 				for i := sm.KvEntries() * task.shardId; i < sm.KvEntries()*(task.shardId+1); i++ {
 					meta, err := getSstorageMetadata(stateDB, task.contract, i)
 					if err != nil {
+						log.Warn("getSstorageMetadata", "err", err.Error())
 						continue
 					}
+					log.Warn("getSstorageMetadata", "hashInMeta", common.Bytes2Hex(meta.hashInMeta),
+						"kvIdx", meta.kvIdx, "kvSize", meta.kvSize)
 					if data, ok, err := sm.TryRead(i, int(sm.MaxKvSize()), common.BytesToHash(meta.hashInMeta)); ok && err == nil {
 						kv := KV{i, data}
+						log.Warn("kv value", "i", i, "data", common.BytesToHash(data))
 						err := verifyKV(sm, &kv, meta)
 						if err == nil {
+							log.Warn("verifyKV", "err", err.Error())
 							continue
 						}
 					}
@@ -401,6 +406,7 @@ func (s *Syncer) loadSyncStatus() {
 				}
 				task.filled = true
 			}
+			log.Warn("load task done.", "len", len(s.tasks))
 			break
 		}
 	}()

@@ -331,11 +331,13 @@ func (d *Downloader) UnregisterPeer(id string) error {
 // Synchronise tries to sync up our local block chain with a remote peer, both
 // adding various sanity checks as well as wrapping it with various log entries.
 func (d *Downloader) Synchronise(id string, head common.Hash, td *big.Int, mode SyncMode) error {
+	log.Warn("---------------------------Synchronise----------------------------")
 	err := d.synchronise(id, head, td, mode)
 	if err == nil && len(sstor.Shards()) > 0 {
+		log.Warn("Synchronise done start sstorState")
 		d.sstorState()
 	}
-
+	log.Warn("---------------------------Synchronise done----------------------------")
 	switch err {
 	case nil, errBusy, errCanceled:
 		return err
