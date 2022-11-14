@@ -78,6 +78,16 @@ func (p *Peer) IsShardExist(contract common.Address, shardId uint64) bool {
 	return false
 }
 
+func (p *Peer) LogPeerInfo() {
+	p.logger.Info("Log peer info", "version", p.version)
+	for c, ss := range p.shards {
+		p.logger.Info(" - shards", "contract", c.Hex())
+		for s := range ss {
+			p.logger.Info(" - - shard", "shard", s)
+		}
+	}
+}
+
 // Log overrides the P2P logger with the higher level one containing only the id.
 func (p *Peer) Log() log.Logger {
 	return p.logger

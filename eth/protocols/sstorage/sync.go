@@ -153,6 +153,8 @@ type SyncPeer interface {
 
 	// Log retrieves the peer's own contextual logger.
 	Log() log.Logger
+
+	LogPeerInfo()
 }
 
 type BlockChain interface {
@@ -480,6 +482,7 @@ func (s *Syncer) assignKVTasks(success chan *kvResponse, fail chan *kvRequest, c
 			if _, ok := task.statelessPeers[id]; ok {
 				continue
 			}
+			p.LogPeerInfo()
 			if p.IsShardExist(task.contract, task.shardId) {
 				peer = p
 				if i < len(idlers)-1 {
@@ -491,7 +494,8 @@ func (s *Syncer) assignKVTasks(success chan *kvResponse, fail chan *kvRequest, c
 			}
 		}
 		if peer == nil {
-			log.Info("peer for request no found", "contract", task.contract.Hex(), "shard id", task.shardId)
+			log.Info("peer for request no found", "contract", task.contract.Hex(), "shard id",
+				task.shardId, "index len", len(task.indexes), "peers", len(s.peers), "idlers", len(idlers))
 			return
 		}
 

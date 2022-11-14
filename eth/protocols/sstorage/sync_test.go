@@ -105,6 +105,16 @@ func (t *testPeer) IsShardExist(contract common.Address, shardId uint64) bool {
 	return res
 }
 
+func (p *Peer) LogPeerInfo() {
+	p.logger.Info("Log peer info", "version", p.version)
+	for c, ss := range p.shards {
+		p.logger.Info(" - shards", "contract", c.Hex())
+		for s := range ss {
+			p.logger.Info(" - - shard", "shard", s)
+		}
+	}
+}
+
 func (t *testPeer) RequestKVs(id uint64, contract common.Address, shardId uint64, kvList []uint64) error {
 	t.logger.Trace("Fetching range of kvs", "contract", contract, "shardId", shardId, "kvList", len(kvList))
 	t.nKVRequests++
