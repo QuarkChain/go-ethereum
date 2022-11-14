@@ -376,6 +376,7 @@ func (s *Syncer) loadSyncStatus() {
 	// fill in tasks async
 	go func() {
 		for true {
+			log.Info("loadSyncStatus", "block number", s.chain.CurrentBlock().Number())
 			stateDB, err := s.chain.StateAt(s.chain.CurrentBlock().Root())
 			if err != nil {
 				log.Error("load syc status failed, fail to get state DB.",
@@ -391,14 +392,9 @@ func (s *Syncer) loadSyncStatus() {
 						log.Warn("getSstorageMetadata", "err", err.Error())
 						continue
 					}
-					log.Warn("getSstorageMetadata", "hashInMeta", common.Bytes2Hex(meta.hashInMeta),
-						"kvIdx", meta.kvIdx, "kvSize", meta.kvSize)
-					if data, ok, err := sm.TryRead(i, int(sm.MaxKvSize()), common.BytesToHash(meta.hashInMeta)); ok && err == nil {
+					if data, ok, err := sm.TryRead(i, int(meta.kvSize), common.BytesToHash(meta.hashInMeta)); ok && err == nil {
 						kv := KV{i, data}
-						log.Warn("kv value", "i", i, "data", common.BytesToHash(data))
-						err := verifyKV(sm, &kv, meta)
-						if err == nil {
-							log.Warn("verifyKV", "err", err.Error())
+						if err := verifyKV(sm, &kv, meta, false); err == nil {
 							continue
 						}
 					}
@@ -406,7 +402,7 @@ func (s *Syncer) loadSyncStatus() {
 				}
 				task.filled = true
 			}
-			log.Warn("load task done.", "len", len(s.tasks))
+			log.Info("load task done.", "len", len(s.tasks))
 			break
 		}
 	}()
@@ -649,7 +645,7 @@ func (s *Syncer) processKVResponse(res *kvResponse) {
 			continue
 		}
 
-		err = verifyKV(sm, kv, meta)
+		err = verifyKV(sm, kv, meta, true)
 		if err != nil {
 			log.Warn("processKVResponse verify kv fail", "error", err)
 			failureCount++
@@ -691,21 +687,25 @@ type metadata struct {
 }
 
 // verifyKV verify kv using metadata
-func verifyKV(sm *sstorage.ShardManager, kv *KV, meta *metadata) error {
+func verifyKV(sm *sstorage.ShardManager, kv *KV, meta *metadata, isMasked bool) error {
 	if kv.Idx != meta.kvIdx {
 		return fmt.Errorf("verifyKV fail: kvIdx mismatch; kv Idx: %d; meta kvIdx: %d", kv.Idx, meta.kvIdx)
 	}
 
-	if sm == nil {
-		return fmt.Errorf("empty sm to verify KV")
-	}
-	data, r, err := sm.UnmaskKV(meta.kvIdx, kv.Data[:meta.kvSize], common.BytesToHash(meta.hashInMeta))
-	if !r || err != nil {
-		return fmt.Errorf("Unmask KV fail, err: %v", err)
-	}
+	data := kv.Data
+	if isMasked {
+		if sm == nil {
+			return fmt.Errorf("empty sm to verify KV")
+		}
+		d, r, err := sm.UnmaskKV(meta.kvIdx, kv.Data[:meta.kvSize], common.BytesToHash(meta.hashInMeta))
+		if !r || err != nil {
+			return fmt.Errorf("Unmask KV fail, err: %v", err)
+		}
 
-	if meta.kvSize > uint64(len(data)) {
-		return fmt.Errorf("verifyKV fail: size error; Data size: %d; meta kvSize: %d", len(kv.Data), meta.kvSize)
+		if meta.kvSize > uint64(len(d)) {
+			return fmt.Errorf("verifyKV fail: size error; Data size: %d; meta kvSize: %d", len(kv.Data), meta.kvSize)
+		}
+		data = d
 	}
 
 	hasher := sha3.NewLegacyKeccak256().(crypto.KeccakState)
@@ -747,22 +747,22 @@ func getSstorageMetadata(s *state.StateDB, contract common.Address, index uint64
 	// 	uint24 kvSize;
 	// 	bytes24 hash;
 	// }
-	key := getSlotHash(6, uint256.NewInt(index).Bytes32())
-	skey := s.GetState(contract, key)
+	position := getSlotHash(2, uint256.NewInt(index).Bytes32())
+	skey := s.GetState(contract, position)
 	if skey == emptyHash {
 		return nil, fmt.Errorf("fail to get skey for index %d", index)
 	}
 
-	key = getSlotHash(5, skey)
-	meta := s.GetState(contract, key)
+	position = getSlotHash(1, skey)
+	meta := s.GetState(contract, position)
 	if meta == emptyHash {
 		return nil, fmt.Errorf("fail to get metadata for skey %s", skey.Hex())
 	}
 
 	return &metadata{
-			new(big.Int).SetBytes(meta[:5]).Uint64(),
-			new(big.Int).SetBytes(meta[5:8]).Uint64(),
-			meta[8:]},
+			new(big.Int).SetBytes(meta[27:]).Uint64(),
+			new(big.Int).SetBytes(meta[24:27]).Uint64(),
+			meta[:24]},
 		nil
 }
 
