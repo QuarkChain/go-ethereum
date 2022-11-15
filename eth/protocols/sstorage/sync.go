@@ -622,13 +622,13 @@ func (s *Syncer) processKVResponse(res *kvResponse) {
 			"res contract", res.contract.Hex())
 		return
 	}
-	state, err := s.chain.StateAt(s.chain.CurrentBlock().Hash())
+	successCount, failureCount, root := 0, 0, s.chain.CurrentBlock().Root()
+	state, err := s.chain.StateAt(root)
 	if err != nil {
 		log.Error("processKVResponse get state fail", "error", err)
 		return
 	}
 
-	successCount, failureCount := 0, 0
 	for _, kv := range res.kvs {
 		// 1. get kv meta
 		// 2. verify kv
@@ -636,6 +636,16 @@ func (s *Syncer) processKVResponse(res *kvResponse) {
 		// 3.2. if fail, set res.task.indexes[Idx] = 0
 		synced++
 		syncedBytes += uint64(len(kv.Data))
+
+		// update state if chain insert new block
+		if root != s.chain.CurrentBlock().Root() {
+			root = s.chain.CurrentBlock().Root()
+			state, err = s.chain.StateAt(root)
+			if err != nil {
+				log.Error("processKVResponse get state fail", "error", err)
+				return
+			}
+		}
 
 		meta, err := getSstorageMetadata(state, res.contract, kv.Idx)
 		if err != nil || meta == nil {
