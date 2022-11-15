@@ -105,8 +105,8 @@ func (t *testPeer) IsShardExist(contract common.Address, shardId uint64) bool {
 	return res
 }
 
-func (p *Peer) LogPeerInfo() {
-	p.logger.Info("Log peer info", "version", p.version)
+func (p *testPeer) LogPeerInfo() {
+	p.logger.Info("Log peer info", "version", 1)
 	for c, ss := range p.shards {
 		p.logger.Info(" - shards", "contract", c.Hex())
 		for s := range ss {
