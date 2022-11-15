@@ -400,6 +400,9 @@ func (s *Syncer) loadSyncStatus() {
 					task.indexes[i] = 0
 				}
 				task.filled = true
+				if len(task.indexes) == 0 {
+					task.done = true
+				}
 			}
 			log.Info("load task done.", "len", len(s.tasks))
 			break
