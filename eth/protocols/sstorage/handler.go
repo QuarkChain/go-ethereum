@@ -118,7 +118,7 @@ func HandleMessage(backend Backend, peer *Peer) error {
 			return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 		}
 		peer.SetShards(convertShardList(req))
-		return p2p.Send(peer.rw, ShardListMsg, sstorage.Shards())
+		return p2p.Send(peer.rw, ShardListMsg, newShardListPacket(sstorage.Shards()))
 
 	case msg.Code == ShardListMsg:
 		// A batch of trie kvs arrived to one of our previous requests
