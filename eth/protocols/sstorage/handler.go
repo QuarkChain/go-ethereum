@@ -171,7 +171,7 @@ func ServiceGetKVsQuery(chain *core.BlockChain, req *GetKVsPacket) ([]*KV, error
 		return nil, fmt.Errorf("shard manager for contract %s is not support", req.Contract.Hex())
 	}
 
-	stateDB, err := chain.StateAt(chain.CurrentBlock().Hash())
+	stateDB, err := chain.StateAt(chain.CurrentBlock().Root())
 	if err != nil {
 		return nil, err
 	}
