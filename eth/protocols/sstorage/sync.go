@@ -388,6 +388,7 @@ func (s *Syncer) loadSyncStatus() {
 			}
 			for _, task := range s.tasks {
 				sm := sstorage.ContractToShardManager[task.contract]
+				cnt := 0
 				for i := sm.KvEntries() * task.shardId; i < sm.KvEntries()*(task.shardId+1); i++ {
 					meta, err := getSstorageMetadata(stateDB, task.contract, i)
 					if err != nil {
@@ -401,7 +402,9 @@ func (s *Syncer) loadSyncStatus() {
 						}
 					}
 					task.indexes[i] = 0
+					cnt++
 				}
+				log.Info("load task state.", "contract", task.contract.Hex(), "shard", task.shardId, "count", cnt)
 				task.filled = true
 				if len(task.indexes) == 0 {
 					task.done = true
@@ -687,14 +690,15 @@ func (s *Syncer) processKVResponse(res *kvResponse) {
 
 	s.kvSynced += synced
 	s.kvBytes += common.StorageSize(syncedBytes)
-	log.Debug("Persisted set of kvs", "count", synced, "bytes", syncedBytes)
+	log.Info("Persisted set of kvs", "count", synced, "bytes", syncedBytes)
 
 	// If this delivery completed the last pending task, forward the account task
 	// to the next kv
 	if len(res.task.indexes) == 0 && res.task.filled {
+		log.Warn("task done", "shardId", res.task.shardId)
 		res.task.done = true
 	}
-	log.Debug("", "remain index for sync", len(res.task.indexes))
+	log.Info("remain index for sync", "shardId", res.task.shardId, "len", len(res.task.indexes))
 }
 
 type metadata struct {
