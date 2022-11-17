@@ -687,9 +687,10 @@ func (s *Syncer) processKVResponse(res *kvResponse) {
 	// If this delivery completed the last pending task, forward the account task
 	// to the next kv
 	if len(res.task.indexes) == 0 && res.task.filled {
+		log.Debug("task done", "shardId", res.task.shardId)
 		res.task.done = true
 	}
-	log.Debug("", "remain index for sync", len(res.task.indexes))
+	log.Debug("remain index for sync", "shardId", res.task.shardId, "len", len(res.task.indexes))
 }
 
 type metadata struct {

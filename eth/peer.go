@@ -17,12 +17,12 @@
 package eth
 
 import (
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/eth/protocols/sstorage"
 	"math/big"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/eth/protocols/eth"
 	"github.com/ethereum/go-ethereum/eth/protocols/snap"
+	"github.com/ethereum/go-ethereum/eth/protocols/sstorage"
 )
 
 // ethPeerInfo represents a short summary of the `eth` sub-protocol metadata known

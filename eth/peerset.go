@@ -347,7 +347,7 @@ func (ps *peerSet) snapLen() int {
 	return ps.snapPeers
 }
 
-// peerWithHighestTD retrieves the known peer with the current highest total
+// peerWithHighestTD retrieves the known peer with the currently highest total
 // difficulty.
 func (ps *peerSet) peerWithHighestTD() *eth.Peer {
 	ps.lock.RLock()
