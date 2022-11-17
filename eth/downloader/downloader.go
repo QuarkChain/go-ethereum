@@ -1634,7 +1634,6 @@ func (d *Downloader) DeliverSnapPacket(peer *snap.Peer, packet snap.Packet) erro
 func (d *Downloader) DeliverSstoragePacket(peer *sstorage.Peer, packet sstorage.Packet) error {
 	switch packet := packet.(type) {
 	case *sstorage.KVsPacket:
-		fmt.Println(packet)
 		return d.SstorSyncer.OnKVs(peer, packet.ID, packet.KVs)
 
 	default:
