@@ -23,6 +23,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/ethereum/go-ethereum/sstorage"
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -701,7 +702,7 @@ func (l *systemContractDeployer) RunWith(env *PrecompiledContractCallEnv, input 
 var (
 	putRawMethodId, _    = hex.DecodeString("4fb03390") // putRaw(uint256,bytes)
 	getRawMethodId, _    = hex.DecodeString("f835367f") // getRaw(bytes32,uint256,uint256,uint256)
-	removeRawMethodId, _ = hex.DecodeString("6c4b6776") // removeRaw(uint256,uint256)
+	removeRawMethodId, _ = hex.DecodeString("6c4b6776") // removeRaw(uint256 lastKvIdx,uint256 updatedKvIdx)
 )
 
 type sstoragePisa struct{}
@@ -751,7 +752,7 @@ func (l *sstoragePisa) RunWith(env *PrecompiledContractCallEnv, input []byte) ([
 		if putLen > maxKVSize {
 			return nil, errors.New("put len too large")
 		}
-		evm.StateDB.SstorageWrite(caller, kvIdx, getData(input, 4+dataPtr+32, putLen))
+		evm.StateDB.SstorageWrite(caller, kvIdx, getData(input, 4+dataPtr+32, putLen), true)
 		return nil, nil
 	} else if bytes.Equal(input[0:4], getRawMethodId) {
 		if !evm.Config.IsJsonRpc {
@@ -762,7 +763,7 @@ func (l *sstoragePisa) RunWith(env *PrecompiledContractCallEnv, input []byte) ([
 		kvIdx := new(big.Int).SetBytes(getData(input, 4+32, 32)).Uint64()
 		kvOff := new(big.Int).SetBytes(getData(input, 4+64, 32)).Uint64()
 		kvLen := new(big.Int).SetBytes(getData(input, 4+96, 32)).Uint64()
-		fb, ok, err := evm.StateDB.SstorageRead(caller, kvIdx, int(kvLen+kvOff), hash)
+		fb, ok, err := evm.StateDB.SstorageRead(caller, kvIdx, int(kvLen+kvOff), hash, false)
 		if err != nil {
 			return nil, err
 		}
@@ -774,6 +775,29 @@ func (l *sstoragePisa) RunWith(env *PrecompiledContractCallEnv, input []byte) ([
 		binary.BigEndian.PutUint64(pb[32-8:32], 32)
 		binary.BigEndian.PutUint64(pb[64-8:64], uint64(len(b)))
 		return append(pb, b...), nil
+	} else if bytes.Equal(input[0:4], removeRawMethodId) {
+		if evm.interpreter.readOnly {
+			return nil, ErrWriteProtection
+		}
+		// The execution of remove should not effect the result when validator running without data node.
+
+		// The remove operation consists of two steps.
+		// First, remove the data corresponding to the kvIdx selected by the operator.
+		// Second, move the data corresponding to lastKvIdx to the data storage location of kvIdx.
+		lastKvIdx := new(big.Int).SetBytes(getData(input, 4, 32))
+		updateKvIdx := new(big.Int).SetBytes(getData(input, 4+32+32, 32))
+
+		// Read the data corresponding to lastKvIdx
+		// Note : The reason why set IsMasked as true is we hope to read the already masked data.
+		dataToMove, _, _ := evm.StateDB.SstorageRead(caller, lastKvIdx.Uint64(), int(sstorage.ShardInfos[0].KVSize), common.Hash{}, true)
+
+		// Delete the data corresponding to lastKvIdx
+		// Note : The reason why set IsMasked as true is we hope to overwrite the whole KvData.
+		evm.StateDB.SstorageWrite(caller, lastKvIdx.Uint64(), []byte{}, true)
+
+		// Replace the data corresponding to kvIdx with the masked data corresponding to lastKvIdx
+		// Note : The reason why set IsMasked as false is dataToMove is the masked data which size is equal to KvSize.
+		evm.StateDB.SstorageWrite(caller, updateKvIdx.Uint64(), dataToMove, false)
 	}
 	// TODO: remove is not supported yet
 	return nil, errors.New("unsupported method")

@@ -20,7 +20,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/ethereum/go-ethereum/core/rawdb"
+	"github.com/ethereum/go-ethereum/core/state"
+	"github.com/ethereum/go-ethereum/params"
+	"github.com/ethereum/go-ethereum/sstorage"
 	"io/ioutil"
+	"math/big"
 	"testing"
 	"time"
 
@@ -311,6 +316,41 @@ func TestPrecompiledBLS12381G2MultiExp(t *testing.T) { testJson("blsG2MultiExp",
 func TestPrecompiledBLS12381Pairing(t *testing.T)    { testJson("blsPairing", "10", t) }
 func TestPrecompiledBLS12381MapG1(t *testing.T)      { testJson("blsMapG1", "11", t) }
 func TestPrecompiledBLS12381MapG2(t *testing.T)      { testJson("blsMapG2", "12", t) }
+
+func TestRemoveKvData(t *testing.T) {
+	sstorage.InitializeConfig()
+
+	statedb, _ := state.New(common.Hash{}, state.NewDatabase(rawdb.NewMemoryDatabase()), nil)
+
+	test := precompiledTest{
+		Name:     "TestPutKvData",
+		Input:    "0x4fb03390000000000000000000000000000000000000000000000000000000000000001200000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000003aabbcc0000000000000000000000000000000000000000000000000000000000",
+		Expected: "",
+	}
+
+	p := &sstoragePisa{}
+	caller := sstorage.ShardInfos[0].Contract
+	gas := p.RequiredGas(common.Hex2Bytes(test.Input))
+
+	vmctx := BlockContext{
+		BlockNumber: big.NewInt(0),
+		CanTransfer: func(db StateDB, address common.Address, b *big.Int) bool {
+			return true
+		},
+		Transfer: func(db StateDB, address common.Address, address2 common.Address, b *big.Int) {},
+	}
+
+	vmenv := NewEVM(vmctx, TxContext{}, statedb, params.AllEthashProtocolChanges, Config{})
+
+	env := &PrecompiledContractCallEnv{vmenv, AccountRef(caller)}
+
+	t.Run(fmt.Sprintf("%s-Gas=%d", test.Name, gas), func(t *testing.T) {
+		ret, remainingGas, err := RunPrecompiledContract(env, p, common.Hex2Bytes(test.Input), gas)
+		if err != nil {
+			t.Error(err, " out ", ret, remainingGas)
+		}
+	})
+}
 
 func BenchmarkPrecompiledBLS12381G1Add(b *testing.B)      { benchJson("blsG1Add", "0a", b) }
 func BenchmarkPrecompiledBLS12381G1Mul(b *testing.B)      { benchJson("blsG1Mul", "0b", b) }

@@ -57,6 +57,15 @@ func (n *proofList) Delete(key []byte) error {
 	panic("not supported")
 }
 
+type KVData struct {
+	Data   []byte
+	Masked bool // true means the data is masked data and false means that the data is origin data
+}
+
+func NewKVData(data []byte, masked bool) KVData {
+	return KVData{Data: data, Masked: masked}
+}
+
 // StateDB structs within the ethereum protocol are used to store anything
 // within the merkle trie. StateDBs take care of caching and storing
 // nested states. It's the general query interface to retrieve:
@@ -81,7 +90,7 @@ type StateDB struct {
 	stateObjectsDirty   map[common.Address]struct{} // State objects modified in the current execution
 
 	// This map holds sharded KV puts
-	shardedStorage map[common.Address]map[uint64][]byte
+	shardedStorage map[common.Address]map[uint64]KVData
 
 	// DB error.
 	// State objects are used by the consensus core and VM which are
@@ -147,7 +156,7 @@ func New(root common.Hash, db Database, snaps *snapshot.Tree) (*StateDB, error) 
 		journal:             newJournal(),
 		accessList:          newAccessList(),
 		hasher:              crypto.NewKeccakState(),
-		shardedStorage:      make(map[common.Address]map[uint64][]byte),
+		shardedStorage:      make(map[common.Address]map[uint64]KVData),
 	}
 	if sdb.snaps != nil {
 		if sdb.snap = sdb.snaps.Snapshot(root); sdb.snap != nil {
@@ -163,40 +172,44 @@ func (s *StateDB) SstorageMaxKVSize(addr common.Address) uint64 {
 	return s.db.TrieDB().SstorageMaxKVSize(addr)
 }
 
-func (s *StateDB) SstorageWrite(addr common.Address, kvIdx uint64, data []byte) error {
+func (s *StateDB) SstorageWrite(addr common.Address, kvIdx uint64, data []byte, IsMasked bool) error {
 	if len(data) > int(s.SstorageMaxKVSize(addr)) {
 		return fmt.Errorf("put too large")
 	}
 
 	if _, ok := s.shardedStorage[addr]; !ok {
-		s.shardedStorage[addr] = make(map[uint64][]byte)
+		s.shardedStorage[addr] = make(map[uint64]KVData)
+
 	}
 
 	s.journal.append(sstorageChange{
-		address:   &addr,
-		prevBytes: s.shardedStorage[addr][kvIdx],
-		kvIdx:     kvIdx,
+		address:      &addr,
+		prevBytes:    s.shardedStorage[addr][kvIdx].Data,
+		prevIsMasked: s.shardedStorage[addr][kvIdx].Masked,
+		kvIdx:        kvIdx,
 	})
 	// Assume data is immutable
-	s.shardedStorage[addr][kvIdx] = data
+	s.shardedStorage[addr][kvIdx] = NewKVData(data, !IsMasked)
 	return nil
 }
 
-func (s *StateDB) SstorageRead(addr common.Address, kvIdx uint64, readLen int, hash common.Hash) ([]byte, bool, error) {
+func (s *StateDB) SstorageRead(addr common.Address, kvIdx uint64, readLen int, hash common.Hash, isMasked bool) ([]byte, bool, error) {
 	if readLen > int(s.SstorageMaxKVSize(addr)) {
 		return nil, false, fmt.Errorf("readLen too large")
 	}
 
 	if m, ok0 := s.shardedStorage[addr]; ok0 {
 		if b, ok1 := m[kvIdx]; ok1 {
-			if readLen > len(b) {
-				return append(b, bytes.Repeat([]byte{0}, readLen-len(b))...), true, nil
+			if b.Masked == isMasked {
+				if readLen > len(b.Data) {
+					return append(b.Data, bytes.Repeat([]byte{0}, readLen-len(b.Data))...), true, nil
+				}
+				return b.Data[0:readLen], true, nil
 			}
-			return b[0:readLen], true, nil
 		}
 	}
 
-	return s.db.TrieDB().SstorageRead(addr, kvIdx, readLen, hash)
+	return s.db.TrieDB().SstorageRead(addr, kvIdx, readLen, hash, isMasked)
 }
 
 // StartPrefetcher initializes a new trie prefetcher to pull in nodes from the
@@ -702,7 +715,7 @@ func (s *StateDB) Copy() *StateDB {
 		preimages:           make(map[common.Hash][]byte, len(s.preimages)),
 		journal:             newJournal(),
 		hasher:              crypto.NewKeccakState(),
-		shardedStorage:      make(map[common.Address]map[uint64][]byte),
+		shardedStorage:      make(map[common.Address]map[uint64]KVData),
 	}
 	// Copy the dirty states, logs, and preimages
 	for addr := range s.journal.dirties {
@@ -785,7 +798,7 @@ func (s *StateDB) Copy() *StateDB {
 		}
 	}
 	for addr, m := range s.shardedStorage {
-		state.shardedStorage[addr] = make(map[uint64][]byte)
+		state.shardedStorage[addr] = make(map[uint64]KVData)
 		for k, v := range m {
 			state.shardedStorage[addr][k] = v
 		}
@@ -1038,13 +1051,13 @@ func (s *StateDB) Commit(deleteEmptyObjects bool) (common.Hash, error) {
 	triedb := s.db.TrieDB()
 	for addr, m := range s.shardedStorage {
 		for k, v := range m {
-			err := triedb.SstorageWrite(addr, k, v)
+			err := triedb.SstorageWrite(addr, k, v.Data, v.Masked)
 			if err != nil {
 				log.Crit("failed to flush sstorage data", "err", err)
 			}
 		}
 	}
-	s.shardedStorage = make(map[common.Address]map[uint64][]byte)
+	s.shardedStorage = make(map[common.Address]map[uint64]KVData)
 	return root, err
 }
 

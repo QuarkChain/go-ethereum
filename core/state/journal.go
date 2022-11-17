@@ -140,9 +140,10 @@ type (
 	}
 	// Sstorage change
 	sstorageChange struct {
-		prevBytes []byte // nil means not exist in StateDB (but may exist in underlying DB)
-		address   *common.Address
-		kvIdx     uint64
+		prevBytes    []byte // nil means not exist in StateDB (but may exist in underlying DB)
+		prevIsMasked bool   //
+		address      *common.Address
+		kvIdx        uint64
 	}
 )
 
@@ -283,6 +284,6 @@ func (ch sstorageChange) revert(s *StateDB) {
 	if ch.prevBytes == nil {
 		delete(s.shardedStorage[*ch.address], ch.kvIdx)
 	} else {
-		s.shardedStorage[*ch.address][ch.kvIdx] = ch.prevBytes
+		s.shardedStorage[*ch.address][ch.kvIdx] = NewKVData(ch.prevBytes, ch.prevIsMasked)
 	}
 }
