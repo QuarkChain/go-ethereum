@@ -60,6 +60,15 @@ var (
 	memcacheCommitSizeMeter  = metrics.NewRegisteredMeter("trie/memcache/commit/size", nil)
 )
 
+type KVData struct {
+	Data   []byte
+	Masked bool // true means the data is masked data and false means that the data is origin data
+}
+
+func NewKVData(data []byte, masked bool) KVData {
+	return KVData{Data: data, Masked: masked}
+}
+
 // Database is an intermediate write layer between the trie data structures and
 // the disk database. The aim is to accumulate trie writes in-memory and only
 // periodically flush a couple tries to disk, garbage collecting the remainder.
@@ -93,7 +102,7 @@ type Database struct {
 	lock sync.RWMutex
 
 	// This map holds sharded KV puts
-	shardedStorage         map[common.Address]map[uint64][]byte
+	shardedStorage         map[common.Address]map[uint64]KVData
 	contractToShardManager map[common.Address]*sstorage.ShardManager
 }
 
@@ -105,7 +114,7 @@ func (s *Database) SstorageMaxKVSize(addr common.Address) uint64 {
 	}
 }
 
-func (s *Database) SstorageWrite(addr common.Address, kvIdx uint64, data []byte) error {
+func (s *Database) SstorageWrite(addr common.Address, kvIdx uint64, data []byte, isMasked bool) error {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
@@ -114,14 +123,14 @@ func (s *Database) SstorageWrite(addr common.Address, kvIdx uint64, data []byte)
 	}
 
 	if _, ok := s.shardedStorage[addr]; !ok {
-		s.shardedStorage[addr] = make(map[uint64][]byte)
+		s.shardedStorage[addr] = make(map[uint64]KVData)
 	}
 	// Assume data is immutable.
-	s.shardedStorage[addr][kvIdx] = data
+	s.shardedStorage[addr][kvIdx] = NewKVData(data, !isMasked)
 	return nil
 }
 
-func (s *Database) SstorageRead(addr common.Address, kvIdx uint64, readLen int, hash common.Hash) ([]byte, bool, error) {
+func (s *Database) SstorageRead(addr common.Address, kvIdx uint64, readLen int, hash common.Hash, isMasked bool) ([]byte, bool, error) {
 	s.lock.RLock()
 	defer s.lock.RUnlock()
 
@@ -131,15 +140,17 @@ func (s *Database) SstorageRead(addr common.Address, kvIdx uint64, readLen int, 
 
 	if m, ok0 := s.shardedStorage[addr]; ok0 {
 		if b, ok1 := m[kvIdx]; ok1 {
-			if readLen > len(b) {
-				return append(b, bytes.Repeat([]byte{0}, readLen-len(b))...), true, nil
+			if b.Masked == isMasked {
+				if readLen > len(b.Data) {
+					return append(b.Data, bytes.Repeat([]byte{0}, readLen-len(b.Data))...), true, nil
+				}
+				return b.Data[0:readLen], true, nil
 			}
-			return b[0:readLen], true, nil
 		}
 	}
 
 	if s, ok0 := s.contractToShardManager[addr]; ok0 {
-		return s.TryRead(kvIdx, readLen, hash)
+		return s.TryRead(kvIdx, readLen, hash, isMasked)
 	}
 	return nil, false, nil
 }
@@ -358,7 +369,7 @@ func NewDatabaseWithConfig(diskdb ethdb.KeyValueStore, config *Config) *Database
 			children: make(map[common.Hash]uint16),
 		}},
 		contractToShardManager: sstorage.ContractToShardManager,
-		shardedStorage:         make(map[common.Address]map[uint64][]byte),
+		shardedStorage:         make(map[common.Address]map[uint64]KVData),
 	}
 	if config == nil || config.Preimages { // TODO(karalabe): Flip to default off in the future
 		db.preimages = make(map[common.Hash][]byte)
@@ -789,13 +800,13 @@ func (db *Database) Commit(node common.Hash, report bool, callback func(common.H
 	for addr, m := range db.shardedStorage {
 		sm := db.contractToShardManager[addr]
 		for kvIdx, b := range m {
-			_, err := sm.TryWrite(kvIdx, b)
+			_, err := sm.TryWrite(kvIdx, b.Data, !b.Masked)
 			if err != nil {
 				log.Error("Failed to write sstorage", "kvIdx", kvIdx, "err", err)
 			}
 		}
 	}
-	db.shardedStorage = make(map[common.Address]map[uint64][]byte)
+	db.shardedStorage = make(map[common.Address]map[uint64]KVData)
 
 	// Reset the storage counters and bumped metrics
 	if db.preimages != nil {

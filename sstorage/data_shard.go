@@ -81,7 +81,7 @@ func (ds *DataShard) Read(kvIdx uint64, readLen int, hash common.Hash, isMasked 
 			chunkReadLen = int(CHUNK_SIZE)
 		}
 		readLen = readLen - chunkReadLen
-
+		// todo chunkIdx := kvIdx*ds.chunksPerKv + i
 		chunkIdx := ds.ChunkIdx() + kvIdx*ds.chunksPerKv + i
 		cdata, err := ds.ReadChunk(chunkIdx, chunkReadLen, hash, isMasked)
 		if err != nil {
@@ -111,6 +111,7 @@ func (ds *DataShard) Write(kvIdx uint64, b []byte, isMasked bool) error {
 			writeLen = int(CHUNK_SIZE)
 		}
 
+		// todo chunkIdx := kvIdx*ds.chunksPerKv + i
 		chunkIdx := ds.ChunkIdx() + kvIdx*ds.chunksPerKv + i
 		err := ds.WriteChunk(chunkIdx, b[off:off+writeLen], isMasked)
 		if err != nil {

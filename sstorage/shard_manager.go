@@ -50,19 +50,19 @@ func (sm *ShardManager) AddDataFile(df *DataFile) error {
 	return nil
 }
 
-func (sm *ShardManager) TryWrite(kvIdx uint64, b []byte) (bool, error) {
+func (sm *ShardManager) TryWrite(kvIdx uint64, b []byte, isMasked bool) (bool, error) {
 	shardIdx := kvIdx / sm.kvEntries
 	if ds, ok := sm.shardMap[shardIdx]; ok {
-		return true, ds.Write(kvIdx, b, false)
+		return true, ds.Write(kvIdx, b, isMasked)
 	} else {
 		return false, nil
 	}
 }
 
-func (sm *ShardManager) TryRead(kvIdx uint64, readLen int, hash common.Hash) ([]byte, bool, error) {
+func (sm *ShardManager) TryRead(kvIdx uint64, readLen int, hash common.Hash, isMasked bool) ([]byte, bool, error) {
 	shardIdx := kvIdx / sm.kvEntries
 	if ds, ok := sm.shardMap[shardIdx]; ok {
-		b, err := ds.Read(kvIdx, readLen, hash, false)
+		b, err := ds.Read(kvIdx, readLen, hash, isMasked)
 		return b, true, err
 	} else {
 		return nil, false, nil
