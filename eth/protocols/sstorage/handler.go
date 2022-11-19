@@ -179,7 +179,7 @@ func ServiceGetKVsQuery(chain *core.BlockChain, req *GetKVsPacket) ([]*KV, error
 		if err != nil {
 			continue
 		}
-		data, ok, err := sm.TryReadMaskedKV(idx, int(sm.MaxKvSize()), common.BytesToHash(meta.hashInMeta))
+		data, ok, err := sm.TryReadMaskedKV(idx, int(meta.kvSize), common.BytesToHash(meta.hashInMeta))
 		if ok && err == nil {
 			kv := KV{idx, data}
 			res = append(res, &kv)
