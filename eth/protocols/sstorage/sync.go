@@ -708,30 +708,31 @@ func verifyKV(sm *sstorage.ShardManager, kv *KV, meta *metadata, isMasked bool) 
 		return fmt.Errorf("verifyKV fail: kvIdx mismatch; kv Idx: %d; meta kvIdx: %d", kv.Idx, meta.kvIdx)
 	}
 
-	data := kv.Data
+	data := make([]byte, len(kv.Data))
+	copy(data, kv.Data)
 	if isMasked {
 		if sm == nil {
 			return fmt.Errorf("empty sm to verify KV")
 		}
-		d, r, err := sm.UnmaskKV(meta.kvIdx, kv.Data[:meta.kvSize], common.BytesToHash(meta.hashInMeta))
+		d, r, err := sm.UnmaskKV(meta.kvIdx, data, common.BytesToHash(meta.hashInMeta))
 		if !r || err != nil {
 			return fmt.Errorf("Unmask KV fail, err: %v", err)
 		}
 
-		if meta.kvSize > uint64(len(d)) {
+		if meta.kvSize != uint64(len(data)) {
 			return fmt.Errorf("verifyKV fail: size error; Data size: %d; meta kvSize: %d", len(kv.Data), meta.kvSize)
 		}
 		data = d
 	}
 
 	hasher := sha3.NewLegacyKeccak256().(crypto.KeccakState)
-	hasher.Write(data[:meta.kvSize])
+	hasher.Write(data)
 	hash := common.Hash{}
 	hasher.Read(hash[:])
 
 	if bytes.Compare(hash[:24], meta.hashInMeta) != 0 {
 		return fmt.Errorf("verifyKV fail: size error; Data hash: %s; meta hash (24): %s",
-			hash.Hex(), common.Bytes2Hex(meta.hashInMeta))
+			common.Bytes2Hex(hash[:24]), common.Bytes2Hex(meta.hashInMeta))
 	}
 
 	return nil
@@ -878,10 +879,6 @@ func (s *Syncer) OnKVs(peer SyncPeer, id uint64, kvs []*KV) error {
 
 // report calculates various status reports and provides it to the user.
 func (s *Syncer) report(force bool) {
-	// Don't report all the events, just occasionally
-	/*if !force && time.Since(s.logTime) < 8*time.Second {
-		return
-	}*/
 	// Don't report anything until we have a meaningful progress
 	synced := s.kvSynced
 	if synced == 0 {
