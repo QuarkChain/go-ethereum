@@ -159,6 +159,10 @@ type BlockChain interface {
 	StateAt(root common.Hash) (*state.StateDB, error)
 
 	CurrentBlock() *types.Block
+
+	LockInsertChain() error
+
+	UnlockInsertChain()
 }
 
 // Syncer is a sstorage syncer based the sstorage protocol. It's purpose is to
@@ -624,6 +628,10 @@ func (s *Syncer) processKVResponse(res *kvResponse) {
 			"res contract", res.contract.Hex())
 		return
 	}
+
+	s.chain.LockInsertChain()
+	defer s.chain.UnlockInsertChain()
+
 	successCount, failureCount, root := 0, 0, s.chain.CurrentBlock().Root()
 	state, err := s.chain.StateAt(root)
 	if err != nil {
@@ -638,16 +646,6 @@ func (s *Syncer) processKVResponse(res *kvResponse) {
 		// 3.2. if fail, set res.task.indexes[Idx] = 0
 		synced++
 		syncedBytes += uint64(len(kv.Data))
-
-		// update state if chain insert new block
-		if root != s.chain.CurrentBlock().Root() {
-			root = s.chain.CurrentBlock().Root()
-			state, err = s.chain.StateAt(root)
-			if err != nil {
-				log.Error("processKVResponse get state fail", "error", err)
-				return
-			}
-		}
 
 		meta, err := getSstorageMetadata(state, res.contract, kv.Idx)
 		if err != nil || meta == nil {
