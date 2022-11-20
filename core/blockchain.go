@@ -1330,6 +1330,18 @@ func (bc *BlockChain) addFutureBlock(block *types.Block) error {
 	return nil
 }
 
+func (bc *BlockChain) LockInsertChain() error {
+	// Pre-checks passed, start the full block imports
+	if !bc.chainmu.TryLock() {
+		return errChainStopped
+	}
+	return nil
+}
+
+func (bc *BlockChain) UnlockInsertChain() {
+	bc.chainmu.Unlock()
+}
+
 // InsertChain attempts to insert the given batch of blocks in to the canonical
 // chain or, otherwise, create a fork. If an error is returned it will return
 // the index number of the failing block as well an error describing what went
