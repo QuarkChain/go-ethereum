@@ -637,6 +637,10 @@ func (s *Syncer) processKVResponse(res *kvResponse) {
 			"res contract", res.contract.Hex())
 		return
 	}
+
+	s.chain.LockInsertChain()
+	defer s.chain.UnlockInsertChain()
+
 	successCount, failureCount, root := 0, 0, s.chain.CurrentBlock().Root()
 	state, err := s.chain.StateAt(root)
 	if err != nil {
