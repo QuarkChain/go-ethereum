@@ -2,7 +2,6 @@ package sstorage
 
 import (
 	"fmt"
-
 	"github.com/ethereum/go-ethereum/common"
 )
 
@@ -82,7 +81,7 @@ func (ds *DataShard) Read(kvIdx uint64, readLen int, hash common.Hash, isMasked 
 		}
 		readLen = readLen - chunkReadLen
 
-		chunkIdx := ds.ChunkIdx() + kvIdx*ds.chunksPerKv + i
+		chunkIdx := kvIdx*ds.chunksPerKv + i
 		cdata, err := ds.ReadChunk(chunkIdx, chunkReadLen, hash, isMasked)
 		if err != nil {
 			return nil, err
@@ -111,7 +110,7 @@ func (ds *DataShard) Write(kvIdx uint64, b []byte, isMasked bool) error {
 			writeLen = int(CHUNK_SIZE)
 		}
 
-		chunkIdx := ds.ChunkIdx() + kvIdx*ds.chunksPerKv + i
+		chunkIdx := kvIdx*ds.chunksPerKv + i
 		err := ds.WriteChunk(chunkIdx, b[off:off+writeLen], isMasked)
 		if err != nil {
 			return nil

@@ -97,7 +97,7 @@ func (sm *ShardManager) MaskOrUnmaskKV(kvIdx uint64, b []byte, hash common.Hash,
 			}
 			datalen = datalen - chunkReadLen
 
-			chunkIdx := ds.ChunkIdx() + kvIdx*ds.chunksPerKv + i
+			chunkIdx := kvIdx*ds.chunksPerKv + i
 			df := ds.GetStorageFile(chunkIdx)
 			if df == nil {
 				return nil, false, fmt.Errorf("cannot find storage file for chunkIdx %d", chunkIdx)
