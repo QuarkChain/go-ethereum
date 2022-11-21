@@ -205,6 +205,10 @@ type BlockChain interface {
 	Snapshots() *snapshot.Tree
 
 	StateAt(root common.Hash) (*state.StateDB, error)
+
+	LockInsertChain() error
+
+	UnlockInsertChain()
 }
 
 // New creates a new downloader to fetch hashes and blocks from remote peers.
