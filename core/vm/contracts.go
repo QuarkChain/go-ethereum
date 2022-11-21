@@ -780,10 +780,11 @@ func (l *sstoragePisa) RunWith(env *PrecompiledContractCallEnv, input []byte) ([
 		if evm.interpreter.readOnly {
 			return nil, ErrWriteProtection
 		}
-		// The execution of remove should not effect the result when validator running without data node.
+
+		// The execution of remove should not affect the result when validator running without data node.
 
 		// The remove operation consists of two steps.
-		// First, remove the data corresponding to the kvIdx selected by the operator.
+		// First, remove the data corresponding to kvIdx selected by the operator.
 		// Second, move the data corresponding to lastKvIdx to the data storage location of kvIdx.
 		lastKvIdx := new(big.Int).SetBytes(getData(input, 4, 32))
 		updateKvIdx := new(big.Int).SetBytes(getData(input, 4+32, 32))
