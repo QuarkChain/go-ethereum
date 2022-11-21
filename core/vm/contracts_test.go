@@ -20,10 +20,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/ethereum/go-ethereum/core/rawdb"
-	"github.com/ethereum/go-ethereum/core/state"
-	"github.com/ethereum/go-ethereum/params"
-	"github.com/ethereum/go-ethereum/sstorage"
 	"io/ioutil"
 	"math/big"
 	"math/rand"
@@ -31,6 +27,10 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/rawdb"
+	"github.com/ethereum/go-ethereum/core/state"
+	"github.com/ethereum/go-ethereum/params"
+	"github.com/ethereum/go-ethereum/sstorage"
 )
 
 // precompiledTest defines the input/output pairs for precompiled contract tests.
@@ -643,16 +643,16 @@ func TestRemoveKvData(t *testing.T) {
 	}
 
 	lastKvIdx := sm.MaxKvSizeEntries()*3 - 2
-	// remove the lastKvIdxData
+	// removeKvIdx is equal to lastKvIdx
 	removeKvIdx := sm.MaxKvSizeEntries()*3 - 2
 	olr0 := newCheckRemoveOperationList(lastKvIdx, removeKvIdx, 4*1024)
 
-	// remove the data of kvIdx which shardId is equal with lastKvIdx
+	// removeKvIdx and lastKvIdx are in the same Shard
 	lastKvIdx--
 	removeKvIdx = sm.MaxKvSizeEntries()*2 + 1
 	olr1 := newCheckRemoveOperationList(lastKvIdx, removeKvIdx, 4*1024)
 
-	// remove the data of kvIdx which shardId is different with lastKvIdx
+	// removeKvIdx and lastKvIdx are in the different Shard
 	lastKvIdx--
 	removeKvIdx = 1
 	olr2 := newCheckRemoveOperationList(lastKvIdx, removeKvIdx, 4*1024)

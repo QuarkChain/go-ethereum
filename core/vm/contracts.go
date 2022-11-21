@@ -23,7 +23,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"github.com/ethereum/go-ethereum/sstorage"
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -33,6 +32,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto/bls12381"
 	"github.com/ethereum/go-ethereum/crypto/bn256"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/ethereum/go-ethereum/sstorage"
 
 	//lint:ignore SA1019 Needed for precompile
 	"golang.org/x/crypto/ripemd160"
@@ -717,8 +717,9 @@ func (l *sstoragePisa) RequiredGas(input []byte) uint64 {
 		return params.SstoreResetGasEIP2200
 	} else if bytes.Equal(input[0:4], getRawMethodId) {
 		return params.SloadGasEIP2200
+	} else if bytes.Equal(input[0:4], getRawMethodId) {
+		return params.SstoreResetGasEIP2200
 	} else {
-		// TODO: remove is not supported yet
 		return 0
 	}
 }
@@ -784,8 +785,8 @@ func (l *sstoragePisa) RunWith(env *PrecompiledContractCallEnv, input []byte) ([
 		// The execution of remove should not affect the result when validator running without data node.
 
 		// The remove operation consists of two steps.
-		// First, remove the data corresponding to kvIdx selected by the operator.
-		// Second, move the data corresponding to lastKvIdx to the data storage location of kvIdx.
+		// First, replace the data corresponding to removeKvIdx selected by the operator with data of lastKvIdx
+		// Second, set the data space of the original lastKvIdx to 0
 		lastKvIdx := new(big.Int).SetBytes(getData(input, 4, 32))
 		updateKvIdx := new(big.Int).SetBytes(getData(input, 4+32, 32))
 
