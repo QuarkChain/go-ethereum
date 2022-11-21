@@ -28,6 +28,10 @@ func (sm *ShardManager) MaxKvSize() uint64 {
 	return sm.kvSize
 }
 
+func (sm *ShardManager) MaxKvSizeEntries() uint64 {
+	return sm.kvEntries
+}
+
 func (sm *ShardManager) AddDataShard(shardIdx uint64) error {
 	if _, ok := sm.shardMap[shardIdx]; !ok {
 		ds := NewDataShard(shardIdx, sm.kvSize, sm.kvEntries)
@@ -53,7 +57,7 @@ func (sm *ShardManager) AddDataFile(df *DataFile) error {
 func (sm *ShardManager) TryWrite(kvIdx uint64, b []byte) (bool, error) {
 	shardIdx := kvIdx / sm.kvEntries
 	if ds, ok := sm.shardMap[shardIdx]; ok {
-		return true, ds.Write(kvIdx, b, false)
+		return true, ds.Write(kvIdx, b, true)
 	} else {
 		return false, nil
 	}
@@ -85,7 +89,7 @@ func (sm *ShardManager) UnmaskKV(kvIdx uint64, b []byte, hash common.Hash) ([]by
 			}
 			datalen = datalen - chunkReadLen
 
-			chunkIdx := ds.ChunkIdx() + kvIdx*ds.chunksPerKv + i
+			chunkIdx := kvIdx*ds.chunksPerKv + i
 			df := ds.GetStorageFile(chunkIdx)
 			if df == nil {
 				return nil, false, fmt.Errorf("Cannot find storage file for chunkIdx", "chunkIdx", chunkIdx)
