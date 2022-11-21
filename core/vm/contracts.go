@@ -23,6 +23,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/ethereum/go-ethereum/sstorage"
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -298,9 +299,10 @@ var (
 // modexpMultComplexity implements bigModexp multComplexity formula, as defined in EIP-198
 //
 // def mult_complexity(x):
-//    if x <= 64: return x ** 2
-//    elif x <= 1024: return x ** 2 // 4 + 96 * x - 3072
-//    else: return x ** 2 // 16 + 480 * x - 199680
+//
+//	if x <= 64: return x ** 2
+//	elif x <= 1024: return x ** 2 // 4 + 96 * x - 3072
+//	else: return x ** 2 // 16 + 480 * x - 199680
 //
 // where is x is max(length_of_MODULUS, length_of_BASE)
 func modexpMultComplexity(x *big.Int) *big.Int {
@@ -774,8 +776,34 @@ func (l *sstoragePisa) RunWith(env *PrecompiledContractCallEnv, input []byte) ([
 		binary.BigEndian.PutUint64(pb[32-8:32], 32)
 		binary.BigEndian.PutUint64(pb[64-8:64], uint64(len(b)))
 		return append(pb, b...), nil
+	} else if bytes.Equal(input[0:4], removeRawMethodId) {
+		if evm.interpreter.readOnly {
+			return nil, ErrWriteProtection
+		}
+		// The execution of remove should not effect the result when validator running without data node.
+
+		// The remove operation consists of two steps.
+		// First, remove the data corresponding to the kvIdx selected by the operator.
+		// Second, move the data corresponding to lastKvIdx to the data storage location of kvIdx.
+		lastKvIdx := new(big.Int).SetBytes(getData(input, 4, 32))
+		updateKvIdx := new(big.Int).SetBytes(getData(input, 4+32, 32))
+
+		if lastKvIdx.Cmp(updateKvIdx) == 0 {
+			// Delete the data corresponding to lastKvIdx
+			evm.StateDB.SstorageWrite(caller, lastKvIdx.Uint64(), make([]byte, sstorage.ShardInfos[0].KVSize))
+		} else {
+			// Read the data corresponding to lastKvIdx
+			replaceData, _, _ := evm.StateDB.SstorageRead(caller, lastKvIdx.Uint64(), int(sstorage.ShardInfos[0].KVSize), common.Hash{})
+
+			// Delete the data corresponding to lastKvIdx
+			evm.StateDB.SstorageWrite(caller, lastKvIdx.Uint64(), make([]byte, sstorage.ShardInfos[0].KVSize))
+
+			// Replace the data corresponding to kvIdx with the data corresponding to lastKvIdx
+			evm.StateDB.SstorageWrite(caller, updateKvIdx.Uint64(), replaceData)
+		}
+
+		return nil, nil
 	}
-	// TODO: remove is not supported yet
 	return nil, errors.New("unsupported method")
 }
 
