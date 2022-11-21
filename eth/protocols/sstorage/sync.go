@@ -648,8 +648,6 @@ func (s *Syncer) processKVResponse(res *kvResponse) {
 		return
 	}
 
-	s.chain.LockInsertChain()
-	defer s.chain.UnlockInsertChain()
 	for _, kv := range res.kvs {
 		// 1. get kv meta
 		// 2. verify kv
