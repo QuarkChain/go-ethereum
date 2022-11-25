@@ -404,11 +404,13 @@ func constructRemoveOperation(lastKvIdx uint64, updateKvIdx uint64, kvSize uint6
 
 	validLastKvIdx := common.BigToHash(big.NewInt(0).SetUint64(lastKvIdx)).Bytes()
 	validUpdateKvIdx := common.BigToHash(big.NewInt(0).SetUint64(updateKvIdx)).Bytes()
+	lastKvIdxHash := common.BigToHash(big.NewInt(1)).Bytes()
 
 	removeInput = make([]byte, 0)
 	removeInput = append(removeInput, removeRawMethodId...)
 	removeInput = append(removeInput, validLastKvIdx...)
 	removeInput = append(removeInput, validUpdateKvIdx...)
+	removeInput = append(removeInput, lastKvIdxHash...)
 
 	lastKvIdxGetInput = constructGetOperation(lastKvIdx, kvSize)
 	updateKvIdxGetInput = constructGetOperation(updateKvIdx, kvSize)
@@ -448,6 +450,7 @@ type operationDetail struct {
 	Output            []byte
 	ExpectOutput      []byte
 	OtherOperationIdx int // -1 means that do not need to set other operation expectOutput
+	ExpectErr         string
 }
 
 func (o *operationDetail) checkOutput(output []byte) error {
@@ -475,6 +478,13 @@ func (ol *operationList) run(db *state.StateDB, env *PrecompiledContractCallEnv,
 	for i, o := range ol.List {
 		output, _, err := RunPrecompiledContract(env, p, o.Input, p.RequiredGas(o.Input))
 		if err != nil {
+			if len(o.ExpectErr) != 0 {
+				if o.ExpectErr == err.Error() {
+					return nil
+				} else {
+					return fmt.Errorf("Error No Match : the %dth operation[%s], actual err:%s , expect err:%s ", i, o.Method, err.Error(), o.ExpectErr)
+				}
+			}
 			return fmt.Errorf("the %dth operation[%s], %s", i, o.Method, err.Error())
 		}
 
@@ -541,6 +551,8 @@ func prepareShardManager() (*sstorage.ShardManager, common.Address, error) {
 	sm := sstorage.NewShardManager(ShardManagerContract, KvSize, KvEntries)
 	// we need to update this ,NewDatabaseWithConfig
 	sstorage.ContractToShardManager[ShardManagerContract] = sm
+	sstorage.ShardInfos[0] = &sstorage.ShardInfo{ShardManagerContract, KvSize, KvEntries}
+
 	err := sm.AddDataShard(0)
 	if err != nil {
 		return nil, common.Address{}, err
@@ -652,12 +664,22 @@ func TestRemoveKvData(t *testing.T) {
 	removeKvIdx = sm.MaxKvSizeEntries()*2 + 1
 	olr1 := newCheckRemoveOperationList(lastKvIdx, removeKvIdx, 4*1024)
 
+	lastKvIdx--
+	removeKvIdx = sm.MaxKvSizeEntries() * 2
+	olr2 := newCheckRemoveOperationList(lastKvIdx, removeKvIdx, 4*1024)
+
 	// removeKvIdx and lastKvIdx are in the different Shard
 	lastKvIdx--
 	removeKvIdx = 1
-	olr2 := newCheckRemoveOperationList(lastKvIdx, removeKvIdx, 4*1024)
+	olr3 := newCheckRemoveOperationList(lastKvIdx, removeKvIdx, 4*1024)
+	olr3.List[1].ExpectErr = "only allow removing a KV entry in the last shard"
 
-	ols = append(ols, olr0, olr1, olr2)
+	lastKvIdx--
+	removeKvIdx = sm.MaxKvSizeEntries()*2 - 1
+	olr4 := newCheckRemoveOperationList(lastKvIdx, removeKvIdx, 4*1024)
+	olr4.List[1].ExpectErr = "only allow removing a KV entry in the last shard"
+
+	ols = append(ols, olr0, olr1, olr2, olr3, olr4)
 
 	p := &sstoragePisa{}
 	vmctx := BlockContext{

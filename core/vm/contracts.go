@@ -703,7 +703,7 @@ func (l *systemContractDeployer) RunWith(env *PrecompiledContractCallEnv, input 
 var (
 	putRawMethodId, _    = hex.DecodeString("4fb03390") // putRaw(uint256,bytes)
 	getRawMethodId, _    = hex.DecodeString("f835367f") // getRaw(bytes32,uint256,uint256,uint256)
-	removeRawMethodId, _ = hex.DecodeString("6c4b6776") // removeRaw(uint256,uint256)
+	removeRawMethodId, _ = hex.DecodeString("fbcc2ab1") // removeRaw(uint256,uint256,bytes32)
 )
 
 type sstoragePisa struct{}
@@ -789,13 +789,19 @@ func (l *sstoragePisa) RunWith(env *PrecompiledContractCallEnv, input []byte) ([
 		// Second, set the data space of the original lastKvIdx to 0
 		lastKvIdx := new(big.Int).SetBytes(getData(input, 4, 32))
 		updateKvIdx := new(big.Int).SetBytes(getData(input, 4+32, 32))
+		lastKvIdxHash := common.BytesToHash(getData(input, 4+32+32, 32))
+		perShardKvEntries := sstorage.ShardInfos[0].KVEntries
 
+		// only allow removing a KV entry in the last shard
+		if lastKvIdx.Uint64()/perShardKvEntries != updateKvIdx.Uint64()/perShardKvEntries {
+			return nil, fmt.Errorf("only allow removing a KV entry in the last shard")
+		}
 		if lastKvIdx.Cmp(updateKvIdx) == 0 {
 			// Delete the data corresponding to lastKvIdx
 			evm.StateDB.SstorageWrite(caller, lastKvIdx.Uint64(), make([]byte, sstorage.ShardInfos[0].KVSize))
 		} else {
 			// Read the data corresponding to lastKvIdx
-			replaceData, _, _ := evm.StateDB.SstorageRead(caller, lastKvIdx.Uint64(), int(sstorage.ShardInfos[0].KVSize), common.Hash{})
+			replaceData, _, _ := evm.StateDB.SstorageRead(caller, lastKvIdx.Uint64(), int(sstorage.ShardInfos[0].KVSize), lastKvIdxHash)
 
 			// Delete the data corresponding to lastKvIdx
 			evm.StateDB.SstorageWrite(caller, lastKvIdx.Uint64(), make([]byte, sstorage.ShardInfos[0].KVSize))
