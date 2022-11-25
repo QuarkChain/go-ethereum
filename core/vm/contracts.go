@@ -794,7 +794,7 @@ func (l *sstoragePisa) RunWith(env *PrecompiledContractCallEnv, input []byte) ([
 
 		// only allow removing a KV entry in the last shard
 		if lastKvIdx.Uint64()/perShardKvEntries != updateKvIdx.Uint64()/perShardKvEntries {
-			return nil, fmt.Errorf("only allow removing a KV entry in the last shard")
+			return nil, errors.New("only allow removing a KV entry in the last shard")
 		}
 		if lastKvIdx.Cmp(updateKvIdx) == 0 {
 			// Delete the data corresponding to lastKvIdx
