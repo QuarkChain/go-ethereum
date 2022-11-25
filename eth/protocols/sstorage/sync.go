@@ -640,7 +640,7 @@ func (s *Syncer) processKVResponse(res *kvResponse) {
 
 	s.chain.LockInsertChain()
 	defer s.chain.UnlockInsertChain()
-
+	st := time.Now()
 	successCount, failureCount, root := 0, 0, s.chain.CurrentBlock().Root()
 	state, err := s.chain.StateAt(root)
 	if err != nil {
@@ -688,7 +688,7 @@ func (s *Syncer) processKVResponse(res *kvResponse) {
 
 	s.kvSynced += synced
 	s.kvBytes += common.StorageSize(syncedBytes)
-	log.Info("Persisted set of kvs", "count", synced, "bytes", syncedBytes)
+	log.Info("Persisted set of kvs", "count", synced, "bytes", syncedBytes, "time (Milliseconds)", time.Since(st).Milliseconds())
 
 	// If this delivery completed the last pending task, forward the account task
 	// to the next kv
