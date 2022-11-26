@@ -18,6 +18,7 @@ package rawdb
 
 import (
 	"github.com/ethereum/go-ethereum/ethdb"
+	"github.com/ethereum/go-ethereum/params"
 )
 
 // table is a wrapper around a database that prefixes each key access with a pre-
@@ -87,6 +88,14 @@ func (t *table) ModifyAncients(fn func(ethdb.AncientWriteOp) error) (int64, erro
 
 func (t *table) ReadAncients(fn func(reader ethdb.AncientReader) error) (err error) {
 	return t.db.ReadAncients(fn)
+}
+
+func (t *table) StartFreeze(db ethdb.KeyValueStore, cfg *params.ChainConfig) error {
+	return t.db.StartFreeze(db, cfg)
+}
+
+func (f *table) PruneConfig() (*params.PruneConfig, error) {
+	return f.db.PruneConfig()
 }
 
 // TruncateAncients is a noop passthrough that just forwards the request to the underlying

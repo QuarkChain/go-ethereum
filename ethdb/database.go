@@ -17,7 +17,11 @@
 // Package ethdb defines the interfaces for an Ethereum data store.
 package ethdb
 
-import "io"
+import (
+	"io"
+
+	"github.com/ethereum/go-ethereum/params"
+)
 
 // KeyValueReader wraps the Has and Get method of a backing data store.
 type KeyValueReader interface {
@@ -111,6 +115,11 @@ type AncientWriter interface {
 
 	// Sync flushes all in-memory ancient store data to disk.
 	Sync() error
+
+	// StartFreeze should be called only once
+	StartFreeze(db KeyValueStore, chainConfig *params.ChainConfig) error
+
+	PruneConfig() (*params.PruneConfig, error)
 }
 
 // AncientWriteOp is given to the function argument of ModifyAncients.
@@ -120,6 +129,8 @@ type AncientWriteOp interface {
 
 	// AppendRaw adds an item without RLP-encoding it.
 	AppendRaw(kind string, number uint64, item []byte) error
+
+	PruneBody() bool
 }
 
 // Reader contains the methods required to read data from both key-value as well as

@@ -881,8 +881,26 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 		ancientBlocks, liveBlocks     types.Blocks
 		ancientReceipts, liveReceipts []types.Receipts
 	)
+
 	// Do a sanity check that the provided chain is actually ordered and linked
 	for i := 0; i < len(blockChain); i++ {
+
+		needDerive := false
+		for _, receipt := range receiptChain[i] {
+			if receipt.TxHash == (common.Hash{}) {
+				needDerive = true
+				break
+			}
+		}
+		if needDerive {
+			// Try to derive the receipt fields from body
+			// This happens when the node addresses the response from an old client that returns both bodies and old receipts
+			// TODO: Remove the code when running in new testnet
+			if err := receiptChain[i].DeriveFields(bc.chainConfig, blockChain[i].Hash(), blockChain[i].NumberU64(), blockChain[i].Transactions()); err != nil {
+				return 0, fmt.Errorf("DeriveFields failed:%v", err)
+			}
+		}
+
 		if i != 0 {
 			if blockChain[i].NumberU64() != blockChain[i-1].NumberU64()+1 || blockChain[i].ParentHash() != blockChain[i-1].Hash() {
 				log.Error("Non contiguous receipt insert", "number", blockChain[i].Number(), "hash", blockChain[i].Hash(), "parent", blockChain[i].ParentHash(),
