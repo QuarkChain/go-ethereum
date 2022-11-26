@@ -82,6 +82,12 @@ type KV struct {
 	Data []byte
 }
 
+type VerifiedKV struct {
+	Idx      uint64
+	Data     []byte
+	MetaHash common.Hash
+}
+
 type ShardListPacket struct {
 	ContractShardsList []*ContractShards
 }
