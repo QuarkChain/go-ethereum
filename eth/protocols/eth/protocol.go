@@ -288,6 +288,11 @@ type ReceiptsPacket66 struct {
 	ReceiptsPacket
 }
 
+type ReceiptsPacket66Complete struct {
+	RequestId      uint64
+	ReceiptsPacket [][]*types.ReceiptComplete
+}
+
 // ReceiptsRLPPacket is used for receipts, when we already have it encoded
 type ReceiptsRLPPacket []rlp.RawValue
 

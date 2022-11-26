@@ -329,7 +329,7 @@ func verifyKVs(stateDB *state.StateDB, data map[common.Address]map[uint64][]byte
 				val, _, _ = shardData.UnmaskKV(idx, val, common.BytesToHash(meta.hashInMeta))
 			}
 			if err != nil {
-				t.Fatalf("get meta data fail with err: %s.", err.Error())
+				t.Fatalf("get MetaHash data fail with err: %s.", err.Error())
 			}
 			sval, ok, err := shardData.TryRead(idx, len(val), common.BytesToHash(meta.hashInMeta))
 			if err != nil {

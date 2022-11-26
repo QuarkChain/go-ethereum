@@ -301,7 +301,12 @@ func ServiceGetReceiptsQuery(chain *core.BlockChain, query GetReceiptsPacket) []
 			}
 		}
 		// If known, encode and queue for response packet
-		if encoded, err := rlp.EncodeToBytes(results); err != nil {
+
+		p2pReceipts := make([]*types.ReceiptComplete, 0, len(results))
+		for _, receipt := range results {
+			p2pReceipts = append(p2pReceipts, (*types.ReceiptComplete)(receipt))
+		}
+		if encoded, err := rlp.EncodeToBytes(p2pReceipts); err != nil {
 			log.Error("Failed to encode receipt", "err", err)
 		} else {
 			receipts = append(receipts, encoded)
@@ -411,9 +416,18 @@ func handleNodeData66(backend Backend, msg Decoder, peer *Peer) error {
 
 func handleReceipts66(backend Backend, msg Decoder, peer *Peer) error {
 	// A batch of receipts arrived to one of our previous requests
-	res := new(ReceiptsPacket66)
-	if err := msg.Decode(res); err != nil {
+	resComplete := new(ReceiptsPacket66Complete)
+	if err := msg.Decode(resComplete); err != nil {
+		peer.Log().Warn("ReceiptsPacket66Complete decode failed", "err", err)
 		return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
+	}
+	// TODO: Fallback to original packet66, which should be removed once we restart new testnet
+	res := new(ReceiptsPacket66)
+	res.RequestId = resComplete.RequestId
+	res.ReceiptsPacket = make([][]*types.Receipt, 0, len(resComplete.ReceiptsPacket))
+	for i := range resComplete.ReceiptsPacket {
+		rs := resComplete.ReceiptsPacket[i]
+		res.ReceiptsPacket = append(res.ReceiptsPacket, types.ConvertReceipts(rs))
 	}
 	metadata := func() interface{} {
 		hasher := trie.NewStackTrie(nil)

@@ -763,7 +763,7 @@ func (q *queue) DeliverHeaders(id string, headers []*types.Header, hashes []comm
 // DeliverBodies injects a block body retrieval response into the results queue.
 // The method returns the number of blocks bodies accepted from the delivery and
 // also wakes any threads waiting for data delivery.
-func (q *queue) DeliverBodies(id string, txLists [][]*types.Transaction, txListHashes []common.Hash, uncleLists [][]*types.Header, uncleListHashes []common.Hash) (int, error) {
+func (q *queue) DeliverBodies(id string, txLists [][]*types.Transaction, txListHashes []common.Hash, uncleLists [][]*types.Header, uncleListHashes []common.Hash, pivot uint64) (int, error) {
 	q.lock.Lock()
 	defer q.lock.Unlock()
 
@@ -782,8 +782,13 @@ func (q *queue) DeliverBodies(id string, txLists [][]*types.Transaction, txListH
 		result.Uncles = uncleLists[index]
 		result.SetBodyDone()
 	}
-	return q.deliver(id, q.blockTaskPool, q.blockTaskQueue, q.blockPendPool,
-		bodyReqTimer, bodyInMeter, bodyDropMeter, len(txLists), validate, reconstruct)
+	if pivot == 0 {
+		return q.deliver(id, q.blockTaskPool, q.blockTaskQueue, q.blockPendPool,
+			bodyReqTimer, bodyInMeter, bodyDropMeter, len(txLists), validate, reconstruct)
+	}
+
+	return q.deliverWithPivot(id, q.blockTaskPool, q.blockTaskQueue, q.blockPendPool,
+		bodyReqTimer, bodyInMeter, bodyDropMeter, len(txLists), validate, reconstruct, pivot)
 }
 
 // DeliverReceipts injects a receipt retrieval response into the results queue.
@@ -805,6 +810,93 @@ func (q *queue) DeliverReceipts(id string, receiptList [][]*types.Receipt, recei
 	}
 	return q.deliver(id, q.receiptTaskPool, q.receiptTaskQueue, q.receiptPendPool,
 		receiptReqTimer, receiptInMeter, receiptDropMeter, len(receiptList), validate, reconstruct)
+}
+
+// deliverWithPivot injects a data retrieval response into the results queue.
+//
+// Note, this method expects the queue lock to be already held for writing. The
+// reason this lock is not obtained in here is because the parameters already need
+// to access the queue, so they already need a lock anyway.
+//
+// Note, the method will complete a header even the result is missing as long as
+// the header is below pivot.
+func (q *queue) deliverWithPivot(id string, taskPool map[common.Hash]*types.Header,
+	taskQueue *prque.Prque, pendPool map[string]*fetchRequest,
+	reqTimer metrics.Timer, resInMeter metrics.Meter, resDropMeter metrics.Meter,
+	results int, validate func(index int, header *types.Header) error,
+	reconstruct func(index int, result *fetchResult), pivot uint64) (int, error) {
+
+	// Short circuit if the data was never requested
+	request := pendPool[id]
+	if request == nil {
+		resDropMeter.Mark(int64(results))
+		return 0, errNoFetchesPending
+	}
+	delete(pendPool, id)
+
+	reqTimer.UpdateSince(request.Time)
+	resInMeter.Mark(int64(results))
+
+	nilFy := func(result *fetchResult, header *types.Header, reason string) {
+		hash := header.Hash()
+		log.Info("nilFy", "number", header.Number.Uint64(), "hash", hash, "reason", reason)
+		result.SetBodyDone()
+		// Clean up a successful fetch
+		delete(taskPool, hash)
+	}
+
+	// Assemble each of the results with their headers and retrieved data parts
+	var (
+		accepted    int
+		failure     error
+		failedIndex int = -1
+	)
+
+	// The results that are expected to be contiguous
+	// Search the first result (if available) that matches the header and <= pivot
+	for ; accepted < len(request.Headers); accepted++ {
+		header := request.Headers[accepted]
+		if results > 0 {
+			// Validate the fields
+			if failure = validate(0, header); failure == nil {
+				// Found a header that matches the first result
+				break
+			}
+		}
+
+		if header.Number.Uint64() < pivot {
+			// The result of the header is not found, but the header is below pivot.
+			// Still accept the result.
+			if res, stale, err := q.resultCache.GetDeliverySlot(header.Number.Uint64()); err == nil && !stale {
+				nilFy(res, header, "front nilFy")
+			} else {
+				// else: betweeen here and above, some other peer filled this result,
+				// or it was indeed a no-op. This should not happen, but if it does it's
+				// not something to panic about
+				log.Error("Delivery stale", "stale", stale, "number", header.Number.Uint64(), "err", err)
+				failure = errStaleDelivery
+				// Clean up a successful fetch
+				delete(taskPool, header.Hash())
+			}
+		} else {
+			// If no data items were retrieved, mark them as unavailable for the origin peer if above pivot
+			request.Peer.MarkLacking(header.Hash())
+			// Set the failed index, and we will keep searching the matched result and mark the headers before as lacking
+			if failedIndex != -1 {
+				failedIndex = accepted
+			}
+		}
+	}
+
+	if failedIndex >= 0 {
+		// No results can be delivered as some results from pivot are missing
+		results = 0
+		accepted0, err := q.deliverWithHeaders(request.Headers[failedIndex:], results, validate, reconstruct, taskPool, resDropMeter, taskQueue, failure)
+		return accepted0 + failedIndex, err
+	} else {
+		accepted0, err := q.deliverWithHeaders(request.Headers[accepted:], results, validate, reconstruct, taskPool, resDropMeter, taskQueue, failure)
+		return accepted0 + accepted, err
+	}
 }
 
 // deliver injects a data retrieval response into the results queue.
@@ -835,14 +927,19 @@ func (q *queue) deliver(id string, taskPool map[common.Hash]*types.Header,
 			request.Peer.MarkLacking(header.Hash())
 		}
 	}
-	// Assemble each of the results with their headers and retrieved data parts
+
+	return q.deliverWithHeaders(request.Headers, results, validate, reconstruct, taskPool, resDropMeter, taskQueue, nil)
+}
+
+func (q *queue) deliverWithHeaders(headers []*types.Header, results int,
+	validate func(index int, header *types.Header) error, reconstruct func(index int, result *fetchResult),
+	taskPool map[common.Hash]*types.Header, resDropMeter metrics.Meter, taskQueue *prque.Prque, failure error) (int, error) {
 	var (
 		accepted int
-		failure  error
 		i        int
 		hashes   []common.Hash
 	)
-	for _, header := range request.Headers {
+	for _, header := range headers {
 		// Short circuit assembly if no more fetch results are found
 		if i >= results {
 			break
@@ -856,7 +953,7 @@ func (q *queue) deliver(id string, taskPool map[common.Hash]*types.Header,
 		i++
 	}
 
-	for _, header := range request.Headers[:i] {
+	for _, header := range headers[:i] {
 		if res, stale, err := q.resultCache.GetDeliverySlot(header.Number.Uint64()); err == nil {
 			reconstruct(accepted, res)
 		} else {
@@ -873,7 +970,7 @@ func (q *queue) deliver(id string, taskPool map[common.Hash]*types.Header,
 	resDropMeter.Mark(int64(results - accepted))
 
 	// Return all failed or missing fetches to the queue
-	for _, header := range request.Headers[accepted:] {
+	for _, header := range headers[accepted:] {
 		taskQueue.Push(header, -int64(header.Number.Uint64()))
 	}
 	// Wake up Results

@@ -177,7 +177,7 @@ func ServiceGetKVsQuery(chain *core.BlockChain, req *GetKVsPacket) ([]*KV, error
 	}
 	res := make([]*KV, 0)
 	for _, idx := range req.KVList {
-		meta, err := getSstorageMetadata(stateDB, req.Contract, idx)
+		_, meta, err := getSstorageMetadata(stateDB, req.Contract, idx)
 		if err != nil {
 			continue
 		}

@@ -21,6 +21,7 @@ import (
 	"sync/atomic"
 
 	"github.com/ethereum/go-ethereum/common/math"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/golang/snappy"
 )
@@ -32,10 +33,11 @@ const freezerBatchBufferLimit = 2 * 1024 * 1024
 // freezerBatch is a write operation of multiple items on a freezer.
 type freezerBatch struct {
 	tables map[string]*freezerTableBatch
+	f      *freezer
 }
 
 func newFreezerBatch(f *freezer) *freezerBatch {
-	batch := &freezerBatch{tables: make(map[string]*freezerTableBatch, len(f.tables))}
+	batch := &freezerBatch{tables: make(map[string]*freezerTableBatch, len(f.tables)), f: f}
 	for kind, table := range f.tables {
 		batch.tables[kind] = table.newBatch()
 	}
@@ -44,12 +46,24 @@ func newFreezerBatch(f *freezer) *freezerBatch {
 
 // Append adds an RLP-encoded item of the given kind.
 func (batch *freezerBatch) Append(kind string, num uint64, item interface{}) error {
+	if batch.tables[kind] == nil {
+		log.Warn("unregistered table accessed", "kind", kind)
+		return nil
+	}
 	return batch.tables[kind].Append(num, item)
 }
 
 // AppendRaw adds an item of the given kind.
 func (batch *freezerBatch) AppendRaw(kind string, num uint64, item []byte) error {
+	if batch.tables[kind] == nil {
+		log.Warn("unregistered table accessed", "kind", kind)
+		return nil
+	}
 	return batch.tables[kind].AppendRaw(num, item)
+}
+
+func (batch *freezerBatch) PruneBody() bool {
+	return batch.f.pruneConfig != nil
 }
 
 // reset initializes the batch.

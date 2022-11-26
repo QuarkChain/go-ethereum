@@ -97,16 +97,12 @@ func TestLegacyReceiptDecoding(t *testing.T) {
 		encode func(*Receipt) ([]byte, error)
 	}{
 		{
-			"StoredReceiptRLP",
-			encodeAsStoredReceiptRLP,
+			"ReceiptForStorage",
+			encodeAsReceiptForStorage,
 		},
 		{
-			"V4StoredReceiptRLP",
-			encodeAsV4StoredReceiptRLP,
-		},
-		{
-			"V3StoredReceiptRLP",
-			encodeAsV3StoredReceiptRLP,
+			"storedReceiptRLPComplete",
+			encodeAsStoredReceiptRLPComplete,
 		},
 	}
 
@@ -166,46 +162,38 @@ func TestLegacyReceiptDecoding(t *testing.T) {
 					t.Fatalf("Receipt log %d data mismatch, want %v, have %v", i, receipt.Logs[i].Data, dec.Logs[i].Data)
 				}
 			}
+
+			if tc.name == "storedReceiptRLPComplete" || tc.name == "ReceiptForStorage" {
+				if receipt.Type != dec.Type {
+					t.Fatalf("Receipt type mismatch, want %v, have %v", receipt.Type, dec.Type)
+				}
+				if receipt.TxHash != dec.TxHash {
+					t.Fatalf("Receipt txhash mismatch, want %v, have %v", receipt.TxHash, dec.TxHash)
+				}
+				if receipt.ContractAddress != dec.ContractAddress {
+					t.Fatalf("Receipt ContractAddress mismatch, want %v, have %v", receipt.ContractAddress, dec.ContractAddress)
+				}
+			}
 		})
 	}
 }
 
-func encodeAsStoredReceiptRLP(want *Receipt) ([]byte, error) {
-	stored := &storedReceiptRLP{
-		PostStateOrStatus: want.statusEncoding(),
-		CumulativeGasUsed: want.CumulativeGasUsed,
-		Logs:              make([]*LogForStorage, len(want.Logs)),
-	}
-	for i, log := range want.Logs {
-		stored.Logs[i] = (*LogForStorage)(log)
-	}
-	return rlp.EncodeToBytes(stored)
+func encodeAsReceiptForStorage(want *Receipt) ([]byte, error) {
+	return rlp.EncodeToBytes((*ReceiptForStorage)(want))
 }
 
-func encodeAsV4StoredReceiptRLP(want *Receipt) ([]byte, error) {
-	stored := &v4StoredReceiptRLP{
+func encodeAsStoredReceiptRLPComplete(want *Receipt) ([]byte, error) {
+	var contract *common.Address
+	if want.ContractAddress != (common.Address{}) {
+		contract = &want.ContractAddress
+	}
+	stored := &storedReceiptRLPComplete{
+		Type:              want.Type,
+		TxHash:            want.TxHash,
+		ContractAddress:   contract,
 		PostStateOrStatus: want.statusEncoding(),
 		CumulativeGasUsed: want.CumulativeGasUsed,
-		TxHash:            want.TxHash,
-		ContractAddress:   want.ContractAddress,
 		Logs:              make([]*LogForStorage, len(want.Logs)),
-		GasUsed:           want.GasUsed,
-	}
-	for i, log := range want.Logs {
-		stored.Logs[i] = (*LogForStorage)(log)
-	}
-	return rlp.EncodeToBytes(stored)
-}
-
-func encodeAsV3StoredReceiptRLP(want *Receipt) ([]byte, error) {
-	stored := &v3StoredReceiptRLP{
-		PostStateOrStatus: want.statusEncoding(),
-		CumulativeGasUsed: want.CumulativeGasUsed,
-		Bloom:             want.Bloom,
-		TxHash:            want.TxHash,
-		ContractAddress:   want.ContractAddress,
-		Logs:              make([]*LogForStorage, len(want.Logs)),
-		GasUsed:           want.GasUsed,
 	}
 	for i, log := range want.Logs {
 		stored.Logs[i] = (*LogForStorage)(log)

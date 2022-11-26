@@ -439,7 +439,10 @@ func ReadBodyRLP(db ethdb.Reader, hash common.Hash, number uint64) rlp.RawValue 
 		// Check if the data is in ancients
 		if isCanon(reader, number, hash) {
 			data, _ = reader.Ancient(freezerBodiesTable, number)
-			return nil
+			// we will prune ancient except genesis block
+			if len(data) > 0 {
+				return nil
+			}
 		}
 		// If not, try reading from leveldb
 		data, _ = db.Get(blockBodyKey(number, hash))
@@ -477,7 +480,11 @@ func WriteBodyRLP(db ethdb.KeyValueWriter, hash common.Hash, number uint64, rlp 
 // HasBody verifies the existence of a block body corresponding to the hash.
 func HasBody(db ethdb.Reader, hash common.Hash, number uint64) bool {
 	if isCanon(db, number, hash) {
-		return true
+		exists, _ := db.HasAncient(freezerBodiesTable, number)
+		if exists {
+			return true
+		}
+		// special case for genesis block
 	}
 	if has, err := db.Has(blockBodyKey(number, hash)); !has || err != nil {
 		return false
@@ -628,9 +635,16 @@ func ReadReceipts(db ethdb.Reader, hash common.Hash, number uint64, config *para
 	}
 	body := ReadBody(db, hash, number)
 	if body == nil {
-		log.Error("Missing body but have receipt", "hash", hash, "number", number)
-		return nil
+		// body is pruned
+		if err := receipts.DeriveFieldsNoBody(hash, number); err != nil {
+			log.Error("Failed to derive block receipts fields without body", "hash", hash, "number", number, "err", err)
+			return nil
+		}
+		return receipts
 	}
+	// The old db format may return an old receipt without sufficient info.
+	// This should not happen on a new client running on a fresh db.
+	// TODO: we should remove the following code when starting in a new testnet
 	if err := receipts.DeriveFields(config, hash, number, body.Transactions); err != nil {
 		log.Error("Failed to derive block receipts fields", "hash", hash, "number", number, "err", err)
 		return nil
@@ -662,14 +676,6 @@ func DeleteReceipts(db ethdb.KeyValueWriter, hash common.Hash, number uint64) {
 	}
 }
 
-// storedReceiptRLP is the storage encoding of a receipt.
-// Re-definition in core/types/receipt.go.
-type storedReceiptRLP struct {
-	PostStateOrStatus []byte
-	CumulativeGasUsed uint64
-	Logs              []*types.LogForStorage
-}
-
 // ReceiptLogs is a barebone version of ReceiptForStorage which only keeps
 // the list of logs. When decoding a stored receipt into this object we
 // avoid creating the bloom filter.
@@ -679,13 +685,32 @@ type receiptLogs struct {
 
 // DecodeRLP implements rlp.Decoder.
 func (r *receiptLogs) DecodeRLP(s *rlp.Stream) error {
-	var stored storedReceiptRLP
+	var stored types.ReceiptForStorage
 	if err := s.Decode(&stored); err != nil {
 		return err
 	}
 	r.Logs = make([]*types.Log, len(stored.Logs))
 	for i, log := range stored.Logs {
+		log.TxHash = stored.TxHash
 		r.Logs[i] = (*types.Log)(log)
+	}
+	return nil
+}
+
+func deriveLogFieldsNoBody(receipts []*receiptLogs, hash common.Hash, number uint64) error {
+	logIndex := uint(0)
+	for i := 0; i < len(receipts); i++ {
+		// The derived log fields can simply be set from the block and transaction
+		for j := 0; j < len(receipts[i].Logs); j++ {
+			if receipts[i].Logs[j].TxHash == (common.Hash{}) {
+				return errors.New("receipt is not complete")
+			}
+			receipts[i].Logs[j].BlockNumber = number
+			receipts[i].Logs[j].BlockHash = hash
+			receipts[i].Logs[j].TxIndex = uint(i)
+			receipts[i].Logs[j].Index = logIndex
+			logIndex++
+		}
 	}
 	return nil
 }
@@ -733,13 +758,15 @@ func ReadLogs(db ethdb.Reader, hash common.Hash, number uint64, config *params.C
 
 	body := ReadBody(db, hash, number)
 	if body == nil {
-		log.Error("Missing body but have receipt", "hash", hash, "number", number)
-		return nil
-	}
-	if err := deriveLogFields(receipts, hash, number, body.Transactions); err != nil {
+		if err := deriveLogFieldsNoBody(receipts, hash, number); err != nil {
+			log.Error("Missing body but have incomplete receipt", "hash", hash, "number", number, "err", err)
+			return nil
+		}
+	} else if err := deriveLogFields(receipts, hash, number, body.Transactions); err != nil {
 		log.Error("Failed to derive block receipts fields", "hash", hash, "number", number, "err", err)
 		return nil
 	}
+
 	logs := make([][]*types.Log, len(receipts))
 	for i, receipt := range receipts {
 		logs[i] = receipt.Logs
@@ -819,12 +846,16 @@ func writeAncientBlock(op ethdb.AncientWriteOp, block *types.Block, header *type
 	if err := op.Append(freezerHeaderTable, num, header); err != nil {
 		return fmt.Errorf("can't append block header %d: %v", num, err)
 	}
-	if err := op.Append(freezerBodiesTable, num, block.Body()); err != nil {
-		return fmt.Errorf("can't append block body %d: %v", num, err)
+	if !op.PruneBody() {
+		if err := op.Append(freezerBodiesTable, num, block.Body()); err != nil {
+			return fmt.Errorf("can't append block body %d: %v", num, err)
+		}
 	}
+
 	if err := op.Append(freezerReceiptTable, num, receipts); err != nil {
 		return fmt.Errorf("can't append block %d receipts: %v", num, err)
 	}
+
 	if err := op.Append(freezerDifficultyTable, num, td); err != nil {
 		return fmt.Errorf("can't append block %d total difficulty: %v", num, err)
 	}
