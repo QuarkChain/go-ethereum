@@ -144,6 +144,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	if _, ok := genesisErr.(*params.ConfigCompatError); genesisErr != nil && !ok {
 		return nil, genesisErr
 	}
+
 	if chainConfig.Tendermint != nil {
 		// Setup default network id if it is empty.
 		if chainConfig.Tendermint.NetworkID == "" {
@@ -172,6 +173,9 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		}
 	}
 
+	if err = chainDb.StartFreeze(chainDb, chainConfig); err != nil {
+		log.Crit("Failed to StartFreeze", "error", err)
+	}
 	log.Info("Initialised chain configuration", "config", chainConfig)
 
 	if err := pruner.RecoverPruning(stack.ResolvePath(""), chainDb, stack.ResolvePath(config.TrieCleanCacheJournal)); err != nil {

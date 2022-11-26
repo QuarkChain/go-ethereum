@@ -232,6 +232,11 @@ func New(checkpoint uint64, stateDb ethdb.Database, mux *event.TypeMux, chain Bl
 		stateSyncStart: make(chan *stateSync),
 		sstorSyncStart: make(chan *sstorSync),
 	}
+
+	cfg, _ := stateDb.PruneConfig()
+	if cfg != nil && cfg.DurationBlocks != 0 {
+		fullMaxForkAncestry = cfg.DurationBlocks
+	}
 	go dl.stateFetcher()
 	go dl.sstorageFetcher()
 	return dl

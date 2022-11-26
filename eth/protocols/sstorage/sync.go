@@ -202,6 +202,7 @@ type Syncer struct {
 
 	pend sync.WaitGroup // Tracks network request goroutines for graceful shutdown
 	lock sync.RWMutex   // Protects fields that can change outside of sync (peers, reqs, root)
+	once sync.Once      // make loadSyncStatus run once
 }
 
 // NewSyncer creates a new sstorage syncer to download the sharded storage content over the sstorage protocol.
@@ -282,7 +283,7 @@ func (s *Syncer) Sync(cancel chan struct{}) error {
 		s.startTime = time.Now()
 	}
 	// Retrieve the previous sync status from LevelDB and abort if already synced
-	s.loadSyncStatus()
+	s.once.Do(s.loadSyncStatus)
 	if len(s.tasks) == 0 {
 		log.Debug("Sstorage sync already completed")
 		return nil
@@ -392,7 +393,7 @@ func (s *Syncer) loadSyncStatus() {
 				sm := sstorage.ContractToShardManager[task.contract]
 				cnt := 0
 				for i := sm.KvEntries() * task.shardId; i < sm.KvEntries()*(task.shardId+1); i++ {
-					meta, err := getSstorageMetadata(stateDB, task.contract, i)
+					_, meta, err := getSstorageMetadata(stateDB, task.contract, i)
 					if err != nil {
 						continue
 					}
@@ -633,44 +634,58 @@ func (s *Syncer) processKVResponse(res *kvResponse) {
 		return
 	}
 
-	s.chain.LockInsertChain()
-	defer s.chain.UnlockInsertChain()
-
-	successCount, failureCount, root := 0, 0, s.chain.CurrentBlock().Root()
-	state, err := s.chain.StateAt(root)
+	vkvs := make([]*VerifiedKV, 0)
+	state, err := s.chain.StateAt(s.chain.CurrentBlock().Root())
 	if err != nil {
-		log.Error("processKVResponse get state fail", "error", err)
+		log.Error("processKVResponse: get state for verification fail", "error", err)
 		return
 	}
 
 	for _, kv := range res.kvs {
-		// 1. get kv meta
-		// 2. verify kv
-		// 3.1. if pass, write to storage and delete(res.task.indexes, Idx)
-		// 3.2. if fail, set res.task.indexes[Idx] = 0
 		synced++
 		syncedBytes += uint64(len(kv.Data))
 
-		meta, err := getSstorageMetadata(state, res.contract, kv.Idx)
+		metaHash, meta, err := getSstorageMetadata(state, res.contract, kv.Idx)
 		if err != nil || meta == nil {
-			log.Warn("processKVResponse get kv meta fail", "error", err)
-			failureCount++
+			log.Warn("processKVResponse: get vkv MetaHash for verification fail", "error", err)
 			continue
 		}
 
 		err = verifyKV(sm, kv, meta, true)
 		if err != nil {
-			log.Warn("processKVResponse verify kv fail", "error", err)
-			failureCount++
+			log.Warn("processKVResponse: verify vkv fail", "error", err)
+			continue
+		}
+		vkvs = append(vkvs, &VerifiedKV{kv.Idx, kv.Data, metaHash})
+	}
+
+	s.chain.LockInsertChain()
+	defer s.chain.UnlockInsertChain()
+
+	successCount, root := 0, s.chain.CurrentBlock().Root()
+	state, err = s.chain.StateAt(root)
+	if err != nil {
+		log.Error("processKVResponse: get state for write vkv fail", "error", err)
+		return
+	}
+
+	for _, vkv := range vkvs {
+		metaHash, meta, err := getSstorageMetadata(state, res.contract, vkv.Idx)
+		if err != nil || meta == nil {
+			log.Warn("processKVResponse: get vkv MetaHash for write vkv fail", "error", err)
 			continue
 		}
 
-		success, err := sm.TryWriteMaskedKV(kv.Idx, kv.Data)
+		if metaHash != vkv.MetaHash {
+			log.Warn("processKVResponse: verify vkv fail", "error", err)
+			continue
+		}
+
+		success, err := sm.TryWriteMaskedKV(vkv.Idx, vkv.Data)
 		if !success || err != nil {
-			res.task.indexes[kv.Idx] = 0
-			failureCount++
+			res.task.indexes[vkv.Idx] = 0
 		} else {
-			delete(res.task.indexes, kv.Idx)
+			delete(res.task.indexes, vkv.Idx)
 			successCount++
 		}
 	}
@@ -686,7 +701,7 @@ func (s *Syncer) processKVResponse(res *kvResponse) {
 	log.Debug("Persisted set of kvs", "count", synced, "bytes", syncedBytes)
 
 	// If this delivery completed the last pending task, forward the account task
-	// to the next kv
+	// to the next vkv
 	if len(res.task.indexes) == 0 && res.task.filled {
 		log.Info("task done", "shardId", res.task.shardId)
 		res.task.done = true
@@ -703,7 +718,7 @@ type metadata struct {
 // verifyKV verify kv using metadata
 func verifyKV(sm *sstorage.ShardManager, kv *KV, meta *metadata, isMasked bool) error {
 	if kv.Idx != meta.kvIdx {
-		return fmt.Errorf("verifyKV fail: kvIdx mismatch; kv Idx: %d; meta kvIdx: %d", kv.Idx, meta.kvIdx)
+		return fmt.Errorf("verifyKV fail: kvIdx mismatch; kv Idx: %d; MetaHash kvIdx: %d", kv.Idx, meta.kvIdx)
 	}
 
 	data := make([]byte, len(kv.Data))
@@ -718,7 +733,7 @@ func verifyKV(sm *sstorage.ShardManager, kv *KV, meta *metadata, isMasked bool) 
 		}
 
 		if meta.kvSize != uint64(len(data)) {
-			return fmt.Errorf("verifyKV fail: size error; Data size: %d; meta kvSize: %d", len(kv.Data), meta.kvSize)
+			return fmt.Errorf("verifyKV fail: size error; Data size: %d; MetaHash kvSize: %d", len(kv.Data), meta.kvSize)
 		}
 		data = d
 	}
@@ -729,7 +744,7 @@ func verifyKV(sm *sstorage.ShardManager, kv *KV, meta *metadata, isMasked bool) 
 	hasher.Read(hash[:])
 
 	if bytes.Compare(hash[:24], meta.hashInMeta) != 0 {
-		return fmt.Errorf("verifyKV fail: size error; Data hash: %s; meta hash (24): %s",
+		return fmt.Errorf("verifyKV fail: size error; Data hash: %s; MetaHash hash (24): %s",
 			common.Bytes2Hex(hash[:24]), common.Bytes2Hex(meta.hashInMeta))
 	}
 
@@ -753,7 +768,7 @@ func getSlotHash(slotIdx uint64, key common.Hash) common.Hash {
 	return hashRes
 }
 
-func getSstorageMetadata(s *state.StateDB, contract common.Address, index uint64) (*metadata, error) {
+func getSstorageMetadata(s *state.StateDB, contract common.Address, index uint64) (common.Hash, *metadata, error) {
 	// according to https://github.com/web3q/web3q-contracts/blob/main/contracts/DecentralizedKV.sol,
 	// it need to fetch the skey from idxMap (slot 6) using storage index,
 	// then get metadata from kvMap (slot 5) using skey. the metadata struct is as following
@@ -765,16 +780,16 @@ func getSstorageMetadata(s *state.StateDB, contract common.Address, index uint64
 	position := getSlotHash(2, uint256.NewInt(index).Bytes32())
 	skey := s.GetState(contract, position)
 	if skey == emptyHash {
-		return nil, fmt.Errorf("fail to get skey for index %d", index)
+		return emptyHash, nil, fmt.Errorf("fail to get skey for index %d", index)
 	}
 
 	position = getSlotHash(1, skey)
 	meta := s.GetState(contract, position)
 	if meta == emptyHash {
-		return nil, fmt.Errorf("fail to get metadata for skey %s", skey.Hex())
+		return emptyHash, nil, fmt.Errorf("fail to get metadata for skey %s", skey.Hex())
 	}
 
-	return &metadata{
+	return meta, &metadata{
 			new(big.Int).SetBytes(meta[27:]).Uint64(),
 			new(big.Int).SetBytes(meta[24:27]).Uint64(),
 			meta[:24]},

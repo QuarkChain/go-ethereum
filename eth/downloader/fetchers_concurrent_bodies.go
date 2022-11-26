@@ -92,7 +92,18 @@ func (q *bodyQueue) deliver(peer *peerConnection, packet *eth.Response) (int, er
 	txs, uncles := packet.Res.(*eth.BlockBodiesPacket).Unpack()
 	hashsets := packet.Meta.([][]common.Hash) // {txs hashes, uncle hashes}
 
-	accepted, err := q.queue.DeliverBodies(peer.id, txs, hashsets[0], uncles, hashsets[1])
+	var pivot uint64
+
+	cfg, _ := q.stateDB.PruneConfig()
+	if cfg != nil {
+		q.pivotLock.RLock()
+		if q.pivotHeader != nil {
+			pivot = q.pivotHeader.Number.Uint64()
+		}
+		q.pivotLock.RUnlock()
+	}
+
+	accepted, err := q.queue.DeliverBodies(peer.id, txs, hashsets[0], uncles, hashsets[1], pivot)
 	switch {
 	case err == nil && len(txs) == 0:
 		peer.log.Trace("Requested bodies delivered")
