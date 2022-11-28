@@ -160,7 +160,7 @@ type BlockChain interface {
 
 	CurrentBlock() *types.Block
 
-	LockInsertChain() error
+	LockInsertChain()
 
 	UnlockInsertChain()
 }

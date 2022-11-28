@@ -1348,12 +1348,8 @@ func (bc *BlockChain) addFutureBlock(block *types.Block) error {
 	return nil
 }
 
-func (bc *BlockChain) LockInsertChain() error {
-	// Pre-checks passed, start the full block imports
-	if !bc.chainmu.TryLock() {
-		return errChainStopped
-	}
-	return nil
+func (bc *BlockChain) LockInsertChain() {
+	bc.chainmu.TryLock()
 }
 
 func (bc *BlockChain) UnlockInsertChain() {
