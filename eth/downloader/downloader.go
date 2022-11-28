@@ -206,7 +206,7 @@ type BlockChain interface {
 
 	StateAt(root common.Hash) (*state.StateDB, error)
 
-	LockInsertChain() error
+	LockInsertChain()
 
 	UnlockInsertChain()
 }
