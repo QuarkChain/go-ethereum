@@ -32,6 +32,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto/bls12381"
 	"github.com/ethereum/go-ethereum/crypto/bn256"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/ethereum/go-ethereum/sstorage"
 
 	//lint:ignore SA1019 Needed for precompile
 	"golang.org/x/crypto/ripemd160"
@@ -298,9 +299,10 @@ var (
 // modexpMultComplexity implements bigModexp multComplexity formula, as defined in EIP-198
 //
 // def mult_complexity(x):
-//    if x <= 64: return x ** 2
-//    elif x <= 1024: return x ** 2 // 4 + 96 * x - 3072
-//    else: return x ** 2 // 16 + 480 * x - 199680
+//
+//	if x <= 64: return x ** 2
+//	elif x <= 1024: return x ** 2 // 4 + 96 * x - 3072
+//	else: return x ** 2 // 16 + 480 * x - 199680
 //
 // where is x is max(length_of_MODULUS, length_of_BASE)
 func modexpMultComplexity(x *big.Int) *big.Int {
@@ -701,7 +703,7 @@ func (l *systemContractDeployer) RunWith(env *PrecompiledContractCallEnv, input 
 var (
 	putRawMethodId, _    = hex.DecodeString("4fb03390") // putRaw(uint256,bytes)
 	getRawMethodId, _    = hex.DecodeString("f835367f") // getRaw(bytes32,uint256,uint256,uint256)
-	removeRawMethodId, _ = hex.DecodeString("6c4b6776") // removeRaw(uint256,uint256)
+	removeRawMethodId, _ = hex.DecodeString("fbcc2ab1") // removeRaw(uint256,uint256,bytes32)
 )
 
 type sstoragePisa struct{}
@@ -715,8 +717,9 @@ func (l *sstoragePisa) RequiredGas(input []byte) uint64 {
 		return params.SstoreResetGasEIP2200
 	} else if bytes.Equal(input[0:4], getRawMethodId) {
 		return params.SloadGasEIP2200
+	} else if bytes.Equal(input[0:4], getRawMethodId) {
+		return params.SstoreResetGasEIP2200
 	} else {
-		// TODO: remove is not supported yet
 		return 0
 	}
 }
@@ -774,8 +777,41 @@ func (l *sstoragePisa) RunWith(env *PrecompiledContractCallEnv, input []byte) ([
 		binary.BigEndian.PutUint64(pb[32-8:32], 32)
 		binary.BigEndian.PutUint64(pb[64-8:64], uint64(len(b)))
 		return append(pb, b...), nil
+	} else if bytes.Equal(input[0:4], removeRawMethodId) {
+		if evm.interpreter.readOnly {
+			return nil, ErrWriteProtection
+		}
+
+		// The execution of remove should not affect the result when validator running without data node.
+
+		// The remove operation consists of two steps.
+		// First, replace the data corresponding to removeKvIdx selected by the operator with data of lastKvIdx
+		// Second, set the data space of the original lastKvIdx to 0
+		lastKvIdx := new(big.Int).SetBytes(getData(input, 4, 32))
+		updateKvIdx := new(big.Int).SetBytes(getData(input, 4+32, 32))
+		lastKvIdxHash := common.BytesToHash(getData(input, 4+32+32, 32))
+		perShardKvEntries := sstorage.ShardInfos[0].KVEntries
+
+		// only allow removing a KV entry in the last shard
+		if lastKvIdx.Uint64()/perShardKvEntries != updateKvIdx.Uint64()/perShardKvEntries {
+			return nil, errors.New("only allow removing a KV entry in the last shard")
+		}
+		if lastKvIdx.Cmp(updateKvIdx) == 0 {
+			// Delete the data corresponding to lastKvIdx
+			evm.StateDB.SstorageWrite(caller, lastKvIdx.Uint64(), make([]byte, sstorage.ShardInfos[0].KVSize))
+		} else {
+			// Read the data corresponding to lastKvIdx
+			replaceData, _, _ := evm.StateDB.SstorageRead(caller, lastKvIdx.Uint64(), int(sstorage.ShardInfos[0].KVSize), lastKvIdxHash)
+
+			// Delete the data corresponding to lastKvIdx
+			evm.StateDB.SstorageWrite(caller, lastKvIdx.Uint64(), make([]byte, sstorage.ShardInfos[0].KVSize))
+
+			// Replace the data corresponding to kvIdx with the data corresponding to lastKvIdx
+			evm.StateDB.SstorageWrite(caller, updateKvIdx.Uint64(), replaceData)
+		}
+
+		return nil, nil
 	}
-	// TODO: remove is not supported yet
 	return nil, errors.New("unsupported method")
 }
 

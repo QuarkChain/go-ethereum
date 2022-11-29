@@ -21,10 +21,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"math/big"
+	"math/rand"
 	"testing"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/rawdb"
+	"github.com/ethereum/go-ethereum/core/state"
+	"github.com/ethereum/go-ethereum/params"
+	"github.com/ethereum/go-ethereum/sstorage"
 )
 
 // precompiledTest defines the input/output pairs for precompiled contract tests.
@@ -311,6 +317,437 @@ func TestPrecompiledBLS12381G2MultiExp(t *testing.T) { testJson("blsG2MultiExp",
 func TestPrecompiledBLS12381Pairing(t *testing.T)    { testJson("blsPairing", "10", t) }
 func TestPrecompiledBLS12381MapG1(t *testing.T)      { testJson("blsMapG1", "11", t) }
 func TestPrecompiledBLS12381MapG2(t *testing.T)      { testJson("blsMapG2", "12", t) }
+
+func constructPutSDOperation(kvIdx uint64, dataLen uint64, specificData uint64) (putInput []byte, getInput []byte, getOutput []byte) {
+
+	validKvIdx := common.BigToHash(big.NewInt(0).SetUint64(kvIdx)).Bytes()
+	putDataPtr := common.Hex2Bytes("0000000000000000000000000000000000000000000000000000000000000040")
+	validdataLen := common.BigToHash(big.NewInt(0).SetUint64(dataLen)).Bytes()
+	validdata := generateSpecificData(dataLen, specificData)
+
+	putInput = make([]byte, 0)
+	putInput = append(putInput, putRawMethodId...)
+	putInput = append(putInput, validKvIdx...)
+	putInput = append(putInput, putDataPtr...)
+	putInput = append(putInput, validdataLen...)
+	putInput = append(putInput, validdata...)
+
+	// hash is not enable at this time, thus hash can set as any number
+	hash := common.BigToHash(big.NewInt(1)).Bytes()
+	readOffset := common.BigToHash(big.NewInt(0)).Bytes()
+	outputDataPtr := common.Hex2Bytes("0000000000000000000000000000000000000000000000000000000000000020")
+	getInput = make([]byte, 0)
+	getInput = append(getInput, getRawMethodId...)
+	getInput = append(getInput, hash...)
+	getInput = append(getInput, validKvIdx...)
+	getInput = append(getInput, readOffset...)
+	getInput = append(getInput, validdataLen...)
+
+	getOutput = make([]byte, 0)
+	getOutput = append(getOutput, outputDataPtr...)
+	getOutput = append(getOutput, validdataLen...)
+	getOutput = append(getOutput, validdata...)
+
+	return putInput, getInput, getOutput
+}
+
+func constructPutOperation(kvIdx uint64, dataLen uint64) (putInput []byte, getInput []byte, getOutput []byte) {
+
+	validKvIdx := common.BigToHash(big.NewInt(0).SetUint64(kvIdx)).Bytes()
+	putDataPtr := common.Hex2Bytes("0000000000000000000000000000000000000000000000000000000000000040")
+	validdataLen := common.BigToHash(big.NewInt(0).SetUint64(dataLen)).Bytes()
+	validdata := generateRandomData(dataLen)
+
+	putInput = make([]byte, 0)
+	putInput = append(putInput, putRawMethodId...)
+	putInput = append(putInput, validKvIdx...)
+	putInput = append(putInput, putDataPtr...)
+	putInput = append(putInput, validdataLen...)
+	putInput = append(putInput, validdata...)
+
+	// hash is not enable at this time, thus hash can set as any number
+	hash := common.BigToHash(big.NewInt(1)).Bytes()
+	readOffset := common.BigToHash(big.NewInt(0)).Bytes()
+	outputDataPtr := common.Hex2Bytes("0000000000000000000000000000000000000000000000000000000000000020")
+	getInput = make([]byte, 0)
+	getInput = append(getInput, getRawMethodId...)
+	getInput = append(getInput, hash...)
+	getInput = append(getInput, validKvIdx...)
+	getInput = append(getInput, readOffset...)
+	getInput = append(getInput, validdataLen...)
+
+	getOutput = make([]byte, 0)
+	getOutput = append(getOutput, outputDataPtr...)
+	getOutput = append(getOutput, validdataLen...)
+	getOutput = append(getOutput, validdata...)
+
+	return putInput, getInput, getOutput
+}
+
+func constructGetOperation(kvIdx uint64, datalen uint64) (getInput []byte) {
+	validKvIdx := common.BigToHash(big.NewInt(0).SetUint64(kvIdx)).Bytes()
+	validDatalen := common.BigToHash(big.NewInt(0).SetUint64(datalen)).Bytes()
+	// hash is not enable at this time, thus hash can set as any number
+	hash := common.BigToHash(big.NewInt(1)).Bytes()
+	readOffset := common.BigToHash(big.NewInt(0)).Bytes()
+	getInput = make([]byte, 0)
+	getInput = append(getInput, getRawMethodId...)
+	getInput = append(getInput, hash...)
+	getInput = append(getInput, validKvIdx...)
+	getInput = append(getInput, readOffset...)
+	getInput = append(getInput, validDatalen...)
+
+	return getInput
+}
+
+func constructRemoveOperation(lastKvIdx uint64, updateKvIdx uint64, kvSize uint64) (removeInput []byte, lastKvIdxGetInput []byte, updateKvIdxGetInput []byte) {
+
+	validLastKvIdx := common.BigToHash(big.NewInt(0).SetUint64(lastKvIdx)).Bytes()
+	validUpdateKvIdx := common.BigToHash(big.NewInt(0).SetUint64(updateKvIdx)).Bytes()
+	lastKvIdxHash := common.BigToHash(big.NewInt(1)).Bytes()
+
+	removeInput = make([]byte, 0)
+	removeInput = append(removeInput, removeRawMethodId...)
+	removeInput = append(removeInput, validLastKvIdx...)
+	removeInput = append(removeInput, validUpdateKvIdx...)
+	removeInput = append(removeInput, lastKvIdxHash...)
+
+	lastKvIdxGetInput = constructGetOperation(lastKvIdx, kvSize)
+	updateKvIdxGetInput = constructGetOperation(updateKvIdx, kvSize)
+
+	return removeInput, lastKvIdxGetInput, updateKvIdxGetInput
+}
+
+func generateRandomData(dataLen uint64) []byte {
+	buf := make([]byte, 0)
+	for i := 0; i < int(dataLen); i++ {
+		rv := byte(rand.Uint32() % 256)
+		buf = append(buf, rv)
+	}
+	return buf
+}
+
+func generateSpecificData(dataLen uint64, expectNum uint64) []byte {
+	buf := make([]byte, 0)
+	for i := 0; i < int(dataLen); i++ {
+		rv := byte(expectNum)
+		buf = append(buf, rv)
+	}
+	return buf
+}
+
+type operationList struct {
+	Name   string
+	KvIdx  uint64
+	KvSize uint64
+	List   []*operationDetail
+}
+
+type operationDetail struct {
+	Method            string
+	Commit            bool
+	Input             []byte
+	Output            []byte
+	ExpectOutput      []byte
+	OtherOperationIdx int // -1 means that do not need to set other operation expectOutput
+	ExpectErr         string
+}
+
+func (o *operationDetail) checkOutput(output []byte) error {
+	o.Output = output
+	if len(o.ExpectOutput) != 0 {
+		if !bytes.Equal(output, o.ExpectOutput) {
+			output = output[64:]
+			if !bytes.Equal(output, o.ExpectOutput) {
+				return fmt.Errorf("no match with expectOutput; \nexpect:%s \nactual:%s", common.Bytes2Hex(o.ExpectOutput), common.Bytes2Hex(o.Output))
+			}
+		}
+	}
+	return nil
+}
+
+func newOperationDetail(method string, input []byte, expectOutput []byte, setOtherOperationIdx int) *operationDetail {
+	return &operationDetail{Method: method, Input: input, ExpectOutput: expectOutput, OtherOperationIdx: setOtherOperationIdx}
+}
+
+func newOperationDetailWithCommit(method string, input []byte, expectOutput []byte, setOtherOperationIdx int) *operationDetail {
+	return &operationDetail{Method: method, Input: input, ExpectOutput: expectOutput, OtherOperationIdx: setOtherOperationIdx, Commit: true}
+}
+
+func (ol *operationList) run(db *state.StateDB, env *PrecompiledContractCallEnv, p PrecompiledContract) error {
+	for i, o := range ol.List {
+		output, _, err := RunPrecompiledContract(env, p, o.Input, p.RequiredGas(o.Input))
+		if err != nil {
+			if len(o.ExpectErr) != 0 {
+				if o.ExpectErr == err.Error() {
+					return nil
+				} else {
+					return fmt.Errorf("Error No Match : the %dth operation[%s], actual err:%s , expect err:%s ", i, o.Method, err.Error(), o.ExpectErr)
+				}
+			}
+			return fmt.Errorf("the %dth operation[%s], %s", i, o.Method, err.Error())
+		}
+
+		err = o.checkOutput(output)
+		if err != nil {
+			return fmt.Errorf("the %dth operation[%s], %s", i, o.Method, err.Error())
+		}
+
+		if o.OtherOperationIdx > 0 {
+			ol.List[o.OtherOperationIdx].ExpectOutput = output
+		}
+
+		if o.Commit {
+
+			hash, err := db.Commit(true)
+			if err != nil {
+				return err
+			}
+
+			err = db.Database().TrieDB().Commit(hash, true, nil)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+func newCheckPutOperationList(kvIdx uint64, kvSize uint64) *operationList {
+	putInput, getInput, getOutput := constructPutOperation(kvIdx, kvSize)
+	putOperate := newOperationDetailWithCommit("put", putInput, nil, -1)
+	getOperate := newOperationDetail("get", getInput, getOutput, -1)
+	return &operationList{Name: "CheckPut", KvIdx: kvIdx, KvSize: kvSize, List: []*operationDetail{putOperate, getOperate}}
+}
+
+func newCheckPutSDOperationList(kvIdx uint64, kvSize uint64, specificData uint64) *operationList {
+	putInput, getInput, getOutput := constructPutSDOperation(kvIdx, kvSize, specificData)
+	putOperate := newOperationDetailWithCommit("put", putInput, nil, -1)
+	getOperate := newOperationDetail("get", getInput, getOutput, -1)
+	return &operationList{Name: "CheckPut", KvIdx: kvIdx, KvSize: kvSize, List: []*operationDetail{putOperate, getOperate}}
+}
+
+func newCheckRemoveOperationList(lastKvIdx, updateKvIdx, maxKvSize uint64) *operationList {
+	removeInput, lastKvIdxGetInput, updateKvIdxGetInput := constructRemoveOperation(lastKvIdx, updateKvIdx, maxKvSize)
+	if lastKvIdx == updateKvIdx {
+		removeOperator := newOperationDetailWithCommit("remove", removeInput, nil, -1)
+		lastKvIdxGetOperatorAfterRemove := newOperationDetail("get", lastKvIdxGetInput, make([]byte, maxKvSize), -1)
+		return &operationList{Name: "CheckRemove", KvIdx: updateKvIdx, KvSize: maxKvSize, List: []*operationDetail{removeOperator, lastKvIdxGetOperatorAfterRemove}}
+	}
+	lastKvIdxGetOperator := newOperationDetail("get", lastKvIdxGetInput, nil, 2)
+	removeOperator := newOperationDetailWithCommit("remove", removeInput, nil, -1)
+	updateKvIdxGetOperator := newOperationDetail("get", updateKvIdxGetInput, nil, -1)
+	lastKvIdxGetOperatorAfterRemove := newOperationDetail("get", lastKvIdxGetInput, make([]byte, maxKvSize), -1)
+	return &operationList{Name: "CheckRemove", KvIdx: updateKvIdx, KvSize: maxKvSize, List: []*operationDetail{lastKvIdxGetOperator, removeOperator, updateKvIdxGetOperator, lastKvIdxGetOperatorAfterRemove}}
+}
+
+func prepareShardManager() (*sstorage.ShardManager, common.Address, error) {
+	var (
+		KvSize               uint64 = 4 * 1024
+		KvEntries            uint64 = 10
+		ShardManagerContract        = common.HexToAddress("0x0000000000000000000000000000000003331111")
+	)
+	sm := sstorage.NewShardManager(ShardManagerContract, KvSize, KvEntries)
+	// we need to update this ,NewDatabaseWithConfig
+	sstorage.ContractToShardManager[ShardManagerContract] = sm
+	sstorage.ShardInfos[0] = &sstorage.ShardInfo{ShardManagerContract, KvSize, KvEntries}
+
+	err := sm.AddDataShard(0)
+	if err != nil {
+		return nil, common.Address{}, err
+	}
+	err = sm.AddDataShard(1)
+	if err != nil {
+		return nil, common.Address{}, err
+	}
+	err = sm.AddDataShard(2)
+	if err != nil {
+		return nil, common.Address{}, err
+	}
+
+	create0, err := sstorage.Create("EthStorage-Data0", 0, 10, sstorage.MASK_KECCAK_256)
+	if err != nil {
+		return nil, common.Address{}, err
+	}
+	create1, err := sstorage.Create("EthStorage-Data1", 10, 10, sstorage.MASK_KECCAK_256)
+	if err != nil {
+		return nil, common.Address{}, err
+	}
+	create2, err := sstorage.Create("EthStorage-Data2", 20, 10, sstorage.MASK_KECCAK_256)
+	if err != nil {
+		return nil, common.Address{}, err
+	}
+
+	err = sm.AddDataFile(create0)
+	if err != nil {
+		return nil, common.Address{}, err
+	}
+	err = sm.AddDataFile(create1)
+	if err != nil {
+		return nil, common.Address{}, err
+	}
+	err = sm.AddDataFile(create2)
+	if err != nil {
+		return nil, common.Address{}, err
+	}
+	return sm, ShardManagerContract, nil
+}
+
+func TestPutAndUpdateKvData(t *testing.T) {
+	// prepare three shards.
+	// Shard Info: MaxKvEntries = 10; KVSize = 4 * 1024; chunksPerKv = 1; ChunkSize = 4 *1024
+	sm, ShardManagerContract, err := prepareShardManager()
+	if err != nil {
+		t.Error(err)
+	}
+
+	ols := make([]*operationList, 0)
+	var i uint64
+	// first put data
+	for i = 0; i < sm.MaxKvSizeEntries()*3; i++ {
+		ol := newCheckPutOperationList(i, 4*1024)
+		ols = append(ols, ol)
+	}
+	// update data
+	for i = 0; i < sm.MaxKvSizeEntries()*3; i++ {
+		ol := newCheckPutOperationList(i, 4*1024)
+		ols = append(ols, ol)
+	}
+
+	p := &sstoragePisa{}
+	vmctx := BlockContext{
+		BlockNumber: big.NewInt(0),
+		CanTransfer: func(db StateDB, address common.Address, b *big.Int) bool {
+			return true
+		},
+		Transfer: func(db StateDB, address common.Address, address2 common.Address, b *big.Int) {},
+	}
+	statedb, _ := state.New(common.Hash{}, state.NewDatabase(rawdb.NewMemoryDatabase()), nil)
+	jsonRpcVmenv := NewEVM(vmctx, TxContext{}, statedb, params.AllEthashProtocolChanges, Config{IsJsonRpc: true})
+	jsonRpcEnv := &PrecompiledContractCallEnv{jsonRpcVmenv, AccountRef(ShardManagerContract)}
+
+	for j, ol := range ols {
+		t.Run(fmt.Sprintf("olIdx:%d KvIdx:%d KvSize:%d Method:%s", j, ol.KvIdx, ol.KvSize, ol.Name), func(t *testing.T) {
+			err := ol.run(statedb, jsonRpcEnv, p)
+			if err != nil {
+				t.Error(err)
+			}
+		})
+
+	}
+}
+
+func TestRemoveKvData(t *testing.T) {
+	// prepare three shards.
+	// Shard Info: MaxKvEntries = 10; KVSize = 4 * 1024; chunksPerKv = 1; ChunkSize = 4 *1024
+	sm, ShardManagerContract, err := prepareShardManager()
+	if err != nil {
+		t.Error(err)
+	}
+
+	ols := make([]*operationList, 0)
+	var i uint64
+	// first put data
+	for i = 0; i < sm.MaxKvSizeEntries()*3-1; i++ {
+		ol := newCheckPutOperationList(i, 4*1024)
+		ols = append(ols, ol)
+	}
+
+	lastKvIdx := sm.MaxKvSizeEntries()*3 - 2
+	// removeKvIdx is equal to lastKvIdx
+	removeKvIdx := sm.MaxKvSizeEntries()*3 - 2
+	olr0 := newCheckRemoveOperationList(lastKvIdx, removeKvIdx, 4*1024)
+
+	// removeKvIdx and lastKvIdx are in the same Shard
+	lastKvIdx--
+	removeKvIdx = sm.MaxKvSizeEntries()*2 + 1
+	olr1 := newCheckRemoveOperationList(lastKvIdx, removeKvIdx, 4*1024)
+
+	lastKvIdx--
+	removeKvIdx = sm.MaxKvSizeEntries() * 2
+	olr2 := newCheckRemoveOperationList(lastKvIdx, removeKvIdx, 4*1024)
+
+	// removeKvIdx and lastKvIdx are in the different Shard
+	lastKvIdx--
+	removeKvIdx = 1
+	olr3 := newCheckRemoveOperationList(lastKvIdx, removeKvIdx, 4*1024)
+	olr3.List[1].ExpectErr = "only allow removing a KV entry in the last shard"
+
+	lastKvIdx--
+	removeKvIdx = sm.MaxKvSizeEntries()*2 - 1
+	olr4 := newCheckRemoveOperationList(lastKvIdx, removeKvIdx, 4*1024)
+	olr4.List[1].ExpectErr = "only allow removing a KV entry in the last shard"
+
+	ols = append(ols, olr0, olr1, olr2, olr3, olr4)
+
+	p := &sstoragePisa{}
+	vmctx := BlockContext{
+		BlockNumber: big.NewInt(0),
+		CanTransfer: func(db StateDB, address common.Address, b *big.Int) bool {
+			return true
+		},
+		Transfer: func(db StateDB, address common.Address, address2 common.Address, b *big.Int) {},
+	}
+	statedb, _ := state.New(common.Hash{}, state.NewDatabase(rawdb.NewMemoryDatabase()), nil)
+	jsonRpcVmenv := NewEVM(vmctx, TxContext{}, statedb, params.AllEthashProtocolChanges, Config{IsJsonRpc: true})
+	jsonRpcEnv := &PrecompiledContractCallEnv{jsonRpcVmenv, AccountRef(ShardManagerContract)}
+
+	for j, ol := range ols {
+		t.Run(fmt.Sprintf("olIdx:%d KvIdx:%d KvSize:%d Method:%s", j, ol.KvIdx, ol.KvSize, ol.Name), func(t *testing.T) {
+			err := ol.run(statedb, jsonRpcEnv, p)
+			if err != nil {
+				t.Error(err)
+			}
+		})
+
+	}
+}
+
+func TestRemoveSpecificKvData(t *testing.T) {
+	// prepare three shards.
+	// Shard Info: MaxKvEntries = 10; KVSize = 4 * 1024; chunksPerKv = 1; ChunkSize = 4 *1024
+	_, ShardManagerContract, err := prepareShardManager()
+	if err != nil {
+		t.Error(err)
+	}
+
+	ols := make([]*operationList, 0)
+	var i uint64
+	// first put data
+	for i = 0; i < 3; i++ {
+		ol := newCheckPutSDOperationList(i, 4*1024, i)
+		ols = append(ols, ol)
+	}
+
+	var lastKvIdx uint64 = 2
+	var removeKvIdx uint64 = 1
+	olr1 := newCheckRemoveOperationList(lastKvIdx, removeKvIdx, 4*1024)
+
+	ols = append(ols, olr1)
+
+	p := &sstoragePisa{}
+	vmctx := BlockContext{
+		BlockNumber: big.NewInt(0),
+		CanTransfer: func(db StateDB, address common.Address, b *big.Int) bool {
+			return true
+		},
+		Transfer: func(db StateDB, address common.Address, address2 common.Address, b *big.Int) {},
+	}
+	statedb, _ := state.New(common.Hash{}, state.NewDatabase(rawdb.NewMemoryDatabase()), nil)
+	jsonRpcVmenv := NewEVM(vmctx, TxContext{}, statedb, params.AllEthashProtocolChanges, Config{IsJsonRpc: true})
+	jsonRpcEnv := &PrecompiledContractCallEnv{jsonRpcVmenv, AccountRef(ShardManagerContract)}
+
+	for j, ol := range ols {
+		t.Run(fmt.Sprintf("olIdx:%d KvIdx:%d KvSize:%d Method:%s", j, ol.KvIdx, ol.KvSize, ol.Name), func(t *testing.T) {
+			err := ol.run(statedb, jsonRpcEnv, p)
+			if err != nil {
+				t.Error(err)
+			}
+		})
+
+	}
+}
 
 func BenchmarkPrecompiledBLS12381G1Add(b *testing.B)      { benchJson("blsG1Add", "0a", b) }
 func BenchmarkPrecompiledBLS12381G1Mul(b *testing.B)      { benchJson("blsG1Mul", "0b", b) }
