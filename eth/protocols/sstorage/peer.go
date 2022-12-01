@@ -112,5 +112,5 @@ func (p *Peer) RequestShardList(shards map[common.Address][]uint64) error {
 	p.logger.Trace("Fetching Shard list", "shards", shards)
 
 	shardListPacket := newShardListPacket(shards)
-	return p2p.Send(p.rw, StatusMsg, shardListPacket)
+	return p2p.Send(p.rw, GetShardsMsg, shardListPacket)
 }

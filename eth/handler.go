@@ -325,7 +325,10 @@ func (h *handler) runEthPeer(peer *eth.Peer, handler eth.Handler) error {
 		}
 	}
 	if sstorExt != nil {
-		sstorExt.Handshake()
+		if err := sstorExt.Handshake(); err != nil {
+			peer.Log().Warn("Ethereum handshake failed", "err", err.Error())
+			return err
+		}
 	}
 
 	// Ignore maxPeers if this is a trusted peer
