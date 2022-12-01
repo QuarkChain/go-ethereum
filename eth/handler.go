@@ -324,6 +324,10 @@ func (h *handler) runEthPeer(peer *eth.Peer, handler eth.Handler) error {
 			}
 		}
 	}
+	if sstorExt != nil {
+		sstorExt.Handshake()
+	}
+
 	// Ignore maxPeers if this is a trusted peer
 	if !peer.Peer.Info().Network.Trusted {
 		if reject || (h.peers.len() >= h.maxPeers && !h.peers.needThisPeer(sstorExt)) {
@@ -482,7 +486,6 @@ func (h *handler) runSstorageExtension(peer *sstorage.Peer, handler sstorage.Han
 	h.peerWG.Add(1)
 	defer h.peerWG.Done()
 
-	peer.RequestShardList(sstor.Shards())
 	if err := h.peers.registerSstorageExtension(peer); err != nil {
 		peer.Log().Error("Sstorage extension registration failed", "err", err)
 		return err
