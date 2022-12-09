@@ -44,7 +44,7 @@ type ChainIndexerBackend interface {
 	// will ensure a sequential order of headers.
 	Process(ctx context.Context, header *types.Header) error
 
-	// Commit finalizes the section metadata and stores it into the database.
+	// Commit finalizes the section SstorageMetadata and stores it into the database.
 	Commit() error
 
 	// Prune deletes the chain index older than the given threshold.
@@ -71,7 +71,7 @@ type ChainIndexerChain interface {
 // affect already finished sections.
 type ChainIndexer struct {
 	chainDb  ethdb.Database      // Chain database to index the data from
-	indexDb  ethdb.Database      // Prefixed table-view of the db to write index metadata into
+	indexDb  ethdb.Database      // Prefixed table-view of the db to write index SstorageMetadata into
 	backend  ChainIndexerBackend // Background processor generating the index data content
 	children []*ChainIndexer     // Child indexers to cascade chain updates to
 

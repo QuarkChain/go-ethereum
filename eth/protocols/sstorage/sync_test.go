@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"github.com/ethereum/go-ethereum/core"
 	"math/rand"
 	"os"
 	"sync"
@@ -40,7 +41,7 @@ import (
 
 var (
 	contract  = common.HexToAddress("0x0000000000000000000000000000000003330001")
-	kvEntries = uint64(256)
+	kvEntries = uint64(512)
 )
 
 type (
@@ -48,8 +49,9 @@ type (
 )
 
 type blockChain struct {
-	block   *types.Block
-	stateDB *state.StateDB
+	block     *types.Block
+	stateDB   *state.StateDB
+	lastKvIdx uint64
 }
 
 func (c *blockChain) StateAt(root common.Hash) (*state.StateDB, error) {
@@ -60,16 +62,141 @@ func (c *blockChain) CurrentBlock() *types.Block {
 	return c.block
 }
 
+// verifyKV verify kv using SstorageMetadata
+func verifyKV(sm *sstorage.ShardManager, idx uint64, val []byte, meta *core.SstorageMetadata, isMasked bool) error {
+	if idx != meta.KVIdx {
+		return fmt.Errorf("verifyKV fail: kv Idx mismatch; idx: %d; MetaHash KVIdx: %d", idx, meta.KVIdx)
+	}
+
+	data := make([]byte, len(val))
+	copy(data, val)
+	if isMasked {
+		if sm == nil {
+			return fmt.Errorf("empty sm to verify KV")
+		}
+		d, r, err := sm.UnmaskKV(meta.KVIdx, data, common.BytesToHash(meta.HashInMeta))
+		if !r || err != nil {
+			return fmt.Errorf("Unmask KV fail, err: %v", err)
+		}
+
+		if meta.KVSize != uint64(len(data)) {
+			return fmt.Errorf("verifyKV fail: size error; Data size: %d; MetaHash KVSize: %d", len(val), meta.KVSize)
+		}
+		data = d
+	}
+
+	hasher := sha3.NewLegacyKeccak256().(crypto.KeccakState)
+	hasher.Write(data)
+	hash := common.Hash{}
+	hasher.Read(hash[:])
+
+	if bytes.Compare(hash[:24], meta.HashInMeta) != 0 {
+		return fmt.Errorf("verifyKV fail: size error; Data hash: %s; MetaHash hash (24): %s",
+			common.Bytes2Hex(hash[:24]), common.Bytes2Hex(meta.HashInMeta))
+	}
+
+	return nil
+}
+
+func (c *blockChain) VerifyAndWriteKV(contract common.Address, data map[uint64][]byte) (uint64, uint64, []uint64, error) {
+	var (
+		synced      uint64
+		syncedBytes uint64
+		inserted    = make([]uint64, 0)
+	)
+	sm := sstorage.ContractToShardManager[contract]
+	if sm == nil {
+		return 0, 0, inserted, fmt.Errorf("kv verify fail: contract not support, contract: %s", contract.Hex())
+	}
+
+	for idx, val := range data {
+		synced++
+		syncedBytes += uint64(len(val))
+
+		_, meta, err := core.GetSstorageMetadata(c.stateDB, contract, idx)
+		if err != nil || meta == nil {
+			log.Warn("processKVResponse: get vkv MetaHash for verification fail", "error", err)
+			continue
+		}
+
+		err = verifyKV(sm, idx, val, meta, true)
+		if err != nil {
+			log.Warn("processKVResponse: verify vkv fail", "error", err)
+			continue
+		}
+
+		success, err := sm.TryWriteMaskedKV(idx, val)
+		if success {
+			inserted = append(inserted, idx)
+		}
+	}
+	return synced, syncedBytes, inserted, nil
+}
+
+func (c *blockChain) ReadMaskedKVsByIndexList(contract common.Address, indexes []uint64) ([]*core.KV, error) {
+	sm := sstorage.ContractToShardManager[contract]
+	if sm == nil {
+		return nil, fmt.Errorf("shard manager for contract %s is not support", contract.Hex())
+	}
+
+	res := make([]*core.KV, 0)
+	for _, idx := range indexes {
+		_, meta, err := core.GetSstorageMetadata(c.stateDB, contract, idx)
+		if err != nil {
+			continue
+		}
+		data, ok, err := sm.TryReadMaskedKV(idx, int(meta.KVSize), common.BytesToHash(meta.HashInMeta))
+		if ok && err == nil {
+			kv := core.KV{idx, data}
+			res = append(res, &kv)
+		}
+	}
+
+	return res, nil
+}
+
+func (c *blockChain) ReadMaskedKVsByIndexRange(contract common.Address, origin uint64, limit uint64, bytes uint64) ([]*core.KV, error) {
+	sm := sstorage.ContractToShardManager[contract]
+	if sm == nil {
+		return nil, fmt.Errorf("shard manager for contract %s is not support", contract.Hex())
+	}
+
+	res := make([]*core.KV, 0)
+	read := uint64(0)
+	for idx := origin; idx <= limit; idx++ {
+		_, meta, err := core.GetSstorageMetadata(c.stateDB, contract, idx)
+		if err != nil {
+			continue
+		}
+		data, ok, err := sm.TryReadMaskedKV(idx, int(meta.KVSize), common.BytesToHash(meta.HashInMeta))
+		if ok && err == nil {
+			kv := core.KV{idx, data}
+			res = append(res, &kv)
+			read += meta.KVSize
+			if read > bytes {
+				break
+			}
+		}
+	}
+
+	return res, nil
+}
+
+func (c *blockChain) GetSstorageLastKvIdx() (uint64, error) {
+	return c.lastKvIdx, nil
+}
+
 type testPeer struct {
-	id               string
-	test             *testing.T
-	remote           *Syncer
-	stateDB          *state.StateDB
-	logger           log.Logger
-	shardData        map[common.Address]map[uint64][]byte
-	shards           map[common.Address][]uint64
-	kvRequestHandler kvHandlerFunc
-	term             func()
+	id                    string
+	test                  *testing.T
+	remote                *Syncer
+	stateDB               *state.StateDB
+	logger                log.Logger
+	shardData             map[common.Address]map[uint64][]byte
+	shards                map[common.Address][]uint64
+	kvRangeRequestHandler kvHandlerFunc
+	kvHealRequestHandler  kvHandlerFunc
+	term                  func()
 
 	// counters
 	nKVRequests int
@@ -77,12 +204,13 @@ type testPeer struct {
 
 func newTestPeer(id string, stateDB *state.StateDB, t *testing.T, term func()) *testPeer {
 	peer := &testPeer{
-		id:               id,
-		test:             t,
-		logger:           log.New("id", id),
-		kvRequestHandler: defaultKVRequestHandler,
-		term:             term,
-		stateDB:          stateDB,
+		id:                    id,
+		test:                  t,
+		logger:                log.New("id", id),
+		kvRangeRequestHandler: defaultKVRangeRequestHandler,
+		kvHealRequestHandler:  defaultKVHealRequestHandler,
+		term:                  term,
+		stateDB:               stateDB,
 	}
 	return peer
 }
@@ -118,7 +246,17 @@ func (p *testPeer) LogPeerInfo() {
 func (t *testPeer) RequestKVs(id uint64, contract common.Address, shardId uint64, kvList []uint64) error {
 	t.logger.Trace("Fetching range of kvs", "contract", contract, "shardId", shardId, "kvList", len(kvList))
 	t.nKVRequests++
-	go t.kvRequestHandler(t, id, contract, shardId, kvList)
+	go t.kvHealRequestHandler(t, id, contract, shardId, kvList)
+	return nil
+}
+
+func (t *testPeer) RequestKVRange(id uint64, contract common.Address, shardId uint64, origin uint64, limit uint64) error {
+	t.nKVRequests++
+	kvList := make([]uint64, 0)
+	for i := origin; i <= limit; i++ {
+		kvList = append(kvList, i)
+	}
+	go t.kvRangeRequestHandler(t, id, contract, shardId, kvList)
 	return nil
 }
 
@@ -135,8 +273,23 @@ func delayRandomTime(max uint64, duration time.Duration) {
 	time.Sleep(d * duration)
 }
 
-// defaultKVRequestHandler is a well-behaving handler for KVsRequests
-func defaultKVRequestHandler(t *testPeer, id uint64, contract common.Address, shardId uint64, kvList []uint64) error {
+// defaultKVRangeRequestHandler is a well-behaving handler for KVsRequests
+func defaultKVRangeRequestHandler(t *testPeer, id uint64, contract common.Address, shardId uint64, kvList []uint64) error {
+	vals := createKVRequestResponse(t, id, t.stateDB, contract, shardId, kvList)
+	delayRandomTime(5000, time.Microsecond)
+	if vals == nil {
+		t.test.Error("CreateKVRequestResponse fail: vals is nul.")
+	}
+	if err := t.remote.OnKVRange(t, id, vals); err != nil {
+		t.test.Errorf("Remote side rejected our delivery: %v", err)
+		t.term()
+		return err
+	}
+	return nil
+}
+
+// defaultKVHealRequestHandler is a well-behaving handler for KVsRequests
+func defaultKVHealRequestHandler(t *testPeer, id uint64, contract common.Address, shardId uint64, kvList []uint64) error {
 	vals := createKVRequestResponse(t, id, t.stateDB, contract, shardId, kvList)
 	delayRandomTime(5000, time.Microsecond)
 	if vals == nil {
@@ -150,8 +303,8 @@ func defaultKVRequestHandler(t *testPeer, id uint64, contract common.Address, sh
 	return nil
 }
 
-func createKVRequestResponse(t *testPeer, id uint64, stateDB *state.StateDB, contract common.Address, shardId uint64, kvList []uint64) (values []*KV) {
-	values = make([]*KV, 0)
+func createKVRequestResponse(t *testPeer, id uint64, stateDB *state.StateDB, contract common.Address, shardId uint64, kvList []uint64) (values []*core.KV) {
+	values = make([]*core.KV, 0)
 	smData, ok := t.shardData[contract]
 	if !ok {
 		return nil
@@ -165,12 +318,12 @@ func createKVRequestResponse(t *testPeer, id uint64, stateDB *state.StateDB, con
 	for _, idx := range kvList {
 		data, ok := smData[idx]
 		if ok {
-			meta, err := getSstorageMetadata(stateDB, contract, idx)
+			_, meta, err := core.GetSstorageMetadata(stateDB, contract, idx)
 			if err != nil {
 				return nil
 			}
-			bs, _, _ := sm.MaskKV(idx, data, common.BytesToHash(meta.hashInMeta))
-			values = append(values, &KV{Idx: idx, Data: bs})
+			bs, _, _ := sm.MaskKV(idx, data, common.BytesToHash(meta.HashInMeta))
+			values = append(values, &core.KV{Idx: idx, Data: bs[:meta.KVSize]})
 		}
 	}
 
@@ -179,7 +332,7 @@ func createKVRequestResponse(t *testPeer, id uint64, stateDB *state.StateDB, con
 
 // emptyRequestKVRangeFn is a rejects AccountRangeRequests
 func emptyRequestKVRangeFn(t *testPeer, id uint64, contract common.Address, shardId uint64, kvList []uint64) error {
-	t.remote.OnKVs(t, id, nil)
+	t.remote.OnKVRange(t, id, nil)
 	return nil
 }
 
@@ -187,12 +340,13 @@ func nonResponsiveRequestKVRangeFn(t *testPeer, id uint64, contract common.Addre
 	return nil
 }
 
-func setupSyncer(shards map[common.Address][]uint64, stateDB *state.StateDB, peers ...*testPeer) *Syncer {
+func setupSyncer(shards map[common.Address][]uint64, stateDB *state.StateDB, lastKvIdx uint64, peers ...*testPeer) *Syncer {
 	db := rawdb.NewMemoryDatabase()
 	blockEnc := common.FromHex("f90260f901f9a083cafc574e1f51ba9dc0568fc617a08ea2429fb384059c972f13b19fa1c8dd55a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347948888f1f195afa192cfee860698584c030f4c9db1a0ef1552a40b7165c3cd773806b9e0c165b75356e0314bf0706f279c729f51e017a05fe50b260da6308036625b850b5d6ced6d0a9f814c0688bc91ffb7b7a3a54b67a0bc37d79753ad738a6dac4921e57392f145d8887476de3f783dfa7edae9283e52b90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008302000001832fefd8825208845506eb0780a0bd4472abb6659ebe3ee06ee4d7b72a00a9f4d001caca51342001075469aff49888a13a5a8c8f2bb1c4f861f85f800a82c35094095e7baea6a6c7c4c2dfeb977efac326af552d870a801ba09bea4c4daac7c7c52e093e6a4c35dbbcf8856f1af7b059ba20253e70848d094fa08a8fae537ce25ed8cb5af9adac3f141af69bd515bd2ba031522df09b97dd72b1c0")
 	var block types.Block
 	rlp.DecodeBytes(blockEnc, &block)
 	chain := blockChain{block: &block, stateDB: stateDB}
+	chain.lastKvIdx = lastKvIdx - 1
 	syncer := NewSyncer(db, &chain, shards)
 	for _, peer := range peers {
 		syncer.Register(peer)
@@ -238,14 +392,34 @@ func checkStall(t *testing.T, term func()) chan struct{} {
 
 func generateMetadata(idx, size uint64, hash common.Hash) common.Hash {
 	meta := make([]byte, 0)
-	idx_bs := make([]byte, 8)
-	binary.BigEndian.PutUint64(idx_bs, idx)
-	meta = append(meta, idx_bs[3:]...)
+	meta = append(meta, hash[:24]...)
+
 	size_bs := make([]byte, 8)
 	binary.BigEndian.PutUint64(size_bs, size)
 	meta = append(meta, size_bs[5:]...)
-	meta = append(meta, hash[:24]...)
+
+	idx_bs := make([]byte, 8)
+	binary.BigEndian.PutUint64(idx_bs, idx)
+	meta = append(meta, idx_bs[3:]...)
+
 	return common.BytesToHash(meta)
+}
+
+// getSlotHash generate slot hash to fetch Data from stateDB
+func getSlotHash(slotIdx uint64, key common.Hash) common.Hash {
+	slot := uint256.NewInt(slotIdx).Bytes32()
+
+	keydata := key.Bytes()
+	slotdata := slot[:]
+	data := append(keydata, slotdata...)
+
+	hasher := sha3.NewLegacyKeccak256().(crypto.KeccakState)
+	hasher.Write(data)
+
+	hashRes := common.Hash{}
+	hasher.Read(hashRes[:])
+
+	return hashRes
 }
 
 // makeKVStorage generate a range of storage Data and its metadata
@@ -265,11 +439,11 @@ func makeKVStorage(stateDB *state.StateDB, contract common.Address, shards []uin
 
 			if stateDB != nil {
 				skey := getSKey(contract, i)
-				key := getSlotHash(6, uint256.NewInt(i).Bytes32())
+				key := getSlotHash(2, uint256.NewInt(i).Bytes32())
 				stateDB.SetState(contract, key, skey)
 
 				meta := generateMetadata(i, uint64(len(val)), hash(val))
-				key = getSlotHash(5, skey)
+				key = getSlotHash(1, skey)
 				stateDB.SetState(contract, key, meta)
 			}
 
@@ -322,16 +496,14 @@ func verifyKVs(stateDB *state.StateDB, data map[common.Address]map[uint64][]byte
 			t.Fatalf("sstorage manager for contract %s do not exist.", contract.Hex())
 		}
 		for idx, val := range shards {
-			meta, err := getSstorageMetadata(stateDB, contract, idx)
+			_, meta, err := core.GetSstorageMetadata(stateDB, contract, idx)
 			if _, ok := destroyedList[idx]; ok {
 				val = make([]byte, shardData.MaxKvSize())
-			} else {
-				val, _, _ = shardData.UnmaskKV(idx, val, common.BytesToHash(meta.hashInMeta))
 			}
 			if err != nil {
 				t.Fatalf("get MetaHash data fail with err: %s.", err.Error())
 			}
-			sval, ok, err := shardData.TryRead(idx, len(val), common.BytesToHash(meta.hashInMeta))
+			sval, ok, err := shardData.TryRead(idx, len(val), common.BytesToHash(meta.HashInMeta))
 			if err != nil {
 				t.Fatalf("TryRead sstorage Data fail. err: %s", err.Error())
 			}
@@ -408,7 +580,51 @@ func TestSync(t *testing.T) {
 	}
 
 	data, _ := makeKVStorage(stateDB, contract, []uint64{0}, kvEntries)
-	syncer := setupSyncer(shards, stateDB, mkSource("source", shards, data))
+	syncer := setupSyncer(shards, stateDB, kvEntries, mkSource("source", shards, data))
+	done := checkStall(t, term)
+	if err := syncer.Sync(cancel); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+	close(done)
+	verifyKVs(stateDB, data, destroyedList, t)
+}
+
+// TestSync tests a basic sync with one peer
+func TestMultiSubTasksSync(t *testing.T) {
+	var (
+		once          sync.Once
+		cancel        = make(chan struct{})
+		entries       = uint64(1024)
+		destroyedList = make(map[uint64]struct{})
+		stateDB, _    = state.New(common.Hash{}, state.NewDatabase(rawdb.NewMemoryDatabase()), nil)
+		term          = func() {
+			once.Do(func() {
+				close(cancel)
+			})
+		}
+	)
+
+	shards, files := createSstorage(contract, []uint64{0}, sstorage.CHUNK_SIZE, entries, 1)
+	if shards == nil {
+		t.Fatalf("createSstorage failed")
+	}
+
+	defer func(files []string) {
+		for _, file := range files {
+			os.Remove(file)
+		}
+	}(files)
+
+	mkSource := func(name string, shards map[common.Address][]uint64,
+		data map[common.Address]map[uint64][]byte) *testPeer {
+		source := newTestPeer(name, stateDB, t, term)
+		source.shardData = data
+		source.shards = shards
+		return source
+	}
+
+	data, _ := makeKVStorage(stateDB, contract, []uint64{0}, entries)
+	syncer := setupSyncer(shards, stateDB, entries, mkSource("source", shards, data))
 	done := checkStall(t, term)
 	if err := syncer.Sync(cancel); err != nil {
 		t.Fatalf("sync failed: %v", err)
@@ -459,7 +675,7 @@ func TestMultiSync(t *testing.T) {
 		peers = append(peers, peer)
 	}
 
-	syncer := setupSyncer(shards, stateDB, peers...)
+	syncer := setupSyncer(shards, stateDB, kvEntries*5, peers...)
 	done := checkStall(t, term)
 	if err := syncer.Sync(cancel); err != nil {
 		t.Fatalf("sync failed: %v", err)
@@ -500,12 +716,12 @@ func TestSyncWithEmptyResponse(t *testing.T) {
 		source := newTestPeer(name, stateDB, t, term)
 		source.shardData = data
 		source.shards = shards
-		source.kvRequestHandler = emptyRequestKVRangeFn
+		source.kvRangeRequestHandler = emptyRequestKVRangeFn
 		return source
 	}
 
 	data, _ := makeKVStorage(stateDB, contract, []uint64{0}, kvEntries)
-	syncer := setupSyncer(shards, stateDB, mkSource("source", shards, data))
+	syncer := setupSyncer(shards, stateDB, kvEntries, mkSource("source", shards, data))
 	for i := uint64(0); i < kvEntries; i++ {
 		destroyedList[i] = struct{}{}
 	}
@@ -547,12 +763,12 @@ func TestSyncWithNoResponse(t *testing.T) {
 		source := newTestPeer(name, stateDB, t, term)
 		source.shardData = data
 		source.shards = shards
-		source.kvRequestHandler = nonResponsiveRequestKVRangeFn
+		source.kvRangeRequestHandler = nonResponsiveRequestKVRangeFn
 		return source
 	}
 
 	data, _ := makeKVStorage(stateDB, contract, []uint64{0}, kvEntries)
-	syncer := setupSyncer(shards, stateDB, mkSource("source", shards, data))
+	syncer := setupSyncer(shards, stateDB, kvEntries, mkSource("source", shards, data))
 	for i := uint64(0); i < kvEntries; i++ {
 		destroyedList[i] = struct{}{}
 	}
@@ -576,6 +792,7 @@ func TestSyncWithFewerResult(t *testing.T) {
 				close(cancel)
 			})
 		}
+		reduce = rand.Uint64()%(kvEntries/2) - 1
 	)
 
 	shards, files := createSstorage(contract, []uint64{0}, sstorage.CHUNK_SIZE, kvEntries, 1)
@@ -597,8 +814,8 @@ func TestSyncWithFewerResult(t *testing.T) {
 		return source
 	}
 
-	data, _ := makeKVStorage(stateDB, contract, []uint64{0}, kvEntries-28)
-	syncer := setupSyncer(shards, stateDB, mkSource("source", shards, data))
+	data, _ := makeKVStorage(stateDB, contract, []uint64{0}, kvEntries-reduce)
+	syncer := setupSyncer(shards, stateDB, kvEntries-reduce, mkSource("source", shards, data))
 	done := checkStall(t, term)
 	if err := syncer.Sync(cancel); err != nil {
 		t.Fatalf("sync failed: %v", err)
@@ -641,7 +858,7 @@ func TestSyncMismatchWithMeta(t *testing.T) {
 
 	data, _ := makeKVStorage(stateDB, contract, []uint64{0}, kvEntries)
 	destroyedList := destoryData(data, make(map[uint64]struct{}), 0, kvEntries, 8)
-	syncer := setupSyncer(shards, stateDB, mkSource("source", shards, data))
+	syncer := setupSyncer(shards, stateDB, kvEntries, mkSource("source", shards, data))
 	done := checkStall(t, term)
 	if err := syncer.Sync(cancel); err != ErrCancelled {
 		t.Fatalf("sync cancelled error is expected: %v", err)
@@ -688,7 +905,7 @@ func TestMultiSyncWithDataOverlay(t *testing.T) {
 	/*	data, shards = makeKVStorage(nil, contract, []uint64{2, 3}, kvEntries)
 		peer2 := mkSource("source_2", shards, data)*/
 
-	syncer := setupSyncer(localShards, stateDB, peer0, peer1)
+	syncer := setupSyncer(localShards, stateDB, kvEntries*4, peer0, peer1)
 	done := checkStall(t, term)
 	if err := syncer.Sync(cancel); err != nil {
 		t.Fatalf("sync failed: %v", err)
@@ -735,7 +952,7 @@ func TestMultiSyncWithDataOverlayWithDestroyed(t *testing.T) {
 	_ = destoryData(data, list, 0, kvEntries*3, 8)
 	peer1 := mkSource("source_1", shards, data)
 
-	syncer := setupSyncer(localShards, stateDB, peer0, peer1)
+	syncer := setupSyncer(localShards, stateDB, kvEntries*3, peer0, peer1)
 	done := checkStall(t, term)
 	if err := syncer.Sync(cancel); err != nil {
 		t.Fatalf("sync failed: %v", err)
@@ -782,7 +999,7 @@ func TestAddPeerDuringSyncing(t *testing.T) {
 	_ = destoryData(data, list, 0, kvEntries*3, 8)
 	peer1 := mkSource("source_1", shards, data)
 
-	syncer := setupSyncer(localShards, stateDB, peer0)
+	syncer := setupSyncer(localShards, stateDB, kvEntries*3, peer0)
 	done := checkStall(t, term)
 	go func() {
 		time.Sleep(100 * time.Millisecond)

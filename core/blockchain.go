@@ -18,8 +18,13 @@
 package core
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/sstorage"
+	"github.com/holiman/uint256"
+	"golang.org/x/crypto/sha3"
 	"io"
 	"math/big"
 	"sort"
@@ -1158,7 +1163,7 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 
 var lastWrite uint64
 
-// writeBlockWithoutState writes only the block and its metadata to the database,
+// writeBlockWithoutState writes only the block and its SstorageMetadata to the database,
 // but does not write any state. This is used to construct competing side forks
 // up to the point where they exceed the canonical total difficulty.
 func (bc *BlockChain) writeBlockWithoutState(block *types.Block, td *big.Int) (err error) {
@@ -1188,7 +1193,7 @@ func (bc *BlockChain) writeKnownBlock(block *types.Block) error {
 	return nil
 }
 
-// writeBlockWithState writes block, metadata and corresponding state data to the
+// writeBlockWithState writes block, SstorageMetadata and corresponding state data to the
 // database.
 func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.Receipt, logs []*types.Log, state *state.StateDB) error {
 	// Calculate the total difficulty of the block
@@ -1223,7 +1228,7 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 		return triedb.Commit(root, false, nil)
 	} else {
 		// Full but not archive node, do proper garbage collection
-		triedb.Reference(root, common.Hash{}) // metadata reference to keep trie alive
+		triedb.Reference(root, common.Hash{}) // SstorageMetadata reference to keep trie alive
 		bc.triegc.Push(root, -int64(block.NumberU64()))
 
 		if current := block.NumberU64(); current > TriesInMemory {
@@ -1346,14 +1351,6 @@ func (bc *BlockChain) addFutureBlock(block *types.Block) error {
 	}
 	bc.futureBlocks.Add(block.Hash(), block)
 	return nil
-}
-
-func (bc *BlockChain) LockInsertChain() {
-	bc.chainmu.TryLock()
-}
-
-func (bc *BlockChain) UnlockInsertChain() {
-	bc.chainmu.Unlock()
 }
 
 // InsertChain attempts to insert the given batch of blocks in to the canonical
@@ -2353,4 +2350,236 @@ func (bc *BlockChain) PreExecuteBlock(block *types.Block) (err error) {
 		return
 	}
 	return
+}
+
+var emptyHash = common.Hash{}
+
+type SstorageMetadata struct {
+	KVIdx      uint64
+	KVSize     uint64
+	HashInMeta []byte
+}
+
+type verifiedKV struct {
+	Idx      uint64
+	Data     []byte
+	MetaHash common.Hash
+}
+
+type KV struct {
+	Idx  uint64
+	Data []byte
+}
+
+// getSlotHash generate slot hash to fetch Data from stateDB
+func getSlotHash(slotIdx uint64, key common.Hash) common.Hash {
+	slot := uint256.NewInt(slotIdx).Bytes32()
+
+	keydata := key.Bytes()
+	slotdata := slot[:]
+	data := append(keydata, slotdata...)
+
+	hasher := sha3.NewLegacyKeccak256().(crypto.KeccakState)
+	hasher.Write(data)
+
+	hashRes := common.Hash{}
+	hasher.Read(hashRes[:])
+
+	return hashRes
+}
+
+func GetSstorageMetadata(s *state.StateDB, contract common.Address, index uint64) (common.Hash, *SstorageMetadata, error) {
+	// according to https://github.com/web3q/web3q-contracts/blob/main/contracts/DecentralizedKV.sol,
+	// it need to fetch the skey from idxMap (slot 2) using storage index,
+	// then get SstorageMetadata from kvMap (slot 1) using skey. the SstorageMetadata struct is as following
+	// struct PhyAddr {
+	// 	uint40 KVIdx;
+	// 	uint24 KVSize;
+	// 	bytes24 hash;
+	// }
+	position := getSlotHash(2, uint256.NewInt(index).Bytes32())
+	skey := s.GetState(contract, position)
+	if skey == emptyHash {
+		return emptyHash, nil, fmt.Errorf("fail to get skey for index %d", index)
+	}
+
+	position = getSlotHash(1, skey)
+	meta := s.GetState(contract, position)
+	if meta == emptyHash {
+		return emptyHash, nil, fmt.Errorf("fail to get SstorageMetadata for skey %s", skey.Hex())
+	}
+
+	return meta, &SstorageMetadata{
+			new(big.Int).SetBytes(meta[27:]).Uint64(),
+			new(big.Int).SetBytes(meta[24:27]).Uint64(),
+			meta[:24]},
+		nil
+}
+
+// verifyKV verify kv using SstorageMetadata
+func verifyKV(sm *sstorage.ShardManager, idx uint64, val []byte, meta *SstorageMetadata, isMasked bool) error {
+	if idx != meta.KVIdx {
+		return fmt.Errorf("verifyKV fail: kv Idx mismatch; idx: %d; MetaHash KVIdx: %d", idx, meta.KVIdx)
+	}
+
+	data := make([]byte, len(val))
+	copy(data, val)
+	if isMasked {
+		if sm == nil {
+			return fmt.Errorf("empty sm to verify KV")
+		}
+		d, r, err := sm.UnmaskKV(meta.KVIdx, data, common.BytesToHash(meta.HashInMeta))
+		if !r || err != nil {
+			return fmt.Errorf("Unmask KV fail, err: %v", err)
+		}
+
+		if meta.KVSize != uint64(len(data)) {
+			return fmt.Errorf("verifyKV fail: size error; Data size: %d; MetaHash KVSize: %d", len(val), meta.KVSize)
+		}
+		data = d
+	}
+
+	hasher := sha3.NewLegacyKeccak256().(crypto.KeccakState)
+	hasher.Write(data)
+	hash := common.Hash{}
+	hasher.Read(hash[:])
+
+	if bytes.Compare(hash[:24], meta.HashInMeta) != 0 {
+		return fmt.Errorf("verifyKV fail: size error; Data hash: %s; MetaHash hash (24): %s",
+			common.Bytes2Hex(hash[:24]), common.Bytes2Hex(meta.HashInMeta))
+	}
+
+	return nil
+}
+
+func (bc *BlockChain) VerifyAndWriteKV(contract common.Address, data map[uint64][]byte) (uint64, uint64, []uint64, error) {
+	var (
+		synced      uint64
+		syncedBytes uint64
+		inserted    = make([]uint64, 0)
+	)
+	sm := sstorage.ContractToShardManager[contract]
+	if sm == nil {
+		return 0, 0, inserted, fmt.Errorf("kv verify fail: contract not support, contract: %s", contract.Hex())
+	}
+
+	vkvs := make([]*verifiedKV, 0)
+	state, err := bc.StateAt(bc.CurrentBlock().Root())
+	if err != nil {
+		return 0, 0, inserted, fmt.Errorf("kv verify fail: get state for verification fail, error: %s", err.Error())
+	}
+
+	for idx, val := range data {
+		synced++
+		syncedBytes += uint64(len(val))
+
+		metaHash, meta, err := GetSstorageMetadata(state, contract, idx)
+		if err != nil || meta == nil {
+			log.Warn("processKVResponse: get vkv MetaHash for verification fail", "error", err)
+			continue
+		}
+
+		err = verifyKV(sm, idx, val, meta, true)
+		if err != nil {
+			log.Warn("processKVResponse: verify vkv fail", "error", err)
+			continue
+		}
+		vkvs = append(vkvs, &verifiedKV{idx, val, metaHash})
+	}
+
+	bc.chainmu.TryLock()
+	defer bc.chainmu.Unlock()
+
+	state, err = bc.StateAt(bc.CurrentBlock().Root())
+	if err != nil {
+		return 0, 0, inserted, fmt.Errorf("kv verify fail: get state for write vkv fail, err: %s", err.Error())
+	}
+
+	for _, vkv := range vkvs {
+		metaHash, meta, err := GetSstorageMetadata(state, contract, vkv.Idx)
+		if err != nil || meta == nil {
+			log.Warn("get vkv MetaHash for write vkv fail", "error", err)
+			continue
+		}
+
+		if metaHash != vkv.MetaHash {
+			log.Warn("verify vkv fail", "error", err)
+			continue
+		}
+
+		success, err := sm.TryWriteMaskedKV(vkv.Idx, vkv.Data)
+		if success {
+			inserted = append(inserted, vkv.Idx)
+		}
+	}
+	return synced, syncedBytes, inserted, nil
+}
+
+func (bc *BlockChain) ReadMaskedKVsByIndexList(contract common.Address, indexes []uint64) ([]*KV, error) {
+	sm := sstorage.ContractToShardManager[contract]
+	if sm == nil {
+		return nil, fmt.Errorf("shard manager for contract %s is not support", contract.Hex())
+	}
+
+	stateDB, err := bc.StateAt(bc.CurrentBlock().Root())
+	if err != nil {
+		return nil, err
+	}
+	res := make([]*KV, 0)
+	for _, idx := range indexes {
+		_, meta, err := GetSstorageMetadata(stateDB, contract, idx)
+		if err != nil {
+			continue
+		}
+		data, ok, err := sm.TryReadMaskedKV(idx, int(meta.KVSize), common.BytesToHash(meta.HashInMeta))
+		if ok && err == nil {
+			kv := KV{idx, data}
+			res = append(res, &kv)
+		}
+	}
+
+	return res, nil
+}
+
+func (bc *BlockChain) ReadMaskedKVsByIndexRange(contract common.Address, origin uint64, limit uint64, bytes uint64) ([]*KV, error) {
+	sm := sstorage.ContractToShardManager[contract]
+	if sm == nil {
+		return nil, fmt.Errorf("shard manager for contract %s is not support", contract.Hex())
+	}
+
+	stateDB, err := bc.StateAt(bc.CurrentBlock().Root())
+	if err != nil {
+		return nil, err
+	}
+	res := make([]*KV, 0)
+	read := uint64(0)
+	for idx := origin; idx <= limit; idx++ {
+		_, meta, err := GetSstorageMetadata(stateDB, contract, idx)
+		if err != nil {
+			continue
+		}
+		data, ok, err := sm.TryReadMaskedKV(idx, int(meta.KVSize), common.BytesToHash(meta.HashInMeta))
+		if ok && err == nil {
+			kv := KV{idx, data}
+			res = append(res, &kv)
+			read += meta.KVSize
+			if read > bytes {
+				break
+			}
+		}
+	}
+
+	return res, nil
+}
+
+func (bc *BlockChain) GetSstorageLastKvIdx(contract common.Address) (uint64, error) {
+	stateDB, err := bc.StateAt(bc.CurrentBlock().Root())
+	if err != nil {
+		return 0, err
+	}
+
+	slot := common.Hash{}
+	val := stateDB.GetState(contract, slot)
+
+	return new(big.Int).SetBytes(val.Bytes()).Uint64(), nil
 }
