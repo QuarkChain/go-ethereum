@@ -213,7 +213,7 @@ type BlockChain interface {
 
 	ReadMaskedKVsByIndexRange(contract common.Address, origin uint64, limit uint64, bytes uint64) ([]*core.KV, error)
 
-	GetSstorageLastKvIdx() (uint64, error)
+	GetSstorageLastKvIdx(contract common.Address) (uint64, error)
 }
 
 // New creates a new downloader to fetch hashes and blocks from remote peers.

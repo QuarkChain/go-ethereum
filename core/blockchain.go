@@ -2578,8 +2578,7 @@ func (bc *BlockChain) GetSstorageLastKvIdx(contract common.Address) (uint64, err
 		return 0, err
 	}
 
-	slot := common.Hash{}
-	val := stateDB.GetState(contract, slot)
+	val := stateDB.GetState(contract, uint256.NewInt(0).Bytes32())
 
 	return new(big.Int).SetBytes(val.Bytes()).Uint64(), nil
 }

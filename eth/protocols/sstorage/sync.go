@@ -237,7 +237,7 @@ type BlockChain interface {
 
 	ReadMaskedKVsByIndexRange(contract common.Address, origin uint64, limit uint64, bytes uint64) ([]*core.KV, error)
 
-	GetSstorageLastKvIdx() (uint64, error)
+	GetSstorageLastKvIdx(contract common.Address) (uint64, error)
 }
 
 // Syncer is a sstorage syncer based the sstorage protocol. It's purpose is to
@@ -448,11 +448,6 @@ func (s *Syncer) Sync(cancel chan struct{}) error {
 func (s *Syncer) loadSyncStatus() {
 	// Start a fresh sync for retrieval.
 	s.kvSynced, s.kvBytes = 0, 0
-	lastKvIndex, err := s.chain.GetSstorageLastKvIdx()
-	if err != nil {
-		log.Warn("loadSyncStatus failed: get lastKvIdx")
-		lastKvIndex = 0
-	}
 
 	// todo load state from db
 
@@ -460,6 +455,11 @@ func (s *Syncer) loadSyncStatus() {
 
 	for contract, shards := range s.sstorageInfo {
 		sm := sstorage.ContractToShardManager[contract]
+		lastKvIndex, err := s.chain.GetSstorageLastKvIdx(contract)
+		if err != nil {
+			log.Warn("loadSyncStatus failed: get lastKvIdx")
+			lastKvIndex = 0
+		}
 		for _, sid := range shards {
 			next, limit := sm.KvEntries()*sid, sm.KvEntries()*(sid+1)-1
 			if lastKvIndex > 0 && next > lastKvIndex {
