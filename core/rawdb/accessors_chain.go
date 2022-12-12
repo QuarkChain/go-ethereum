@@ -1027,3 +1027,16 @@ func ReadHeadBlock(db ethdb.Reader) *types.Block {
 	}
 	return ReadBlock(db, headBlockHash, *headBlockNumber)
 }
+
+// ReadSnapshotSyncStatus retrieves the serialized sync status saved at shutdown.
+func ReadSstorageSyncStatus(db ethdb.KeyValueReader) []byte {
+	data, _ := db.Get(sstorageSyncStatusKey)
+	return data
+}
+
+// WriteSnapshotSyncStatus stores the serialized sync status to save at shutdown.
+func WriteSstorageSyncStatus(db ethdb.KeyValueWriter, status []byte) {
+	if err := db.Put(sstorageSyncStatusKey, status); err != nil {
+		log.Crit("Failed to store snapshot sync status", "err", err)
+	}
+}

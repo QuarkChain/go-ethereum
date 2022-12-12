@@ -111,23 +111,44 @@ func HandleMessage(backend Backend, peer *Peer) error {
 	defer msg.Discard()
 	// Handle the message depending on its contents
 	switch {
-	case msg.Code == GetShardListMsg:
+	case msg.Code == GetShardsMsg:
 		// Decode trie node retrieval request
 		req := new(ShardListPacket)
 		if err := msg.Decode(req); err != nil {
 			return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 		}
 		peer.SetShards(convertShardList(req))
-		return p2p.Send(peer.rw, ShardListMsg, newShardListPacket(sstorage.Shards()))
+		peer.logger.Debug("HandleMessage: GetShardListMsg", "url", peer.Node().URLv4(), "shards", peer.shards)
+		return p2p.Send(peer.rw, ShardsMsg, newShardListPacket(sstorage.Shards()))
 
-	case msg.Code == ShardListMsg:
+	case msg.Code == GetKVRangeMsg:
+		// Decode trie node retrieval request
+		var req GetKVRangePacket
+		if err := msg.Decode(&req); err != nil {
+			return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
+		}
+		// Service the request, potentially returning nothing in case of errors
+		kvs, err := ServiceGetKVRangeQuery(backend.Chain(), &req)
+		if err != nil {
+			return err
+		}
+		// Send back anything accumulated (or empty in case of errors)
+		return p2p.Send(peer.rw, KVRangeMsg, &KVRangePacket{
+			ID:       req.ID,
+			Contract: req.Contract,
+			ShardId:  req.ShardId,
+			KVs:      kvs,
+		})
+
+	case msg.Code == KVRangeMsg:
 		// A batch of trie kvs arrived to one of our previous requests
-		res := new(ShardListPacket)
+		res := new(KVRangePacket)
 		if err := msg.Decode(res); err != nil {
 			return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 		}
-		peer.SetShards(convertShardList(res))
-		return nil
+
+		return backend.Handle(peer, res)
+
 	case msg.Code == GetKVsMsg:
 		// Decode trie node retrieval request
 		var req GetKVsPacket
@@ -155,38 +176,25 @@ func HandleMessage(backend Backend, peer *Peer) error {
 		}
 
 		return backend.Handle(peer, res)
-
 	default:
 		return fmt.Errorf("%w: %v", errInvalidMsgCode, msg.Code)
 	}
 }
 
-// ServiceGetKVsQuery assembles the response to a kvs query.
+// ServiceGetKVRangeQuery assembles the response to a kvs query.
 // It is exposed to allow external packages to test protocol behavior.
-func ServiceGetKVsQuery(chain *core.BlockChain, req *GetKVsPacket) ([]*KV, error) {
-	sm := sstorage.ContractToShardManager[req.Contract]
-	if sm == nil {
-		return nil, fmt.Errorf("shard manager for contract %s is not support", req.Contract.Hex())
-	}
+func ServiceGetKVsQuery(chain *core.BlockChain, req *GetKVsPacket) ([]*core.KV, error) {
+	return chain.ReadMaskedKVsByIndexList(req.Contract, req.KVList)
+}
 
-	stateDB, err := chain.StateAt(chain.CurrentBlock().Root())
-	if err != nil {
-		return nil, err
+// ServiceGetKVRangeQuery assembles the response to a kvs query.
+// It is exposed to allow external packages to test protocol behavior.
+func ServiceGetKVRangeQuery(chain *core.BlockChain, req *GetKVRangePacket) ([]*core.KV, error) {
+	kvList := make([]uint64, 0)
+	for i := req.Origin; i < req.Limit; i++ {
+		kvList = append(kvList, i)
 	}
-	res := make([]*KV, 0)
-	for _, idx := range req.KVList {
-		_, meta, err := getSstorageMetadata(stateDB, req.Contract, idx)
-		if err != nil {
-			continue
-		}
-		data, ok, err := sm.TryReadMaskedKV(idx, int(meta.kvSize), common.BytesToHash(meta.hashInMeta))
-		if ok && err == nil {
-			kv := KV{idx, data}
-			res = append(res, &kv)
-		}
-	}
-
-	return res, nil
+	return chain.ReadMaskedKVsByIndexList(req.Contract, kvList)
 }
 
 // NodeInfo represents a short summary of the `sstorage` sub-protocol metadata
