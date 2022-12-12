@@ -118,18 +118,9 @@ func HandleMessage(backend Backend, peer *Peer) error {
 			return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 		}
 		peer.SetShards(convertShardList(req))
-		peer.logger.Warn("HandleMessage: GetShardListMsg", "url", peer.Node().URLv4(), "shards", peer.shards)
+		peer.logger.Debug("HandleMessage: GetShardListMsg", "url", peer.Node().URLv4(), "shards", peer.shards)
 		return p2p.Send(peer.rw, ShardsMsg, newShardListPacket(sstorage.Shards()))
 
-		/*case msg.Code == ShardListMsg:
-		// A batch of trie kvs arrived to one of our previous requests
-		res := new(ShardListPacket)
-		if err := msg.Decode(res); err != nil {
-			return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
-		}
-		peer.SetShards(convertShardList(res))
-		peer.logger.Warn("HandleMessage: ShardListMsg", "url", peer.Node().URLv4(), "shards", peer.shards)
-		return nil*/
 	case msg.Code == GetKVRangeMsg:
 		// Decode trie node retrieval request
 		var req GetKVRangePacket
