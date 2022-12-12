@@ -1177,9 +1177,11 @@ func (s *Syncer) report(force bool) {
 		return
 	}
 	kvsToSync := uint64(0)
+	subTaskRemain := 0
 	for _, task := range s.tasks {
 		for _, subTask := range task.KvSubTasks {
 			kvsToSync = kvsToSync + (subTask.Last - subTask.Next)
+			subTaskRemain++
 		}
 		kvsToSync = kvsToSync + uint64(len(task.HealTask.Indexes))
 	}
@@ -1193,6 +1195,6 @@ func (s *Syncer) report(force bool) {
 		progress = fmt.Sprintf("%.2f%%", float64(synced)*100/float64(kvsToSync+synced))
 		kv       = fmt.Sprintf("%v@%v", log.FormatLogfmtUint64(s.kvSynced), s.kvBytes.TerminalString())
 	)
-	log.Info("State sync in progress", "synced", progress, "state", synced,
-		"kv", kv, "eta", common.PrettyDuration(estTime-elapsed))
+	log.Info("State sync in progress", "synced", progress, "state", synced, "kvsToSync", kvsToSync,
+		"sub task remain", subTaskRemain, "kv", kv, "eta", common.PrettyDuration(estTime-elapsed))
 }
