@@ -1652,7 +1652,7 @@ func (d *Downloader) DeliverSstoragePacket(peer *sstorage.Peer, packet sstorage.
 	case *sstorage.KVsPacket:
 		return d.SstorSyncer.OnKVs(peer, packet.ID, packet.KVs)
 	case *sstorage.KVRangePacket:
-		return d.SstorSyncer.OnKVs(peer, packet.ID, packet.KVs) // todo
+		return d.SstorSyncer.OnKVRange(peer, packet.ID, packet.KVs)
 	default:
 		return fmt.Errorf("unexpected snap packet type: %T", packet)
 	}

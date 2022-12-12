@@ -256,10 +256,10 @@ type Syncer struct {
 	rates    *msgrate.Trackers // Message throughput rates for peers
 
 	// Request tracking during syncing phase
-	kvIdlers     map[string]struct{}        // Peers that aren't serving kv requests
-	kvHealIdlers map[string]struct{}        // Peers that aren't serving kv heal requests
-	kvRangeReqs  map[uint64]*kvRangeRequest // KV requests currently running
-	kvHealReqs   map[uint64]*kvHealRequest  // KV heal requests currently running
+	kvRangeIdlers map[string]struct{}        // Peers that aren't serving kv requests
+	kvHealIdlers  map[string]struct{}        // Peers that aren't serving kv heal requests
+	kvRangeReqs   map[uint64]*kvRangeRequest // KV requests currently running
+	kvHealReqs    map[uint64]*kvHealRequest  // KV heal requests currently running
 
 	kvSynced  uint64             // Number of kvs downloaded
 	kvBytes   common.StorageSize // Number of kv bytes downloaded
@@ -288,10 +288,10 @@ func NewSyncer(db ethdb.KeyValueStore, chain BlockChain, sstorageInfo map[common
 		rates:    msgrate.NewTrackers(log.New("proto", "sstorage")),
 		update:   make(chan struct{}, 1),
 
-		kvIdlers:     make(map[string]struct{}),
-		kvHealIdlers: make(map[string]struct{}),
-		kvRangeReqs:  make(map[uint64]*kvRangeRequest),
-		kvHealReqs:   make(map[uint64]*kvHealRequest),
+		kvRangeIdlers: make(map[string]struct{}),
+		kvHealIdlers:  make(map[string]struct{}),
+		kvRangeReqs:   make(map[uint64]*kvRangeRequest),
+		kvHealReqs:    make(map[uint64]*kvHealRequest),
 	}
 }
 
@@ -310,7 +310,7 @@ func (s *Syncer) Register(peer SyncPeer) error {
 	s.rates.Track(id, msgrate.NewTracker(s.rates.MeanCapacities(), s.rates.MedianRoundTrip()))
 
 	// Mark the peer as idle, even if no sync is running
-	s.kvIdlers[id] = struct{}{}
+	s.kvRangeIdlers[id] = struct{}{}
 	s.kvHealIdlers[id] = struct{}{}
 	s.lock.Unlock()
 
@@ -336,7 +336,7 @@ func (s *Syncer) Unregister(id string) error {
 		delete(task.statelessPeers, id)
 	}
 
-	delete(s.kvIdlers, id)
+	delete(s.kvRangeIdlers, id)
 	delete(s.kvHealIdlers, id)
 	s.lock.Unlock()
 
@@ -588,11 +588,11 @@ func (s *Syncer) assignKVRangeTasks(success chan *kvRangeResponse, fail chan *kv
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
-	if len(s.kvIdlers) == 0 {
+	if len(s.kvRangeIdlers) == 0 {
 		return
 	}
-	idlers := make([]string, 0, len(s.kvIdlers))
-	for id := range s.kvIdlers {
+	idlers := make([]string, 0, len(s.kvRangeIdlers))
+	for id := range s.kvRangeIdlers {
 		idlers = append(idlers, id)
 	}
 
@@ -661,7 +661,7 @@ func (s *Syncer) assignKVRangeTasks(success chan *kvRangeResponse, fail chan *kv
 				s.scheduleRevertKVRangeRequest(req)
 			})
 			s.kvRangeReqs[reqid] = req
-			delete(s.kvIdlers, peer.ID())
+			delete(s.kvRangeIdlers, peer.ID())
 
 			s.pend.Add(1)
 			go func() {
@@ -1092,7 +1092,7 @@ func (s *Syncer) OnKVRange(peer SyncPeer, id uint64, kvs []*core.KV) error {
 	// we'll drop the peer in a bit.
 	s.lock.Lock()
 	if _, ok := s.peers[peer.ID()]; ok {
-		s.kvIdlers[peer.ID()] = struct{}{}
+		s.kvRangeIdlers[peer.ID()] = struct{}{}
 	}
 	select {
 	case s.update <- struct{}{}:
