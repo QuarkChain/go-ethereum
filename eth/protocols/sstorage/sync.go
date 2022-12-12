@@ -17,9 +17,11 @@
 package sstorage
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/ethereum/go-ethereum/core"
+	"github.com/ethereum/go-ethereum/core/rawdb"
 	"math/rand"
 	"sort"
 	"sync"
@@ -127,30 +129,21 @@ type kvHealResponse struct {
 // kvTask represents the sync task for a sstorage shard.
 type kvTask struct {
 	// These fields get serialized to leveldb on shutdown
-	contract   common.Address // contract address
-	shardId    uint64         // shardId
-	kvSubTasks []*kvSubTask
-	healTask   *kvHealTask
+	Contract   common.Address // Contract address
+	ShardId    uint64         // ShardId
+	KvSubTasks []*kvSubTask
+	HealTask   *kvHealTask
 
 	statelessPeers map[string]struct{} // Peers that failed to deliver kv Data
 
 	done bool // Flag whether the task can be removed
 }
 
-func (t *kvTask) AllSubTaskDone() bool {
-	for _, st := range t.kvSubTasks {
-		if st.done == false {
-			return false
-		}
-	}
-	return true
-}
-
 type kvSubTask struct {
 	kvTask *kvTask
 
-	next uint64
-	last uint64
+	Next uint64
+	Last uint64
 
 	req *kvRangeRequest  // Pending request to fill this task
 	res *kvRangeResponse // Validate response filling this task
@@ -161,14 +154,13 @@ type kvSubTask struct {
 // kvHealTask represents the sync task for a sstorage shard.
 type kvHealTask struct {
 	kvTask  *kvTask
-	indexes map[uint64]int64 // indexes kv index to sync time map
+	Indexes map[uint64]int64 // Indexes kv index to sync time map
 
 	// These fields are internals used during runtime
 	req *kvHealRequest  // Pending request to fill this task
 	res *kvHealResponse // Validate response filling this task
 
 	lock sync.RWMutex // Protects fields that can change outside of sync (peers, reqs, root)
-	done bool         // Flag whether the task can be removed
 }
 
 func (t *kvHealTask) getKVIndexesForRequest(batch uint64) []uint64 {
@@ -176,7 +168,7 @@ func (t *kvHealTask) getKVIndexesForRequest(batch uint64) []uint64 {
 	l := uint64(0)
 	t.lock.Lock()
 	defer t.lock.Unlock()
-	for idx, tm := range t.indexes {
+	for idx, tm := range t.Indexes {
 		if time.Now().UnixMilli()-tm > requestTimeoutInMillisecond.Milliseconds() {
 			indexes = append(indexes, idx)
 			l++
@@ -193,8 +185,7 @@ func (t *kvHealTask) getKVIndexesForRequest(batch uint64) []uint64 {
 // sync. Opposed to full and fast sync, there is no way to restart a suspended
 // sstorage sync without prior knowledge of the suspension point.
 type SyncProgress struct {
-	Tasks     []*kvTask     // The suspended kv tasks
-	HealTasks []*kvHealTask // The suspended kv heal tasks
+	Tasks []*kvTask // The suspended kv tasks
 
 	// Status report during syncing phase
 	KVSynced uint64             // Number of kvs downloaded
@@ -208,7 +199,7 @@ type SyncPeer interface {
 	// ID retrieves the peer's unique identifier.
 	ID() string
 
-	// IsShardExist is the peer support this shardId
+	// IsShardExist is the peer support this ShardId
 	IsShardExist(contract common.Address, shardId uint64) bool
 
 	// RequestKVs fetches a batch of kvs with a kv list
@@ -254,7 +245,7 @@ type Syncer struct {
 	chain BlockChain
 	tasks []*kvTask
 
-	sstorageInfo map[common.Address][]uint64 // Map for contract address to support shardIds
+	sstorageInfo map[common.Address][]uint64 // Map for Contract address to support shardIds
 	syncDone     bool                        // Flag to signal that sstorage phase is done
 	update       chan struct{}               // Notification channel for possible sync progression
 
@@ -275,7 +266,7 @@ type Syncer struct {
 	kvSyncing uint64             // Number of kvs downloading
 
 	startTime time.Time // Time instance when sstorage sync started
-	logTime   time.Time // Time instance when status was last reported
+	logTime   time.Time // Time instance when status was Last reported
 
 	pend sync.WaitGroup // Tracks network request goroutines for graceful shutdown
 	lock sync.RWMutex   // Protects fields that can change outside of sync (peers, reqs, root)
@@ -365,16 +356,17 @@ func (s *Syncer) Sync(cancel chan struct{}) error {
 	}
 	// Retrieve the previous sync status from LevelDB and abort if already synced
 	s.once.Do(s.loadSyncStatus)
-	if len(s.tasks) == 0 {
+	if len(s.tasks) == 0 || s.syncDone {
 		log.Debug("Sstorage sync already completed")
 		return nil
 	}
 	defer func() { // Persist any progress, independent of failure
 		s.cleanKVTasks() // todo
+		s.saveSyncStatus()
 	}()
 
 	for addr, ids := range s.sstorageInfo {
-		log.Debug("Starting Sstorage sync cycle", "contract", addr.Hex(), "shards", ids)
+		log.Debug("Starting Sstorage sync cycle", "Contract", addr.Hex(), "shards", ids)
 	}
 
 	// Whether sync completed or not, disregard any future packets
@@ -407,7 +399,7 @@ func (s *Syncer) Sync(cancel chan struct{}) error {
 	for {
 		// Remove all completed tasks and terminate sync if everything's done
 		s.cleanKVTasks()
-		if len(s.tasks) == 0 {
+		if len(s.tasks) == 0 || s.syncDone {
 			return nil
 		}
 		s.assignKVRangeTasks(kvRangeResps, kvRangeReqFails, cancel)
@@ -448,11 +440,25 @@ func (s *Syncer) Sync(cancel chan struct{}) error {
 func (s *Syncer) loadSyncStatus() {
 	// Start a fresh sync for retrieval.
 	s.kvSynced, s.kvBytes = 0, 0
+	var progress SyncProgress
 
-	// todo load state from db
+	if status := rawdb.ReadSstorageSyncStatus(s.db); status != nil {
+		if err := json.Unmarshal(status, &progress); err != nil {
+			log.Error("Failed to decode sstorage sync status", "err", err)
+		} else {
+			for _, task := range progress.Tasks {
+				log.Debug("Scheduled sstorage sync task", "Contract", task.Contract.Hex(),
+					"shard", task.ShardId, "count", len(task.KvSubTasks))
+				task.HealTask.kvTask = task
+				for _, kvSubTask := range task.KvSubTasks {
+					kvSubTask.kvTask = task
+				}
+			}
+			s.kvSynced, s.kvBytes = progress.KVSynced, progress.KVBytes
+		}
+	}
 
 	// create tasks
-
 	for contract, shards := range s.sstorageInfo {
 		sm := sstorage.ContractToShardManager[contract]
 		lastKvIndex, err := s.chain.GetSstorageLastKvIdx(contract)
@@ -461,6 +467,17 @@ func (s *Syncer) loadSyncStatus() {
 			lastKvIndex = 0
 		}
 		for _, sid := range shards {
+			exist := false
+			for _, task := range progress.Tasks {
+				if task.Contract == contract && task.ShardId == sid {
+					s.tasks = append(s.tasks, task)
+					exist = true
+					continue
+				}
+			}
+			if exist {
+				continue
+			}
 			next, limit := sm.KvEntries()*sid, sm.KvEntries()*(sid+1)-1
 			if lastKvIndex > 0 && next > lastKvIndex {
 				continue
@@ -469,16 +486,15 @@ func (s *Syncer) loadSyncStatus() {
 				limit = lastKvIndex
 			}
 			task := kvTask{
-				contract:       contract,
-				shardId:        sid,
+				Contract:       contract,
+				ShardId:        sid,
 				statelessPeers: make(map[string]struct{}),
 				done:           false,
 			}
 
 			healTask := kvHealTask{
 				kvTask:  &task,
-				indexes: make(map[uint64]int64),
-				done:    false,
+				Indexes: make(map[uint64]int64),
 			}
 			subTasks := make([]*kvSubTask, 0)
 
@@ -489,8 +505,8 @@ func (s *Syncer) loadSyncStatus() {
 				}
 				subTask := kvSubTask{
 					kvTask: &task,
-					next:   next,
-					last:   last,
+					Next:   next,
+					Last:   last,
 					done:   false,
 				}
 
@@ -498,10 +514,36 @@ func (s *Syncer) loadSyncStatus() {
 				next = last + 1
 			}
 
-			task.healTask, task.kvSubTasks = &healTask, subTasks
+			task.HealTask, task.KvSubTasks = &healTask, subTasks
 			s.tasks = append(s.tasks, &task)
 		}
 	}
+
+	allDone := true
+	for _, task := range s.tasks {
+		if len(task.KvSubTasks) > 0 || len(task.HealTask.Indexes) > 0 {
+			allDone = false
+			break
+		}
+	}
+	if allDone {
+		s.syncDone = true
+	}
+}
+
+// saveSyncStatus marshals the remaining sync tasks into leveldb.
+func (s *Syncer) saveSyncStatus() {
+	// Store the actual progress markers
+	progress := &SyncProgress{
+		Tasks:    s.tasks,
+		KVSynced: s.kvSynced,
+		KVBytes:  s.kvBytes,
+	}
+	status, err := json.Marshal(progress)
+	if err != nil {
+		panic(err) // This can only fail during implementation
+	}
+	rawdb.WriteSstorageSyncStatus(s.db, status)
 }
 
 // Progress returns the sstorage sync status statistics.
@@ -518,19 +560,22 @@ func (s *Syncer) Progress() (*SyncProgress, uint64) {
 
 // cleanKVTasks removes kv range retrieval tasks that have already been completed.
 func (s *Syncer) cleanKVTasks() {
-	// If the sync was already done before, don't even bother
-	if len(s.tasks) == 0 {
-		return
-	}
 	// Sync wasn't finished previously, check for any task that can be finalized
-	for i := 0; i < len(s.tasks); i++ {
-		if s.tasks[i].AllSubTaskDone() && len(s.tasks[i].healTask.indexes) == 0 {
-			s.tasks = append(s.tasks[:i], s.tasks[i+1:]...)
-			i--
+	allDone := true
+	for _, task := range s.tasks {
+		for i := 0; i < len(task.KvSubTasks); i++ {
+			if task.KvSubTasks[i].done {
+				task.KvSubTasks = append(task.KvSubTasks[:i], task.KvSubTasks[i+1:]...)
+				i--
+			}
+		}
+		if len(task.KvSubTasks) > 0 || len(task.HealTask.Indexes) > 0 {
+			allDone = false
 		}
 	}
+
 	// If everything was just finalized, generate the account trie and start heal
-	if len(s.tasks) == 0 {
+	if allDone {
 		s.lock.Lock()
 		s.syncDone = true
 		s.lock.Unlock()
@@ -555,7 +600,7 @@ func (s *Syncer) assignKVRangeTasks(success chan *kvRangeResponse, fail chan *kv
 
 	// Iterate over all the tasks and try to find a pending one
 	for _, task := range s.tasks {
-		for _, subTask := range task.kvSubTasks {
+		for _, subTask := range task.KvSubTasks {
 			// Skip any tasks already filling
 			if subTask.req != nil || subTask.res != nil {
 				continue
@@ -571,11 +616,11 @@ func (s *Syncer) assignKVRangeTasks(success chan *kvRangeResponse, fail chan *kv
 				if _, ok := task.statelessPeers[id]; ok {
 					continue
 				}
-				if p.IsShardExist(task.contract, task.shardId) {
+				if p.IsShardExist(task.Contract, task.ShardId) {
 					peer = p
 					if i < len(idlers)-1 {
 						idlers = append(idlers[:i], idlers[i+1:]...)
-					} else { // last one
+					} else { // Last one
 						idlers = idlers[:i]
 					}
 					break
@@ -601,10 +646,10 @@ func (s *Syncer) assignKVRangeTasks(success chan *kvRangeResponse, fail chan *kv
 			req := &kvRangeRequest{
 				peer:     peer.ID(),
 				id:       reqid,
-				contract: task.contract,
-				shardId:  task.shardId,
-				origin:   subTask.next,
-				limit:    subTask.last,
+				contract: task.Contract,
+				shardId:  task.ShardId,
+				origin:   subTask.Next,
+				limit:    subTask.Last,
 				time:     time.Now(),
 				deliver:  success,
 				revert:   fail,
@@ -625,7 +670,7 @@ func (s *Syncer) assignKVRangeTasks(success chan *kvRangeResponse, fail chan *kv
 				defer s.pend.Done()
 
 				// Attempt to send the remote request and revert if it fails
-				if err := peer.RequestKVRange(reqid, req.task.kvTask.contract, req.shardId, req.origin, req.limit); err != nil {
+				if err := peer.RequestKVRange(reqid, req.task.kvTask.Contract, req.shardId, req.origin, req.limit); err != nil {
 					log.Debug("Failed to request kvs", "err", err)
 					s.scheduleRevertKVRangeRequest(req)
 				}
@@ -652,7 +697,7 @@ func (s *Syncer) assignKVHealTasks(success chan *kvHealResponse, fail chan *kvHe
 	// Iterate over all the tasks and try to find a pending one
 	for _, task := range s.tasks {
 		// All the kvs are downloading, wait for request time or success
-		batch := maxRequestSize / sstorage.ContractToShardManager[task.contract].MaxKvSize()
+		batch := maxRequestSize / sstorage.ContractToShardManager[task.Contract].MaxKvSize() * 2
 
 		// kvHealTask pending retrieval, try to find an idle peer. If no such peer
 		// exists, we probably assigned tasks for all (or they are stateless).
@@ -660,7 +705,7 @@ func (s *Syncer) assignKVHealTasks(success chan *kvHealResponse, fail chan *kvHe
 		if len(idlers) == 0 {
 			return
 		}
-		indexes := task.healTask.getKVIndexesForRequest(batch)
+		indexes := task.HealTask.getKVIndexesForRequest(batch)
 		if len(indexes) == 0 {
 			continue
 		}
@@ -673,19 +718,19 @@ func (s *Syncer) assignKVHealTasks(success chan *kvHealResponse, fail chan *kvHe
 				continue
 			}
 			p.LogPeerInfo()
-			if p.IsShardExist(task.contract, task.shardId) {
+			if p.IsShardExist(task.Contract, task.ShardId) {
 				peer = p
 				if i < len(idlers)-1 {
 					idlers = append(idlers[:i], idlers[i+1:]...)
-				} else { // last one
+				} else { // Last one
 					idlers = idlers[:i]
 				}
 				break
 			}
 		}
 		if peer == nil {
-			log.Info("peer for request no found", "contract", task.contract.Hex(), "shard id",
-				task.shardId, "index len", len(task.healTask.indexes), "peers", len(s.peers), "idlers", len(idlers))
+			log.Info("peer for request no found", "Contract", task.Contract.Hex(), "shard id",
+				task.ShardId, "index len", len(task.HealTask.Indexes), "peers", len(s.peers), "idlers", len(idlers))
 			continue
 		}
 
@@ -705,15 +750,15 @@ func (s *Syncer) assignKVHealTasks(success chan *kvHealResponse, fail chan *kvHe
 		req := &kvHealRequest{
 			peer:     peer.ID(),
 			id:       reqid,
-			contract: task.contract,
-			shardId:  task.shardId,
+			contract: task.Contract,
+			shardId:  task.ShardId,
 			indexes:  indexes,
 			time:     time.Now(),
 			deliver:  success,
 			revert:   fail,
 			cancel:   cancel,
 			stale:    make(chan struct{}),
-			task:     task.healTask,
+			task:     task.HealTask,
 		}
 		req.timeout = time.AfterFunc(s.rates.TargetTimeout(), func() {
 			peer.Log().Debug("KV request timed out", "reqid", reqid)
@@ -728,17 +773,17 @@ func (s *Syncer) assignKVHealTasks(success chan *kvHealResponse, fail chan *kvHe
 			defer s.pend.Done()
 
 			// Attempt to send the remote request and revert if it fails
-			if err := peer.RequestKVs(reqid, req.task.kvTask.contract, req.shardId, req.indexes); err != nil {
+			if err := peer.RequestKVs(reqid, req.task.kvTask.Contract, req.shardId, req.indexes); err != nil {
 				log.Debug("Failed to request kvs", "err", err)
 				s.scheduleRevertKVHealRequest(req)
 			}
 		}()
 
-		task.healTask.req = req
+		task.HealTask.req = req
 		req.task.lock.Lock()
 		defer req.task.lock.Unlock()
 		for _, idx := range indexes {
-			req.task.indexes[idx] = time.Now().UnixMilli()
+			req.task.Indexes[idx] = time.Now().UnixMilli()
 		}
 	}
 }
@@ -849,7 +894,7 @@ func (s *Syncer) revertKVHealRequest(req *kvHealRequest) {
 	// retrievals as not-pending, ready for resheduling
 	req.timeout.Stop()
 	for _, index := range req.indexes {
-		req.task.indexes[index] = 0
+		req.task.Indexes[index] = 0
 	}
 }
 
@@ -860,8 +905,8 @@ func (s *Syncer) processKVRangeResponse(res *kvRangeResponse) {
 		synced      uint64
 		syncedBytes uint64
 	)
-	if res.task.kvTask.contract != res.contract {
-		log.Error("processKVRangeResponse fail: contract mismatch", "task", res.task.kvTask.contract.Hex(), "res", res.contract.Hex())
+	if res.task.kvTask.Contract != res.contract {
+		log.Error("processKVRangeResponse fail: Contract mismatch", "task", res.task.kvTask.Contract.Hex(), "res", res.contract.Hex())
 		return
 	}
 
@@ -886,17 +931,17 @@ func (s *Syncer) processKVRangeResponse(res *kvRangeResponse) {
 		return inserted[i] < inserted[j]
 	})
 	max := inserted[len(inserted)-1]
-	for i, n := 0, res.task.next; n <= max; n++ {
+	for i, n := 0, res.task.Next; n <= max; n++ {
 		if inserted[i] == n {
 			i++
 		} else if inserted[i] > n {
-			res.task.kvTask.healTask.indexes[n] = 0
+			res.task.kvTask.HealTask.Indexes[n] = 0
 		}
 	}
-	if max == res.task.last {
+	if max == res.task.Last {
 		res.task.done = true
 	} else {
-		res.task.next = max
+		res.task.Next = max
 	}
 }
 
@@ -907,8 +952,8 @@ func (s *Syncer) processKVHealResponse(res *kvHealResponse) {
 		synced      uint64
 		syncedBytes uint64
 	)
-	if res.task.kvTask.contract != res.contract {
-		log.Error("processKVHealResponse fail: contract mismatch", "task", res.task.kvTask.contract.Hex(), "res", res.contract.Hex())
+	if res.task.kvTask.Contract != res.contract {
+		log.Error("processKVHealResponse fail: Contract mismatch", "task", res.task.kvTask.Contract.Hex(), "res", res.contract.Hex())
 		return
 	}
 
@@ -932,16 +977,16 @@ func (s *Syncer) processKVHealResponse(res *kvHealResponse) {
 	defer res.task.lock.Unlock()
 	for _, idx := range inserted {
 		if _, ok := res.kvs[idx]; ok {
-			delete(res.task.indexes, idx)
+			delete(res.task.Indexes, idx)
 		} else {
-			res.task.indexes[idx] = 0
+			res.task.Indexes[idx] = 0
 		}
 	}
 
-	log.Debug("remain index for sync", "shardId", res.task.kvTask.shardId, "len", len(res.task.indexes))
+	log.Debug("remain index for sync", "ShardId", res.task.kvTask.ShardId, "len", len(res.task.Indexes))
 }
 
-// OnKVs is a callback method to invoke when a batch of contract
+// OnKVs is a callback method to invoke when a batch of Contract
 // bytes codes are received from a remote peer.
 func (s *Syncer) OnKVs(peer SyncPeer, id uint64, kvs []*core.KV) error {
 	var size common.StorageSize
@@ -1035,7 +1080,7 @@ func (s *Syncer) OnKVs(peer SyncPeer, id uint64, kvs []*core.KV) error {
 	return nil
 }
 
-// OnKVRange is a callback method to invoke when a batch of contract
+// OnKVRange is a callback method to invoke when a batch of Contract
 // bytes codes are received from a remote peer.
 func (s *Syncer) OnKVRange(peer SyncPeer, id uint64, kvs []*core.KV) error {
 	var size common.StorageSize
@@ -1138,10 +1183,10 @@ func (s *Syncer) report(force bool) {
 	}
 	kvsToSync := uint64(0)
 	for _, task := range s.tasks {
-		for _, subTask := range task.kvSubTasks {
-			kvsToSync = kvsToSync + (subTask.last - subTask.next)
+		for _, subTask := range task.KvSubTasks {
+			kvsToSync = kvsToSync + (subTask.Last - subTask.Next)
 		}
-
+		kvsToSync = kvsToSync + uint64(len(task.HealTask.Indexes))
 	}
 	s.logTime = time.Now()
 

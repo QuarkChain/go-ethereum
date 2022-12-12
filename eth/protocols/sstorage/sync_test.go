@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"github.com/ethereum/go-ethereum/core"
 	"math/rand"
 	"os"
 	"sync"
@@ -28,6 +27,7 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -182,7 +182,7 @@ func (c *blockChain) ReadMaskedKVsByIndexRange(contract common.Address, origin u
 	return res, nil
 }
 
-func (c *blockChain) GetSstorageLastKvIdx() (uint64, error) {
+func (c *blockChain) GetSstorageLastKvIdx(contract common.Address) (uint64, error) {
 	return c.lastKvIdx, nil
 }
 
@@ -519,21 +519,132 @@ func verifyKVs(stateDB *state.StateDB, data map[common.Address]map[uint64][]byte
 	}
 }
 
-func destoryData(data map[common.Address]map[uint64][]byte, excludeList map[uint64]struct{}, start, end, count uint64) map[uint64]struct{} {
-	// destroy data
-	list := make(map[uint64]struct{})
-	fdata := []byte("fake data")
+func getRandomU64InRange(excludeList map[uint64]struct{}, start, end, count uint64) []uint64 {
 	i := uint64(0)
+	list := make([]uint64, 0)
 	for i < count {
 		idx := rand.Uint64()%(end-start) + start
 		if _, ok := excludeList[idx]; ok {
 			continue
 		}
-		list[idx] = struct{}{}
-		data[contract][idx] = fdata
+		excludeList[idx] = struct{}{}
+		list = append(list, idx)
 		i++
 	}
 	return list
+}
+
+func destoryData(data map[common.Address]map[uint64][]byte, excludeList map[uint64]struct{}, start, end, count uint64) map[uint64]struct{} {
+	// destroy data
+	list := make(map[uint64]struct{})
+	fdata := []byte("fake data")
+	idxes := getRandomU64InRange(excludeList, start, end, count)
+	for _, idx := range idxes {
+		data[contract][idx] = fdata
+		list[idx] = struct{}{}
+	}
+	return list
+}
+
+func createKvTask(contract common.Address, kvEntries uint64, sid uint64, lastKvIndex uint64, count uint64) *kvTask {
+	next, limit := kvEntries*sid, kvEntries*(sid+1)-1
+	if next > lastKvIndex {
+		return nil
+	}
+	if lastKvIndex > 0 && limit > lastKvIndex {
+		limit = lastKvIndex
+	}
+	task := kvTask{
+		Contract:       contract,
+		ShardId:        sid,
+		statelessPeers: make(map[string]struct{}),
+		done:           false,
+	}
+
+	healTask := kvHealTask{
+		kvTask:  &task,
+		Indexes: make(map[uint64]int64),
+	}
+	list := getRandomU64InRange(make(map[uint64]struct{}), next, limit, count)
+	for _, idx := range list {
+		healTask.Indexes[idx] = 0
+	}
+	subTasks := make([]*kvSubTask, 0)
+
+	for next < limit {
+		last := next + maxTaskSize
+		if last > limit {
+			last = limit
+		}
+		subTask := kvSubTask{
+			kvTask: &task,
+			Next:   next,
+			Last:   last,
+			done:   false,
+		}
+
+		subTasks = append(subTasks, &subTask)
+		next = last + 1
+	}
+
+	task.HealTask, task.KvSubTasks = &healTask, subTasks
+	return &task
+}
+
+func compareTasks(tasks1, tasks2 []*kvTask) error {
+	if err := checkTasksWithBaskTasks(tasks1, tasks2); err != nil {
+		return err
+	}
+	if err := checkTasksWithBaskTasks(tasks2, tasks1); err != nil {
+		return err
+	}
+	return nil
+}
+
+func checkTasksWithBaskTasks(baseTasks, tasks []*kvTask) error {
+	for _, task1 := range baseTasks {
+		var task2 *kvTask = nil
+		for _, stask := range tasks {
+			if task1.Contract == stask.Contract && task1.ShardId == stask.ShardId {
+				task2 = stask
+				break
+			}
+		}
+		if task2 == nil {
+			return fmt.Errorf("compare tasks failed. error: missing task; contract %s & shardId %d",
+				task1.Contract.Hex(), task1.ShardId)
+		}
+		if len(task1.KvSubTasks) != len(task2.KvSubTasks) {
+			return fmt.Errorf("compare tasks failed: error: subtask len mismatch; contract %s & shardId %d, len 1 %d, len 2 %d",
+				task1.Contract.Hex(), task1.ShardId, len(task1.KvSubTasks), len(task2.KvSubTasks))
+		}
+		if len(task1.HealTask.Indexes) != len(task2.HealTask.Indexes) {
+			return fmt.Errorf("compare tasks failed: error: index len in heal task mismatch; contract %s & shardId %d, len 1 %d, len 2 %d",
+				task1.Contract.Hex(), task1.ShardId, len(task1.HealTask.Indexes), len(task2.HealTask.Indexes))
+		}
+
+		for _, subTask1 := range task1.KvSubTasks {
+			exist := false
+			for _, subTask2 := range task2.KvSubTasks {
+				if subTask1.Next == subTask2.Next && subTask1.Last == subTask2.Last {
+					exist = true
+					break
+				}
+			}
+			if !exist {
+				return fmt.Errorf("compare tasks failed: error: missing subtask; contract %s & shardId %d, Next %d, Last %d",
+					task1.Contract.Hex(), task1.ShardId, subTask1.Next, subTask1.Last)
+			}
+		}
+
+		for idx, _ := range task1.HealTask.Indexes {
+			if _, ok := task2.HealTask.Indexes[idx]; !ok {
+				return fmt.Errorf("compare tasks failed: error: index missing; contract %s & shardId %d, index %d",
+					task1.Contract.Hex(), task1.ShardId, idx)
+			}
+		}
+	}
+	return nil
 }
 
 // test cases:
@@ -1014,4 +1125,38 @@ func TestAddPeerDuringSyncing(t *testing.T) {
 	}
 	close(done)
 	verifyKVs(stateDB, expectedData, make(map[uint64]struct{}), t)
+}
+
+func TestSaveAndLoadSyncStatus(t *testing.T) {
+	var (
+		stateDB, _  = state.New(common.Hash{}, state.NewDatabase(rawdb.NewMemoryDatabase()), nil)
+		entries     = kvEntries * 10
+		lastKvIndex = entries*3 - kvEntries - 9
+	)
+	shards, files := createSstorage(contract, []uint64{0, 1, 2}, sstorage.CHUNK_SIZE, kvEntries, 1)
+	if shards == nil {
+		t.Fatalf("createSstorage failed")
+	}
+
+	defer func(files []string) {
+		for _, file := range files {
+			os.Remove(file)
+		}
+	}(files)
+
+	syncer := setupSyncer(shards, stateDB, kvEntries)
+	task0 := createKvTask(contract, entries, 0, lastKvIndex, 20)
+	task0.KvSubTasks = make([]*kvSubTask, 0)
+	task1 := createKvTask(contract, entries, 1, lastKvIndex, 4)
+	task2 := createKvTask(contract, entries, 2, lastKvIndex, 0)
+
+	tasks := []*kvTask{task0, task1, task2}
+	syncer.tasks = tasks
+	syncer.saveSyncStatus()
+
+	syncer.tasks = make([]*kvTask, 0)
+	syncer.loadSyncStatus()
+	if err := compareTasks(tasks, syncer.tasks); err != nil {
+		t.Fatalf("compare kv task fail. err: %s", err.Error())
+	}
 }

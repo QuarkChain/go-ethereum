@@ -63,6 +63,9 @@ var (
 	// snapshotSyncStatusKey tracks the snapshot sync status across restarts.
 	snapshotSyncStatusKey = []byte("SnapshotSyncStatus")
 
+	// sstorageSyncStatusKey tracks the sstorage sync status across restarts.
+	sstorageSyncStatusKey = []byte("SstorageSyncStatus")
+
 	// txIndexTailKey tracks the oldest block whose transactions have been indexed.
 	txIndexTailKey = []byte("TransactionIndexTail")
 
