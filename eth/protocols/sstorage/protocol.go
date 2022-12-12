@@ -19,6 +19,7 @@ package sstorage
 import (
 	"errors"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core"
 )
 
 // Constants to match up protocol versions and messages
@@ -36,16 +37,18 @@ var ProtocolVersions = []uint{SSTORAGE1}
 
 // protocolLengths are the number of implemented message corresponding to
 // different protocol versions.
-var protocolLengths = map[uint]uint64{SSTORAGE1: 4}
+var protocolLengths = map[uint]uint64{SSTORAGE1: 8}
 
 // maxMessageSize is the maximum cap on the size of a protocol message.
-const maxMessageSize = 10 * 1024 * 1024
+const maxMessageSize = 2 * 1024 * 1024
 
 const (
-	GetShardListMsg = 0x00
-	ShardListMsg    = 0x01
-	GetKVsMsg       = 0x02
-	KVsMsg          = 0x03
+	GetShardsMsg  = 0x00
+	ShardsMsg     = 0x01
+	GetKVRangeMsg = 0x02
+	KVRangeMsg    = 0x03
+	GetKVsMsg     = 0x04
+	KVsMsg        = 0x05
 )
 
 var (
@@ -74,18 +77,25 @@ type KVsPacket struct {
 	ID       uint64         // ID of the request this is a response for
 	Contract common.Address // Contract of the sharded storage
 	ShardId  uint64         // ShardId
-	KVs      []*KV          // Merkle proofs for the *last* slot range, if it's incomplete
+	KVs      []*core.KV     // List of the returning KVs data
 }
 
-type KV struct {
-	Idx  uint64
-	Data []byte
+// GetKVRangePacket represents a KVs query.
+type GetKVRangePacket struct {
+	ID       uint64         // Request ID to match up responses with
+	Contract common.Address // Contract of the sharded storage
+	ShardId  uint64         // ShardId
+	Origin   uint64         // Index of the first kv to retrieve
+	Limit    uint64         // Index of the last kv to retrieve
+	Bytes    uint64         // Soft limit at which to stop returning data
 }
 
-type VerifiedKV struct {
-	Idx      uint64
-	Data     []byte
-	MetaHash common.Hash
+// KVRangePacket represents a KVs query response.
+type KVRangePacket struct {
+	ID       uint64         // ID of the request this is a response for
+	Contract common.Address // Contract of the sharded storage
+	ShardId  uint64         // ShardId
+	KVs      []*core.KV     // List of the returning KVs data
 }
 
 type ShardListPacket struct {
@@ -124,3 +134,9 @@ func (*GetKVsPacket) Kind() byte   { return GetKVsMsg }
 
 func (*KVsPacket) Name() string { return "KVsMsg" }
 func (*KVsPacket) Kind() byte   { return KVsMsg }
+
+func (*GetKVRangePacket) Name() string { return "GetKVRangeMsg" }
+func (*GetKVRangePacket) Kind() byte   { return GetKVRangeMsg }
+
+func (*KVRangePacket) Name() string { return "KVRangeMsg" }
+func (*KVRangePacket) Kind() byte   { return KVRangeMsg }
