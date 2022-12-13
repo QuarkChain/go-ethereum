@@ -191,7 +191,7 @@ func ServiceGetKVsQuery(chain *core.BlockChain, req *GetKVsPacket) ([]*core.KV, 
 // It is exposed to allow external packages to test protocol behavior.
 func ServiceGetKVRangeQuery(chain *core.BlockChain, req *GetKVRangePacket) ([]*core.KV, error) {
 	kvList := make([]uint64, 0)
-	for i := req.Origin; i < req.Limit; i++ {
+	for i := req.Origin; i <= req.Limit; i++ {
 		kvList = append(kvList, i)
 	}
 	return chain.ReadMaskedKVsByIndexList(req.Contract, kvList)

@@ -547,8 +547,8 @@ func destoryData(data map[common.Address]map[uint64][]byte, excludeList map[uint
 }
 
 func createKvTask(contract common.Address, kvEntries uint64, sid uint64, lastKvIndex uint64, count uint64) *kvTask {
-	next, limit := kvEntries*sid, kvEntries*(sid+1)-1
-	if next > lastKvIndex {
+	first, limit := kvEntries*sid, kvEntries*(sid+1)-1
+	if first > lastKvIndex {
 		return nil
 	}
 	if lastKvIndex > 0 && limit > lastKvIndex {
@@ -565,26 +565,32 @@ func createKvTask(contract common.Address, kvEntries uint64, sid uint64, lastKvI
 		kvTask:  &task,
 		Indexes: make(map[uint64]int64),
 	}
-	list := getRandomU64InRange(make(map[uint64]struct{}), next, limit, count)
+	list := getRandomU64InRange(make(map[uint64]struct{}), first, limit, count)
 	for _, idx := range list {
 		healTask.Indexes[idx] = 0
 	}
 	subTasks := make([]*kvSubTask, 0)
 
-	for next < limit {
-		last := next + maxTaskSize
+	maxTaskSize := (limit - first + maxConcurrency) / maxConcurrency
+	if maxTaskSize < minSubTaskSize {
+		maxTaskSize = minSubTaskSize
+	}
+
+	for first < limit {
+		last := first + maxTaskSize
 		if last > limit {
 			last = limit
 		}
 		subTask := kvSubTask{
 			kvTask: &task,
-			Next:   next,
+			next:   first,
+			First:  first,
 			Last:   last,
 			done:   false,
 		}
 
 		subTasks = append(subTasks, &subTask)
-		next = last + 1
+		first = last + 1
 	}
 
 	task.HealTask, task.KvSubTasks = &healTask, subTasks
@@ -626,14 +632,14 @@ func checkTasksWithBaskTasks(baseTasks, tasks []*kvTask) error {
 		for _, subTask1 := range task1.KvSubTasks {
 			exist := false
 			for _, subTask2 := range task2.KvSubTasks {
-				if subTask1.Next == subTask2.Next && subTask1.Last == subTask2.Last {
+				if subTask1.next == subTask2.next && subTask1.Last == subTask2.Last {
 					exist = true
 					break
 				}
 			}
 			if !exist {
 				return fmt.Errorf("compare tasks failed: error: missing subtask; contract %s & shardId %d, Next %d, Last %d",
-					task1.Contract.Hex(), task1.ShardId, subTask1.Next, subTask1.Last)
+					task1.Contract.Hex(), task1.ShardId, subTask1.next, subTask1.Last)
 			}
 		}
 

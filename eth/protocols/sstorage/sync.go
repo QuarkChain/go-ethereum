@@ -42,7 +42,9 @@ const (
 	// This number is used as the high cap for kv range requests.
 	maxRequestSize = uint64(512 * 1024)
 
-	maxTaskSize = 512
+	maxConcurrency = 16
+
+	minSubTaskSize = 512
 )
 
 // ErrCancelled is returned from sstorage syncing if the operation was prematurely
@@ -142,8 +144,9 @@ type kvTask struct {
 type kvSubTask struct {
 	kvTask *kvTask
 
-	Next uint64
-	Last uint64
+	next  uint64
+	First uint64
+	Last  uint64
 
 	req *kvRangeRequest  // Pending request to fill this task
 	res *kvRangeResponse // Validate response filling this task
@@ -161,6 +164,19 @@ type kvHealTask struct {
 	res *kvHealResponse // Validate response filling this task
 
 	lock sync.RWMutex // Protects fields that can change outside of sync (peers, reqs, root)
+}
+
+func (h *kvHealTask) hasIndexInRange(first, last uint64) (bool, uint64) {
+	min, exist := last, false
+	for idx, _ := range h.Indexes {
+		if idx <= last && idx >= first {
+			exist = true
+			if min > idx {
+				min = idx
+			}
+		}
+	}
+	return exist, min
 }
 
 func (t *kvHealTask) getKVIndexesForRequest(batch uint64) []uint64 {
@@ -354,7 +370,7 @@ func (s *Syncer) Sync(cancel chan struct{}) error {
 	}
 	// Retrieve the previous sync status from LevelDB and abort if already synced
 	s.once.Do(s.loadSyncStatus)
-	if len(s.tasks) == 0 || s.syncDone {
+	if s.syncDone {
 		log.Warn("Sstorage sync already completed")
 		return nil
 	}
@@ -397,7 +413,7 @@ func (s *Syncer) Sync(cancel chan struct{}) error {
 	for {
 		// Remove all completed tasks and terminate sync if everything's done
 		s.cleanKVTasks()
-		if len(s.tasks) == 0 || s.syncDone {
+		if s.syncDone {
 			return nil
 		}
 		s.assignKVRangeTasks(kvRangeResps, kvRangeReqFails, cancel)
@@ -450,6 +466,7 @@ func (s *Syncer) loadSyncStatus() {
 				task.HealTask.kvTask = task
 				for _, kvSubTask := range task.KvSubTasks {
 					kvSubTask.kvTask = task
+					kvSubTask.next = kvSubTask.First
 				}
 			}
 			s.kvSynced, s.kvBytes = progress.KVSynced, progress.KVBytes
@@ -476,8 +493,8 @@ func (s *Syncer) loadSyncStatus() {
 			if exist {
 				continue
 			}
-			next, limit := sm.KvEntries()*sid, sm.KvEntries()*(sid+1)-1
-			if lastKvIndex > 0 && next > lastKvIndex {
+			first, limit := sm.KvEntries()*sid, sm.KvEntries()*(sid+1)-1
+			if lastKvIndex > 0 && first > lastKvIndex {
 				continue
 			}
 			if lastKvIndex > 0 && limit > lastKvIndex {
@@ -495,21 +512,28 @@ func (s *Syncer) loadSyncStatus() {
 				Indexes: make(map[uint64]int64),
 			}
 			subTasks := make([]*kvSubTask, 0)
+			// split task for a shard to 16 subtasks and if one batch is too small
+			// set to minSubTaskSize
+			maxTaskSize := (limit - first + maxConcurrency) / maxConcurrency
+			if maxTaskSize < minSubTaskSize {
+				maxTaskSize = minSubTaskSize
+			}
 
-			for next < limit {
-				last := next + maxTaskSize
+			for first < limit {
+				last := first + maxTaskSize
 				if last > limit {
 					last = limit
 				}
 				subTask := kvSubTask{
 					kvTask: &task,
-					Next:   next,
+					next:   first,
+					First:  first,
 					Last:   last,
 					done:   false,
 				}
 
 				subTasks = append(subTasks, &subTask)
-				next = last + 1
+				first = last + 1
 			}
 
 			task.HealTask, task.KvSubTasks = &healTask, subTasks
@@ -562,12 +586,16 @@ func (s *Syncer) cleanKVTasks() {
 	allDone := true
 	for _, task := range s.tasks {
 		for i := 0; i < len(task.KvSubTasks); i++ {
-			if task.KvSubTasks[i].done {
+			exist, min := task.HealTask.hasIndexInRange(task.KvSubTasks[i].First, task.KvSubTasks[i].Last)
+			if exist {
+				task.KvSubTasks[i].First = min
+			}
+			if task.KvSubTasks[i].done && !exist {
 				task.KvSubTasks = append(task.KvSubTasks[:i], task.KvSubTasks[i+1:]...)
 				i--
 			}
 		}
-		if len(task.KvSubTasks) > 0 || len(task.HealTask.Indexes) > 0 {
+		if len(task.KvSubTasks) > 0 {
 			allDone = false
 		}
 	}
@@ -599,6 +627,9 @@ func (s *Syncer) assignKVRangeTasks(success chan *kvRangeResponse, fail chan *kv
 	// Iterate over all the tasks and try to find a pending one
 	for _, task := range s.tasks {
 		for _, subTask := range task.KvSubTasks {
+			if subTask.done {
+				continue
+			}
 			// Skip any tasks already filling
 			if subTask.req != nil || subTask.res != nil {
 				continue
@@ -646,7 +677,7 @@ func (s *Syncer) assignKVRangeTasks(success chan *kvRangeResponse, fail chan *kv
 				id:       reqid,
 				contract: task.Contract,
 				shardId:  task.ShardId,
-				origin:   subTask.Next,
+				origin:   subTask.next,
 				limit:    subTask.Last,
 				time:     time.Now(),
 				deliver:  success,
@@ -899,7 +930,12 @@ func (s *Syncer) processKVRangeResponse(res *kvRangeResponse) {
 	var (
 		synced      uint64
 		syncedBytes uint64
+		req         = res.task.req
 	)
+	res.task.req = nil
+	res.task.res = res
+	defer func() { res.task.res = nil }()
+
 	if res.task.kvTask.Contract != res.contract {
 		log.Error("processKVRangeResponse fail: Contract mismatch", "task", res.task.kvTask.Contract.Hex(), "res", res.contract.Hex())
 		return
@@ -916,7 +952,6 @@ func (s *Syncer) processKVRangeResponse(res *kvRangeResponse) {
 	log.Info("Persisted set of kvs", "count", synced, "bytes", syncedBytes)
 
 	// set peer to stateless peer if fail too much
-	req := res.task.req
 	if len(inserted) == 0 {
 		res.task.kvTask.statelessPeers[req.peer] = struct{}{}
 		return
@@ -926,7 +961,7 @@ func (s *Syncer) processKVRangeResponse(res *kvRangeResponse) {
 		return inserted[i] < inserted[j]
 	})
 	max := inserted[len(inserted)-1]
-	for i, n := 0, res.task.Next; n <= max; n++ {
+	for i, n := 0, res.task.next; n <= max; n++ {
 		if inserted[i] == n {
 			i++
 		} else if inserted[i] > n {
@@ -936,7 +971,7 @@ func (s *Syncer) processKVRangeResponse(res *kvRangeResponse) {
 	if max == res.task.Last {
 		res.task.done = true
 	} else {
-		res.task.Next = max
+		res.task.next = max + 1
 	}
 }
 
@@ -946,7 +981,12 @@ func (s *Syncer) processKVHealResponse(res *kvHealResponse) {
 	var (
 		synced      uint64
 		syncedBytes uint64
+		req         = res.task.req
 	)
+	/*res.task.req = nil
+	res.task.res = res*/
+	defer func() { res.task.res = nil }()
+
 	if res.task.kvTask.Contract != res.contract {
 		log.Error("processKVHealResponse fail: Contract mismatch", "task", res.task.kvTask.Contract.Hex(), "res", res.contract.Hex())
 		return
@@ -959,7 +999,6 @@ func (s *Syncer) processKVHealResponse(res *kvHealResponse) {
 	}
 
 	// set peer to stateless peer if fail too much
-	req := res.task.req
 	if len(inserted) == 0 {
 		res.task.kvTask.statelessPeers[req.peer] = struct{}{}
 	}
@@ -1180,7 +1219,7 @@ func (s *Syncer) report(force bool) {
 	subTaskRemain := 0
 	for _, task := range s.tasks {
 		for _, subTask := range task.KvSubTasks {
-			kvsToSync = kvsToSync + (subTask.Last - subTask.Next)
+			kvsToSync = kvsToSync + (subTask.Last - subTask.next)
 			subTaskRemain++
 		}
 		kvsToSync = kvsToSync + uint64(len(task.HealTask.Indexes))
