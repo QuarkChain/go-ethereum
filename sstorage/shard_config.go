@@ -125,13 +125,3 @@ func Shards() map[common.Address][]uint64 {
 
 	return shardList
 }
-
-func GetDataShard(shardIdx uint64) *DataShard {
-	for _, sm := range ContractToShardManager {
-		if ds, ok := sm.shardMap[shardIdx]; ok {
-			return ds
-		}
-	}
-
-	return nil
-}
