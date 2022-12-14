@@ -55,7 +55,7 @@ func (p *Peer) readStatus() error {
 		return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 	}
 	p.SetShards(convertShardList(res))
-	p.logger.Debug("Handshake", "url", p.Node().URLv4(), "shards", p.shards)
+	p.logger.Warn("Handshake", "url", p.Node().URLv4(), "shards", p.shards)
 
 	return nil
 }

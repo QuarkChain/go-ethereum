@@ -118,7 +118,7 @@ func HandleMessage(backend Backend, peer *Peer) error {
 			return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 		}
 		peer.SetShards(convertShardList(req))
-		peer.logger.Debug("HandleMessage: GetShardListMsg", "url", peer.Node().URLv4(), "shards", peer.shards)
+		peer.logger.Warn("HandleMessage: GetShardListMsg", "url", peer.Node().URLv4(), "shards", peer.shards)
 		return p2p.Send(peer.rw, ShardsMsg, newShardListPacket(sstorage.Shards()))
 
 	case msg.Code == GetKVRangeMsg:
@@ -132,6 +132,8 @@ func HandleMessage(backend Backend, peer *Peer) error {
 		if err != nil {
 			return err
 		}
+		peer.logger.Warn("HandleMessage: GetKVRangeMsg", "get kvs", len(kvs), "shard id", req.ShardId,
+			"origin", req.Origin, "limit", req.Limit)
 		// Send back anything accumulated (or empty in case of errors)
 		return p2p.Send(peer.rw, KVRangeMsg, &KVRangePacket{
 			ID:       req.ID,
@@ -146,6 +148,7 @@ func HandleMessage(backend Backend, peer *Peer) error {
 		if err := msg.Decode(res); err != nil {
 			return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 		}
+		peer.logger.Warn("HandleMessage: KVRangeMsg", "get kvs", len(res.KVs), "shard id", res.ShardId)
 		return backend.Handle(peer, res)
 
 	case msg.Code == GetKVsMsg:
@@ -159,6 +162,8 @@ func HandleMessage(backend Backend, peer *Peer) error {
 		if err != nil {
 			return err
 		}
+		peer.logger.Warn("HandleMessage: GetKVsMsg", "get kvs", len(kvs), "shard id", req.ShardId,
+			"req list len", len(req.KVList))
 		// Send back anything accumulated (or empty in case of errors)
 		return p2p.Send(peer.rw, KVsMsg, &KVsPacket{
 			ID:       req.ID,
@@ -173,7 +178,7 @@ func HandleMessage(backend Backend, peer *Peer) error {
 		if err := msg.Decode(res); err != nil {
 			return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 		}
-
+		peer.logger.Warn("HandleMessage: KVRangeMsg", "get kvs", len(res.KVs), "shard id", res.ShardId)
 		return backend.Handle(peer, res)
 	default:
 		return fmt.Errorf("%w: %v", errInvalidMsgCode, msg.Code)
@@ -189,11 +194,7 @@ func ServiceGetKVsQuery(chain *core.BlockChain, req *GetKVsPacket) ([]*core.KV, 
 // ServiceGetKVRangeQuery assembles the response to a kvs query.
 // It is exposed to allow external packages to test protocol behavior.
 func ServiceGetKVRangeQuery(chain *core.BlockChain, req *GetKVRangePacket) ([]*core.KV, error) {
-	kvList := make([]uint64, 0)
-	for i := req.Origin; i <= req.Limit; i++ {
-		kvList = append(kvList, i)
-	}
-	return chain.ReadMaskedKVsByIndexList(req.Contract, kvList)
+	return chain.ReadMaskedKVsByIndexRange(req.Contract, req.Origin, req.Limit, req.Bytes)
 }
 
 // NodeInfo represents a short summary of the `sstorage` sub-protocol metadata
