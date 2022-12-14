@@ -23,6 +23,7 @@ import (
 	"github.com/ethereum/go-ethereum/p2p"
 	"github.com/ethereum/go-ethereum/p2p/enode"
 	"github.com/ethereum/go-ethereum/p2p/enr"
+	"github.com/ethereum/go-ethereum/sstorage"
 )
 
 // Handler is a callback to invoke from an outside runner after the boilerplate
@@ -110,7 +111,7 @@ func HandleMessage(backend Backend, peer *Peer) error {
 	defer msg.Discard()
 	// Handle the message depending on its contents
 	switch {
-	/*	case msg.Code == GetShardsMsg:
+	case msg.Code == GetShardsMsg:
 		// Decode trie node retrieval request
 		req := new(ShardListPacket)
 		if err := msg.Decode(req); err != nil {
@@ -119,7 +120,7 @@ func HandleMessage(backend Backend, peer *Peer) error {
 		peer.SetShards(convertShardList(req))
 		peer.logger.Warn("HandleMessage: GetShardListMsg", "url", peer.Node().URLv4(), "shards", peer.shards)
 		return p2p.Send(peer.rw, ShardsMsg, newShardListPacket(sstorage.Shards()))
-	*/
+
 	case msg.Code == GetKVRangeMsg:
 		// Decode trie node retrieval request
 		var req GetKVRangePacket
