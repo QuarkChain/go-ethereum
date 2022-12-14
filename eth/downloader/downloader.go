@@ -27,6 +27,7 @@ import (
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/state/snapshot"
@@ -206,9 +207,13 @@ type BlockChain interface {
 
 	StateAt(root common.Hash) (*state.StateDB, error)
 
-	LockInsertChain()
+	VerifyAndWriteKV(contract common.Address, data map[uint64][]byte) (uint64, uint64, []uint64, error)
 
-	UnlockInsertChain()
+	ReadMaskedKVsByIndexList(contract common.Address, indexes []uint64) ([]*core.KV, error)
+
+	ReadMaskedKVsByIndexRange(contract common.Address, origin uint64, limit uint64, bytes uint64) ([]*core.KV, error)
+
+	GetSstorageLastKvIdx(contract common.Address) (uint64, error)
 }
 
 // New creates a new downloader to fetch hashes and blocks from remote peers.
@@ -1646,7 +1651,8 @@ func (d *Downloader) DeliverSstoragePacket(peer *sstorage.Peer, packet sstorage.
 	switch packet := packet.(type) {
 	case *sstorage.KVsPacket:
 		return d.SstorSyncer.OnKVs(peer, packet.ID, packet.KVs)
-
+	case *sstorage.KVRangePacket:
+		return d.SstorSyncer.OnKVRange(peer, packet.ID, packet.KVs)
 	default:
 		return fmt.Errorf("unexpected snap packet type: %T", packet)
 	}

@@ -107,10 +107,26 @@ func (p *Peer) RequestKVs(id uint64, contract common.Address, shardId uint64, kv
 	})
 }
 
+// RequestKVs fetches a batch of kvs using a list of kv index
+func (p *Peer) RequestKVRange(id uint64, contract common.Address, shardId uint64, origin uint64, limit uint64) error {
+	p.logger.Trace("Fetching KVs", "reqId", id, "contract", contract,
+		"shardId", shardId, "origin", origin, "limit", limit)
+
+	requestTracker.Track(p.id, p.version, GetKVRangeMsg, KVRangeMsg, id)
+	return p2p.Send(p.rw, GetKVRangeMsg, &GetKVRangePacket{
+		ID:       id,
+		Contract: contract,
+		ShardId:  shardId,
+		Origin:   origin,
+		Limit:    limit,
+		Bytes:    maxMessageSize,
+	})
+}
+
 // RequestShardList fetches shard list support by the peer
 func (p *Peer) RequestShardList(shards map[common.Address][]uint64) error {
 	p.logger.Trace("Fetching Shard list", "shards", shards)
 
 	shardListPacket := newShardListPacket(shards)
-	return p2p.Send(p.rw, GetShardListMsg, shardListPacket)
+	return p2p.Send(p.rw, GetShardsMsg, shardListPacket)
 }
