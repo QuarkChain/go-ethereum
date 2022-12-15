@@ -47,15 +47,14 @@ func (p *Peer) readStatus() error {
 	if err != nil {
 		return err
 	}
-	if msg.Code != ShardsMsg {
+	if msg.Code != GetShardsMsg {
 		return fmt.Errorf("no status message: first msg has code %x (!= %x)", msg.Code, GetShardsMsg)
 	}
 	res := new(ShardListPacket)
 	if err := msg.Decode(res); err != nil {
 		return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 	}
-	p.SetShards(convertShardList(res))
-	p.logger.Debug("Handshake", "url", p.Node().URLv4(), "shards", p.shards)
 
+	p.SetShards(convertShardList(res))
 	return nil
 }
