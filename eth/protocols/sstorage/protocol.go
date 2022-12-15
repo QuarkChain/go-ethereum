@@ -37,18 +37,17 @@ var ProtocolVersions = []uint{SSTORAGE1}
 
 // protocolLengths are the number of implemented message corresponding to
 // different protocol versions.
-var protocolLengths = map[uint]uint64{SSTORAGE1: 8}
+var protocolLengths = map[uint]uint64{SSTORAGE1: 6}
 
 // maxMessageSize is the maximum cap on the size of a protocol message.
 const maxMessageSize = 2 * 1024 * 1024
 
 const (
 	GetShardsMsg  = 0x00
-	ShardsMsg     = 0x01
-	GetKVRangeMsg = 0x02
-	KVRangeMsg    = 0x03
-	GetKVsMsg     = 0x04
-	KVsMsg        = 0x05
+	GetKVRangeMsg = 0x01
+	KVRangeMsg    = 0x02
+	GetKVsMsg     = 0x03
+	KVsMsg        = 0x04
 )
 
 var (

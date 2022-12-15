@@ -229,8 +229,6 @@ type SyncPeer interface {
 
 	// Log retrieves the peer's own contextual logger.
 	Log() log.Logger
-
-	LogPeerInfo()
 }
 
 type BlockChain interface {
@@ -371,7 +369,7 @@ func (s *Syncer) Sync(cancel chan struct{}) error {
 	// Retrieve the previous sync status from LevelDB and abort if already synced
 	s.once.Do(s.loadSyncStatus)
 	if s.syncDone {
-		log.Warn("Sstorage sync already completed")
+		log.Info("Sstorage sync already completed")
 		return nil
 	}
 	defer func() { // Persist any progress, independent of failure
@@ -478,7 +476,7 @@ func (s *Syncer) loadSyncStatus() {
 		sm := sstorage.ContractToShardManager[contract]
 		lastKvIndex, err := s.chain.GetSstorageLastKvIdx(contract)
 		if err != nil {
-			log.Warn("loadSyncStatus failed: get lastKvIdx")
+			log.Info("loadSyncStatus failed: get lastKvIdx")
 			lastKvIndex = 0
 		}
 		for _, sid := range shards {
@@ -494,11 +492,11 @@ func (s *Syncer) loadSyncStatus() {
 				continue
 			}
 			first, limit := sm.KvEntries()*sid, sm.KvEntries()*(sid+1)-1
-			if lastKvIndex > 0 && first > lastKvIndex {
+			if lastKvIndex > 0 && first >= lastKvIndex {
 				continue
 			}
-			if lastKvIndex > 0 && limit > lastKvIndex {
-				limit = lastKvIndex
+			if lastKvIndex > 0 && limit >= lastKvIndex {
+				limit = lastKvIndex - 1
 			}
 			task := kvTask{
 				Contract:       contract,
@@ -605,6 +603,7 @@ func (s *Syncer) cleanKVTasks() {
 		s.lock.Lock()
 		s.syncDone = true
 		s.lock.Unlock()
+		log.Info("Sstorage sync done", "task count", len(s.tasks))
 
 		// Push the final sync report
 		s.report(true)
@@ -687,7 +686,7 @@ func (s *Syncer) assignKVRangeTasks(success chan *kvRangeResponse, fail chan *kv
 				task:     subTask,
 			}
 			req.timeout = time.AfterFunc(s.rates.TargetTimeout(), func() {
-				peer.Log().Warn("KV Range request timed out", "reqid", reqid)
+				peer.Log().Info("KV Range request timed out", "reqid", reqid)
 				s.rates.Update(peer.ID(), KVRangeMsg, 0, 0)
 				s.scheduleRevertKVRangeRequest(req)
 			})
@@ -789,7 +788,7 @@ func (s *Syncer) assignKVHealTasks(success chan *kvHealResponse, fail chan *kvHe
 			task:     task.HealTask,
 		}
 		req.timeout = time.AfterFunc(s.rates.TargetTimeout(), func() {
-			peer.Log().Warn("KV heal request timed out", "reqid", reqid)
+			peer.Log().Info("KV heal request timed out", "reqid", reqid)
 			s.rates.Update(peer.ID(), KVsMsg, 0, 0)
 			s.scheduleRevertKVHealRequest(req)
 		})
@@ -878,7 +877,7 @@ func (s *Syncer) scheduleRevertKVHealRequest(req *kvHealRequest) {
 func (s *Syncer) revertKVRangeRequest(req *kvRangeRequest) {
 	select {
 	case <-req.stale:
-		log.Warn("KV request already reverted", "peer", req.peer, "reqid", req.id)
+		log.Trace("KV request already reverted", "peer", req.peer, "reqid", req.id)
 		return
 	default:
 	}
@@ -905,7 +904,7 @@ func (s *Syncer) revertKVRangeRequest(req *kvRangeRequest) {
 func (s *Syncer) revertKVHealRequest(req *kvHealRequest) {
 	select {
 	case <-req.stale:
-		log.Warn("KV request already reverted", "peer", req.peer, "reqid", req.id)
+		log.Trace("KV request already reverted", "peer", req.peer, "reqid", req.id)
 		return
 	default:
 	}
@@ -1005,7 +1004,7 @@ func (s *Syncer) processKVHealResponse(res *kvHealResponse) {
 
 	s.kvSynced += synced
 	s.kvBytes += common.StorageSize(syncedBytes)
-	log.Info("Persisted set of kvs", "count", synced, "bytes", syncedBytes)
+	log.Trace("Persisted set of kvs", "count", synced, "bytes", syncedBytes)
 
 	res.task.lock.Lock()
 	defer res.task.lock.Unlock()
@@ -1017,7 +1016,7 @@ func (s *Syncer) processKVHealResponse(res *kvHealResponse) {
 		}
 	}
 
-	log.Warn("remain index for heal sync", "ShardId", res.task.kvTask.ShardId, "len", len(res.task.Indexes))
+	log.Info("remain index for heal sync", "ShardId", res.task.kvTask.ShardId, "len", len(res.task.Indexes))
 }
 
 // OnKVs is a callback method to invoke when a batch of Contract
@@ -1081,14 +1080,14 @@ func (s *Syncer) OnKVs(peer SyncPeer, id uint64, kvs []*core.KV) error {
 		}
 	}
 	if len(kvs) > len(kvInRange) {
-		logger.Warn("Drop unexpected kvs", "count", len(kvs)-len(kvInRange))
+		logger.Trace("Drop unexpected kvs", "count", len(kvs)-len(kvInRange))
 	}
 
 	// Response is valid, but check if peer is signalling that it does not have
 	// the requested Data. For kv range queries that means the peer is not
 	// yet synced.
 	if len(kvInRange) == 0 {
-		logger.Warn("Peer rejected kv request")
+		logger.Warn("Peer rejected kv range request")
 		req.task.kvTask.statelessPeers[peer.ID()] = struct{}{}
 		s.lock.Unlock()
 
@@ -1175,7 +1174,7 @@ func (s *Syncer) OnKVRange(peer SyncPeer, id uint64, kvs []*core.KV) error {
 		}
 	}
 	if len(kvs) > len(kvInRange) {
-		logger.Warn("Drop unexpected kvs", "count", len(kvs)-len(kvInRange))
+		logger.Trace("Drop unexpected kvs", "count", len(kvs)-len(kvInRange))
 	}
 
 	// Response is valid, but check if peer is signalling that it does not have
