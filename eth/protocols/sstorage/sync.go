@@ -494,11 +494,11 @@ func (s *Syncer) loadSyncStatus() {
 				continue
 			}
 			first, limit := sm.KvEntries()*sid, sm.KvEntries()*(sid+1)-1
-			if lastKvIndex > 0 && first > lastKvIndex {
+			if lastKvIndex > 0 && first >= lastKvIndex {
 				continue
 			}
-			if lastKvIndex > 0 && limit > lastKvIndex {
-				limit = lastKvIndex
+			if lastKvIndex > 0 && limit >= lastKvIndex {
+				limit = lastKvIndex - 1
 			}
 			task := kvTask{
 				Contract:       contract,
@@ -550,6 +550,7 @@ func (s *Syncer) loadSyncStatus() {
 	}
 	if allDone {
 		s.syncDone = true
+		log.Warn("Sync Done")
 	}
 }
 
