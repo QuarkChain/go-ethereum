@@ -23,7 +23,6 @@ import (
 	"github.com/ethereum/go-ethereum/p2p"
 	"github.com/ethereum/go-ethereum/p2p/enode"
 	"github.com/ethereum/go-ethereum/p2p/enr"
-	"github.com/ethereum/go-ethereum/sstorage"
 )
 
 // Handler is a callback to invoke from an outside runner after the boilerplate
@@ -111,16 +110,6 @@ func HandleMessage(backend Backend, peer *Peer) error {
 	defer msg.Discard()
 	// Handle the message depending on its contents
 	switch {
-	case msg.Code == GetShardsMsg:
-		// Decode trie node retrieval request
-		req := new(ShardListPacket)
-		if err := msg.Decode(req); err != nil {
-			return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
-		}
-		peer.SetShards(convertShardList(req))
-		peer.logger.Debug("HandleMessage: GetShardListMsg", "url", peer.Node().URLv4(), "shards", peer.shards)
-		return p2p.Send(peer.rw, ShardsMsg, newShardListPacket(sstorage.Shards()))
-
 	case msg.Code == GetKVRangeMsg:
 		// Decode trie node retrieval request
 		var req GetKVRangePacket
@@ -146,7 +135,6 @@ func HandleMessage(backend Backend, peer *Peer) error {
 		if err := msg.Decode(res); err != nil {
 			return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 		}
-
 		return backend.Handle(peer, res)
 
 	case msg.Code == GetKVsMsg:
@@ -174,7 +162,6 @@ func HandleMessage(backend Backend, peer *Peer) error {
 		if err := msg.Decode(res); err != nil {
 			return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 		}
-
 		return backend.Handle(peer, res)
 	default:
 		return fmt.Errorf("%w: %v", errInvalidMsgCode, msg.Code)
@@ -190,11 +177,7 @@ func ServiceGetKVsQuery(chain *core.BlockChain, req *GetKVsPacket) ([]*core.KV, 
 // ServiceGetKVRangeQuery assembles the response to a kvs query.
 // It is exposed to allow external packages to test protocol behavior.
 func ServiceGetKVRangeQuery(chain *core.BlockChain, req *GetKVRangePacket) ([]*core.KV, error) {
-	kvList := make([]uint64, 0)
-	for i := req.Origin; i <= req.Limit; i++ {
-		kvList = append(kvList, i)
-	}
-	return chain.ReadMaskedKVsByIndexList(req.Contract, kvList)
+	return chain.ReadMaskedKVsByIndexRange(req.Contract, req.Origin, req.Limit, req.Bytes)
 }
 
 // NodeInfo represents a short summary of the `sstorage` sub-protocol metadata
