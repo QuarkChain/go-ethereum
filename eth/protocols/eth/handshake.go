@@ -39,7 +39,6 @@ func (p *Peer) Handshake(network uint64, td *big.Int, head common.Hash, genesis 
 	errc := make(chan error, 2)
 
 	var status StatusPacket // safe to read after two values have been received from errc
-	p.Log().Warn("handshake start", "ProtocolVersion", p.version)
 	go func() {
 		errc <- p2p.Send(p.rw, StatusMsg, &StatusPacket{
 			ProtocolVersion: uint32(p.version),
@@ -59,7 +58,6 @@ func (p *Peer) Handshake(network uint64, td *big.Int, head common.Hash, genesis 
 		select {
 		case err := <-errc:
 			if err != nil {
-				p.Log().Warn("handshake error", "err", err.Error())
 				return err
 			}
 		case <-timeout.C:
