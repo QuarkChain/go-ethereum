@@ -490,7 +490,6 @@ func (h *handler) runSstorageExtension(peer *sstorage.Peer, handler sstorage.Han
 	h.peerWG.Add(1)
 	defer h.peerWG.Done()
 
-	peer.RequestShardList(sstor.Shards())
 	if err := h.peers.registerSstorageExtension(peer); err != nil {
 		peer.Log().Error("Sstorage extension registration failed", "err", err)
 		return err
