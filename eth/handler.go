@@ -324,14 +324,14 @@ func (h *handler) runEthPeer(peer *eth.Peer, handler eth.Handler) error {
 			}
 		}
 	}
-	if sstorExt != nil {
+	/*	if sstorExt != nil {
 		t := time.Now()
 		if err := sstorExt.Handshake(); err != nil {
 			peer.Log().Warn("Ethereum handshake failed", "err", err.Error())
 			return err
 		}
 		peer.Log().Warn("handshaked", "node", peer.Node().URLv4(), "shards", sstorExt.Shards(), "time", time.Since(t).Milliseconds())
-	}
+	}*/
 	// Ignore maxPeers if this is a trusted peer
 	if !peer.Peer.Info().Network.Trusted {
 		if reject || (h.peers.len() >= h.maxPeers && !h.peers.needThisPeer(sstorExt)) {
@@ -490,6 +490,10 @@ func (h *handler) runSstorageExtension(peer *sstorage.Peer, handler sstorage.Han
 	h.peerWG.Add(1)
 	defer h.peerWG.Done()
 
+	if err := peer.Handshake(); err != nil {
+		peer.Log().Warn("Ethereum handshake failed", "err", err.Error())
+		return err
+	}
 	if err := h.peers.registerSstorageExtension(peer); err != nil {
 		peer.Log().Error("Sstorage extension registration failed", "err", err)
 		return err
