@@ -61,6 +61,7 @@ func (p *Peer) Shards() map[common.Address][]uint64 {
 	return p.shards
 }
 
+// SetShards this should only be set when doing handshake.
 func (p *Peer) SetShards(shards map[common.Address][]uint64) {
 	p.shards = shards
 }

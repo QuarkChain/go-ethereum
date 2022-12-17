@@ -112,6 +112,7 @@ func IsComplete() error {
 	return nil
 }
 
+// Return a copy of the map of all shards hosted by the node. The method is thread-safe.
 func Shards() map[common.Address][]uint64 {
 	shardList := make(map[common.Address][]uint64, 0)
 	for addr, sm := range ContractToShardManager {

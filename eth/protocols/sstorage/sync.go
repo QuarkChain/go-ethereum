@@ -236,12 +236,18 @@ type BlockChain interface {
 
 	CurrentBlock() *types.Block
 
+	// VerifyAndWriteKV verify a list KV data using the metadata saved in the local level DB and write successfully verified
+	// KVs to the sstorage file. And return the inserted KV index list.
 	VerifyAndWriteKV(contract common.Address, data map[uint64][]byte) (uint64, uint64, []uint64, error)
 
+	// ReadMaskedKVsByIndexList Read the masked KVs by a list of KV index.
 	ReadMaskedKVsByIndexList(contract common.Address, indexes []uint64) ([]*core.KV, error)
 
+	// ReadMaskedKVsByIndexRange Read masked KVs sequentially starting from origin until the index exceeds the limit or
+	// the amount of data read is greater than the bytes.
 	ReadMaskedKVsByIndexRange(contract common.Address, origin uint64, limit uint64, bytes uint64) ([]*core.KV, error)
 
+	// GetSstorageLastKvIdx get LastKvIdx from a sstorage contract with latest stateDB.
 	GetSstorageLastKvIdx(contract common.Address) (uint64, error)
 }
 
@@ -610,7 +616,7 @@ func (s *Syncer) cleanKVTasks() {
 	}
 }
 
-// assignKVHealTasks attempts to match idle peers to pending code retrievals.
+// assignKVHealTasks attempts to match idle peers to pending kv range retrievals.
 func (s *Syncer) assignKVRangeTasks(success chan *kvRangeResponse, fail chan *kvRangeRequest, cancel chan struct{}) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
@@ -709,7 +715,7 @@ func (s *Syncer) assignKVRangeTasks(success chan *kvRangeResponse, fail chan *kv
 	}
 }
 
-// assignKVHealTasks attempts to match idle peers to pending code retrievals.
+// assignKVHealTasks attempts to match idle peers to heal kv requests to retrieval missing kv from the kv range request.
 func (s *Syncer) assignKVHealTasks(success chan *kvHealResponse, fail chan *kvHealRequest, cancel chan struct{}) {
 	s.lock.Lock()
 	defer s.lock.Unlock()
