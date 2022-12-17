@@ -1353,14 +1353,6 @@ func (bc *BlockChain) addFutureBlock(block *types.Block) error {
 	return nil
 }
 
-func (bc *BlockChain) LockInsertChain() {
-	bc.chainmu.TryLock()
-}
-
-func (bc *BlockChain) UnlockInsertChain() {
-	bc.chainmu.Unlock()
-}
-
 // InsertChain attempts to insert the given batch of blocks in to the canonical
 // chain or, otherwise, create a fork. If an error is returned it will return
 // the index number of the failing block as well an error describing what went
@@ -2396,6 +2388,7 @@ func getSlotHash(slotIdx uint64, key common.Hash) common.Hash {
 	return hashRes
 }
 
+// GetSstorageMetadata get sstorage metadata for a given kv (specified by contract address and index)
 func GetSstorageMetadata(s *state.StateDB, contract common.Address, index uint64) (common.Hash, *SstorageMetadata, error) {
 	// according to https://github.com/web3q/web3q-contracts/blob/main/contracts/DecentralizedKV.sol,
 	// it need to fetch the skey from idxMap (slot 2) using storage index,
@@ -2460,6 +2453,8 @@ func verifyKV(sm *sstorage.ShardManager, idx uint64, val []byte, meta *SstorageM
 	return nil
 }
 
+// VerifyAndWriteKV verify a list KV data using the metadata saved in the local level DB and write successfully verified
+// KVs to the sstorage file. And return the inserted KV index list.
 func (bc *BlockChain) VerifyAndWriteKV(contract common.Address, data map[uint64][]byte) (uint64, uint64, []uint64, error) {
 	var (
 		synced      uint64
@@ -2523,6 +2518,7 @@ func (bc *BlockChain) VerifyAndWriteKV(contract common.Address, data map[uint64]
 	return synced, syncedBytes, inserted, nil
 }
 
+// ReadMaskedKVsByIndexList Read the masked KVs by a list of KV index.
 func (bc *BlockChain) ReadMaskedKVsByIndexList(contract common.Address, indexes []uint64) ([]*KV, error) {
 	sm := sstorage.ContractToShardManager[contract]
 	if sm == nil {
@@ -2549,6 +2545,8 @@ func (bc *BlockChain) ReadMaskedKVsByIndexList(contract common.Address, indexes 
 	return res, nil
 }
 
+// ReadMaskedKVsByIndexRange Read masked KVs sequentially starting from origin until the index exceeds the limit or
+// the amount of data read is greater than the bytes.
 func (bc *BlockChain) ReadMaskedKVsByIndexRange(contract common.Address, origin uint64, limit uint64, bytes uint64) ([]*KV, error) {
 	sm := sstorage.ContractToShardManager[contract]
 	if sm == nil {
@@ -2580,6 +2578,7 @@ func (bc *BlockChain) ReadMaskedKVsByIndexRange(contract common.Address, origin 
 	return res, nil
 }
 
+// GetSstorageLastKvIdx get LastKvIdx from a sstorage contract with latest stateDB.
 func (bc *BlockChain) GetSstorageLastKvIdx(contract common.Address) (uint64, error) {
 	stateDB, err := bc.StateAt(bc.CurrentBlock().Root())
 	if err != nil {
