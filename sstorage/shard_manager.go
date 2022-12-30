@@ -24,6 +24,10 @@ func NewShardManager(contractAddress common.Address, kvSize uint64, kvEntries ui
 	}
 }
 
+func (sm *ShardManager) KvEntries() uint64 {
+	return sm.kvEntries
+}
+
 func (sm *ShardManager) MaxKvSize() uint64 {
 	return sm.kvSize
 }
@@ -70,6 +74,14 @@ func (sm *ShardManager) TryRead(kvIdx uint64, readLen int, hash common.Hash) ([]
 }
 
 func (sm *ShardManager) UnmaskKV(kvIdx uint64, b []byte, hash common.Hash) ([]byte, bool, error) {
+	return sm.MaskOrUnmaskKV(kvIdx, b, hash, false)
+}
+
+func (sm *ShardManager) MaskKV(kvIdx uint64, b []byte, hash common.Hash) ([]byte, bool, error) {
+	return sm.MaskOrUnmaskKV(kvIdx, b, hash, true)
+}
+
+func (sm *ShardManager) MaskOrUnmaskKV(kvIdx uint64, b []byte, hash common.Hash, mask bool) ([]byte, bool, error) {
 	shardIdx := kvIdx / sm.kvEntries
 	var data []byte
 	if ds, ok := sm.shardMap[shardIdx]; ok {
@@ -88,14 +100,19 @@ func (sm *ShardManager) UnmaskKV(kvIdx uint64, b []byte, hash common.Hash) ([]by
 			chunkIdx := kvIdx*ds.chunksPerKv + i
 			df := ds.GetStorageFile(chunkIdx)
 			if df == nil {
-				return nil, false, fmt.Errorf("Cannot find storage file for chunkIdx", "chunkIdx", chunkIdx)
+				return nil, false, fmt.Errorf("cannot find storage file for chunkIdx %d", chunkIdx)
 			}
-			cdata := UnmaskDataInPlace(b[i*CHUNK_SIZE:i*CHUNK_SIZE+uint64(chunkReadLen)], getMaskData(chunkIdx, df.maskType))
-			data = append(data, cdata...)
+			if mask {
+				cdata := MaskDataInPlace(getMaskData(chunkIdx, df.maskType), b[i*CHUNK_SIZE:i*CHUNK_SIZE+uint64(chunkReadLen)])
+				data = append(data, cdata...)
+			} else {
+				cdata := UnmaskDataInPlace(b[i*CHUNK_SIZE:i*CHUNK_SIZE+uint64(chunkReadLen)], getMaskData(chunkIdx, df.maskType))
+				data = append(data, cdata...)
+			}
 		}
 		return data, true, nil
 	} else {
-		return nil, false, fmt.Errorf("Cannot find storage shard for kvIdx", "kvIdx", kvIdx)
+		return nil, false, fmt.Errorf("cannot find storage shard for kvIdx %d", kvIdx)
 	}
 }
 
@@ -108,10 +125,10 @@ func (sm *ShardManager) TryWriteMaskedKV(kvIdx uint64, b []byte) (bool, error) {
 	}
 }
 
-func (sm *ShardManager) TryReadMaskedKV(kvIdx uint64, hash common.Hash) ([]byte, bool, error) {
+func (sm *ShardManager) TryReadMaskedKV(kvIdx uint64, readLen int, hash common.Hash) ([]byte, bool, error) {
 	shardIdx := kvIdx / sm.kvEntries
 	if ds, ok := sm.shardMap[shardIdx]; ok {
-		b, err := ds.Read(kvIdx, int(ds.kvSize), hash, true) // read all the data
+		b, err := ds.Read(kvIdx, readLen, hash, true) // read all the data
 		return b, true, err
 	} else {
 		return nil, false, nil
