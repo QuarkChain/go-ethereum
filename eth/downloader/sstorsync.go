@@ -32,7 +32,7 @@ func (d *Downloader) sstorageFetcher() {
 	}
 }
 
-// runStateSync runs a state synchronisation until it completes or another root
+// runSstorSync runs a sstor synchronisation until it completes or another root
 // hash is requested to be switched over to.
 func (d *Downloader) runSstorSync(s *sstorSync) *sstorSync {
 	go s.run()

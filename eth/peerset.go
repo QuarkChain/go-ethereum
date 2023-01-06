@@ -377,6 +377,9 @@ func (ps *peerSet) close() {
 }
 
 func (ps *peerSet) needThisPeer(peer *sstorage.Peer) bool {
+	ps.lock.Lock()
+	defer ps.lock.Unlock()
+
 	for contract, shards := range peer.Shards() {
 		_, ok := ps.sstorPeers[contract]
 		if !ok {
