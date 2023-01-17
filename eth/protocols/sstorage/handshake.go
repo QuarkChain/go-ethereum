@@ -47,8 +47,8 @@ func (p *Peer) readStatus() error {
 	if err != nil {
 		return err
 	}
-	if msg.Code != GetShardsMsg {
-		return fmt.Errorf("no status message: first msg has code %x (!= %x)", msg.Code, GetShardsMsg)
+	if msg.Code != ShardsMsg {
+		return fmt.Errorf("no status message: first msg has code %x (!= %x)", msg.Code, ShardsMsg)
 	}
 	res := new(ShardListPacket)
 	if err := msg.Decode(res); err != nil {
