@@ -55,6 +55,5 @@ func (p *Peer) readStatus() error {
 		return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 	}
 
-	p.SetShards(convertShardList(res))
-	return nil
+	return p.SetShards(convertShardList(res))
 }

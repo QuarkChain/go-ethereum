@@ -17,6 +17,7 @@
 package sstorage
 
 import (
+	"fmt"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/p2p"
@@ -62,11 +63,13 @@ func (p *Peer) Shards() map[common.Address][]uint64 {
 }
 
 // SetShards this should only be set when doing handshake.
-func (p *Peer) SetShards(shards map[common.Address][]uint64) {
+func (p *Peer) SetShards(shards map[common.Address][]uint64) error {
 	// shards can only be set once.
 	if p.shards != nil {
-		p.shards = shards
+		return fmt.Errorf("peer shards has been set multi times")
 	}
+	p.shards = shards
+	return nil
 }
 
 // IsShardExist checks whether one specific shard is supported by this peer.
