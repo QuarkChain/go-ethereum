@@ -232,8 +232,11 @@ type SyncPeer interface {
 }
 
 type BlockChain interface {
+	// StateAt returns a new mutable state based on a particular point in time.
 	StateAt(root common.Hash) (*state.StateDB, error)
 
+	// CurrentBlock retrieves the current head block of the canonical chain. The
+	// block is retrieved from the blockchain's internal cache.
 	CurrentBlock() *types.Block
 
 	// VerifyAndWriteKV verify a list KV data using the metadata saved in the local level DB and write successfully verified
