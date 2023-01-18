@@ -115,7 +115,7 @@ type receiptRLPComplete struct {
 type storedReceiptRLPComplete struct {
 	PostStateOrStatus []byte
 	CumulativeGasUsed uint64
-	Logs              []*LogForStorage
+	Logs              []*Log
 	Type              uint8
 	TxHash            common.Hash
 	ContractAddress   *common.Address `rlp:"nil"`
