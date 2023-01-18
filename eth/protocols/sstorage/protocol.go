@@ -43,7 +43,7 @@ var protocolLengths = map[uint]uint64{SSTORAGE1: 6}
 const maxMessageSize = 2 * 1024 * 1024
 
 const (
-	GetShardsMsg  = 0x00
+	ShardsMsg     = 0x00
 	GetKVRangeMsg = 0x01
 	KVRangeMsg    = 0x02
 	GetKVsMsg     = 0x03
