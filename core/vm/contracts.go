@@ -1225,53 +1225,60 @@ var (
 type crossChainCall struct {
 }
 
+// ErrGasEstimationWhenCrossChainCall as a very large gas will be charged when an overflow occurs to avoid the program continue to run
+const ErrGasEstimationWhenCrossChainCall = math.MaxUint64
 const CrossChainCallInputLength = 164
-const ErrGasCost = 20000
 
 // RequiredGas is the maximum gas consumption that will calculate the cross_chain_call
 func (c *crossChainCall) RequiredGas(input []byte) uint64 {
+	var (
+		overflow           bool
+		packedTopicAddrLen uint64
+		packedDataLen      uint64
+		packedTotalLen     uint64
+		outputDataGasCost  uint64
+		totalGasCost       uint64
+	)
+
 	if len(input) != CrossChainCallInputLength {
 		// charge a high gas when an error occurs to avoid DOS attack
-		return ErrGasCost
+		return 0
 	}
 
 	maxDataLen := new(big.Int).SetBytes(getData(input, 4+3*32, 32)).Uint64()
-	inputGas := uint64(len(input)) * params.ExternalCallByteGasCost
 
-	var callResultGas uint64 = (32 + 32*7) * params.ExternalCallByteGasCost // pay address and topics
+	// we must consider this case that 'maxDataLen' is not divisible by 32 when calculating 'packedDataLen'
 	if maxDataLen%32 != 0 {
-		var maxDataLenTmp uint64
-		maxDataLenTmp = maxDataLen + (32 - maxDataLen%32)
-		if maxDataLenTmp < maxDataLen {
-			// overflow
-			// charge a high gas when an error occurs to avoid DOS attack
-			return ErrGasCost
+		tmp := 32 + 32 - maxDataLen%32
+		if packedDataLen, overflow = math.SafeAdd(maxDataLen, tmp); overflow {
+			return ErrGasEstimationWhenCrossChainCall
 		}
-		maxDataLen = maxDataLenTmp
+	} else {
+		if packedDataLen, overflow = math.SafeAdd(maxDataLen, 32); overflow {
+			return ErrGasEstimationWhenCrossChainCall
+		}
 	}
 
-	callResultGas += maxDataLen * params.ExternalCallByteGasCost
-	if callResultGas/maxDataLen != params.ExternalCallByteGasCost {
-		// overflow
-		// charge a high gas when an error occurs to avoid DOS attack
-		return ErrGasCost
-	}
-	gasUsed := callResultGas + inputGas
-	if gasUsed < callResultGas+inputGas {
-		// overflow
-		// charge a high gas when an error occurs to avoid DOS attack
-		return ErrGasCost
+	// the sum of address len and topics len (address_len = 32 , topics_len = 7 * 32)
+	packedTopicAddrLen = 8 * 32
+	if packedTotalLen, overflow = math.SafeAdd(packedTopicAddrLen, packedDataLen); overflow {
+		return ErrGasEstimationWhenCrossChainCall
 	}
 
-	gasUsedSum := gasUsed + params.ExternalCallGas
-	if gasUsedSum < gasUsed+params.ExternalCallGas {
-		// overflow
-		// charge a high gas when an error occurs to avoid DOS attack
-		return ErrGasCost
+	// calculate gas cost of outputData
+	if outputDataGasCost, overflow = math.SafeMul(packedTotalLen, params.CrossChainCallDataPerByteGas); overflow {
+		return ErrGasEstimationWhenCrossChainCall
 	}
+
+	if totalGasCost, overflow = math.SafeAdd(outputDataGasCost, params.OnceCrossChainCallGas); overflow {
+		return ErrGasEstimationWhenCrossChainCall
+	}
+
+	return totalGasCost
+
 	/*
 		The gas calculation formula is as follows：
-		gas_overpay =  ExternalCallByteGasCost * (address_len + topics_len + data_len) + ExternalCallGas
+		gas_overpay =  CrossChainCallDataPerByteGas * (address_len + topics_len + data_len) + OnceCrossChainCallGas
 
 		address_len = 32
 		000000000000000000000000751320c36f413a6280ad54487766ae0f780b6f58
@@ -1300,8 +1307,6 @@ func (c *crossChainCall) RequiredGas(input []byte) uint64 {
 		bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 		bbbbbbbbbbbbbbbb000000000000000000000000000000000000000000000000
 	*/
-
-	return gasUsed
 }
 
 func (c *crossChainCall) Run(input []byte) ([]byte, error) {
