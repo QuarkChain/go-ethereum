@@ -165,10 +165,10 @@ func (evm *EVM) ExternalCallClient() ExternalCallClient {
 	return evm.Config.ExternalCallClient
 }
 
-// SetCrossChainCallResults pre-sets the result of the cross-chain-call and is used when verifying the correctness of the transaction
-func (evm *EVM) SetCrossChainCallResults(result []byte) {
+// SetCCCOutputs pre-sets the result of the cross-chain-call and is used when verifying the correctness of the transaction
+func (evm *EVM) SetCCCOutputs(result []byte) {
 	if evm.ExternalCallClient() == nil && evm.IsExternalCallEnabled() && len(result) != 0 {
-		evm.Interpreter().SetCrossChainCallResults(result)
+		evm.Interpreter().SetCCCOutputs(result)
 	}
 }
 
@@ -185,7 +185,7 @@ func (evm *EVM) IsExternalCallEnabled() bool {
 func (evm *EVM) Reset(txCtx TxContext, statedb StateDB) {
 	evm.TxContext = txCtx
 	evm.StateDB = statedb
-	evm.interpreter.resetCrossChainCallResultsAndResultIdx()
+	evm.interpreter.resetCCCOuputs()
 }
 
 // Cancel cancels any running EVM operation. This may be called concurrently and
