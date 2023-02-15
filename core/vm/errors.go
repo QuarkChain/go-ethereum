@@ -39,12 +39,12 @@ var (
 	ErrCodeInsufficientStake    = errors.New("insufficient staking for code")
 
 	// ErrOutOfBoundsTracePtr which happen when execute operation of cross chain call
-	ErrOutOfBoundsTracePtr              = errors.New("CrossChainCall: tracePtr out-of-bound")
-	ErrInvalidCrossChainCallInputLength = errors.New("CrossChainCall:invalid CrossChainCallInputLength")
-	ErrDisableExternalCall              = errors.New("CrossChainCall:disable external_call module")
-	ErrExternalCallNoActive             = errors.New("CrossChainCall:external_call is not active")
-	ErrNoActiveClient                   = errors.New("CrossChainCall:no active external-call-client")
-	ErrUserConfirmsNoEnough             = errors.New("CrossChainCall：the number of confirms defined by the user is too small")
+	ErrTraceIdxOutOfBounds              = errors.New("CrossChainCall: outputs traceIdx out-of-bound")
+	ErrInvalidCrossChainCallInputLength = errors.New("CrossChainCall: invalid CrossChainCallInputLength")
+	ErrDisableExternalCall              = errors.New("CrossChainCall: disable external_call module")
+	ErrExternalCallNoActive             = errors.New("CrossChainCall: external_call is not active")
+	ErrNoActiveClient                   = errors.New("CrossChainCall: no active external-call-client")
+	ErrUserConfirmsNoEnough             = errors.New("CrossChainCall: the number of confirms defined by the user is too small")
 	ErrActualGasExceedChargedGas        = errors.New("CrossChainCall: the gas charged in advance cannot cover the actual gas consumption")
 	ErrUnsupportMethod                  = errors.New("unsupported method")
 

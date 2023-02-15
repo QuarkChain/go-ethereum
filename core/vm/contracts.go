@@ -1329,14 +1329,14 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractCallEnv, input []byte, 
 
 		if env.evm.Config.relayExternalCalls {
 			// The flag of relayExternalCalls is true means that the node will preset the external-call-result received through network
-			idx := env.evm.Interpreter().CallResultIdx()
-			if idx >= uint64(len(env.evm.Interpreter().CrossChainCallResults())) {
+			idx := env.evm.Interpreter().CCCOutputsIdx()
+			if idx >= uint64(len(env.evm.Interpreter().CCCOutputs())) {
 				// unexpect error
-				env.evm.setCrossChainCallUnexpectErr(ErrOutOfBoundsTracePtr)
-				return nil, 0, ErrOutOfBoundsTracePtr
+				env.evm.setCrossChainCallUnexpectErr(ErrTraceIdxOutOfBounds)
+				return nil, 0, ErrTraceIdxOutOfBounds
 			}
-			list = env.evm.Interpreter().CrossChainCallResults()[idx]
-			env.evm.Interpreter().AddCallResultIdx()
+			list = env.evm.Interpreter().CCCOutputs()[idx]
+			env.evm.Interpreter().CCCOutputsIdxIncrease()
 
 			if !list.Success {
 				return list.CallRes, list.GasUsed, ErrExecutionReverted
@@ -1372,9 +1372,8 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractCallEnv, input []byte, 
 				return nil, 0, expErr
 			} else {
 				// calculate actual cost of gas
-				actualGasUsed := callres.GasCost(params.ExternalCallByteGasCost)
-				actualGasUsed += uint64(len(input)) * params.CalldataGasCostEIP4488
-				actualGasUsed += params.ExternalCallGas
+				actualGasUsed := callres.GasCost(params.CrossChainCallDataPerByteGas)
+				actualGasUsed += params.OnceCrossChainCallGas
 
 				resultValuePack, err := callres.ABIPack()
 				if err != nil {
@@ -1386,7 +1385,7 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractCallEnv, input []byte, 
 					Success: true,
 					GasUsed: actualGasUsed,
 				}
-				env.evm.Interpreter().AppendCrossChainCallResults(list)
+				env.evm.Interpreter().AppendCCCOutputs(list)
 			}
 
 		}
@@ -1448,6 +1447,7 @@ func GetExternalLog(ctx context.Context, env *PrecompiledContractCallEnv, chainI
 		data = make([]byte, maxDataLen)
 		copy(data, log.Data[:maxDataLen])
 	} else {
+		data = make([]byte, len(log.Data))
 		copy(data, log.Data)
 	}
 
