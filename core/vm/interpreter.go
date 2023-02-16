@@ -40,11 +40,11 @@ type Config struct {
 	ExtraEips []int // Additional EIPS that are to be enabled
 	IsJsonRpc bool  // Whether the call is in context of JsonRpc
 
-	relayExternalCalls bool               // Define whether the execution environment of crossChainCall precompile contract needs to obtain the results of external calls independently
-	ExternalCallClient ExternalCallClient // This client is used to make external calls
+	relayMindReading  bool              // relayMindReading is a flag to define whether the execution environment of crossChainCall precompile contract needs to obtain the results of external calls independently
+	MindReadingClient MindReadingClient // MindReadingClient is responsible for responding to request from crossChainCall in the current version
 }
 
-type ExternalCallClient interface {
+type MindReadingClient interface {
 	ethereum.TransactionReader
 	ChainID(ctx context.Context) (*big.Int, error)
 	BlockNumber(ctx context.Context) (uint64, error)
@@ -79,7 +79,7 @@ type EVMInterpreter struct {
 
 	// cCCOutputs means 'crossChainCallOutputs` will store the return value of each cross-chain call
 	// cCCOutputsIdx increases by 1 after each invoking to CrossChainCall in order to point to the corresponding CCROutput
-	cCCOutputs    []*CrossChainCallResults
+	cCCOutputs    []*CrossChainCallOutput
 	cCCOutputsIdx uint64
 }
 
@@ -134,22 +134,22 @@ func (in *EVMInterpreter) CCCOutputsIdxIncrease() {
 	in.cCCOutputsIdx++
 }
 
-func (in *EVMInterpreter) CCCOutputs() []*CrossChainCallResults {
+func (in *EVMInterpreter) CCCOutputs() []*CrossChainCallOutput {
 	return in.cCCOutputs
 }
 
-func (in *EVMInterpreter) AppendCCCOutputs(trace *CrossChainCallResults) []*CrossChainCallResults {
+func (in *EVMInterpreter) AppendCCCOutput(trace *CrossChainCallOutput) []*CrossChainCallOutput {
 	in.cCCOutputs = append(in.cCCOutputs, trace)
 	return in.cCCOutputs
 }
 
 func (in *EVMInterpreter) SetCCCOutputs(b []byte) error {
-	cr := &CrossChainCallResultsWithVersion{}
-	err := rlp.DecodeBytes(b, cr)
+	outputsWithVersion := &CrossChainCallOutputsWithVersion{}
+	err := rlp.DecodeBytes(b, outputsWithVersion)
 	if err != nil {
 		return err
 	}
-	in.cCCOutputs = cr.Results
+	in.cCCOutputs = outputsWithVersion.Outputs
 	return nil
 }
 
