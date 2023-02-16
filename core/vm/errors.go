@@ -39,7 +39,7 @@ var (
 	ErrCodeInsufficientStake    = errors.New("insufficient staking for code")
 
 	// ErrOutOfBoundsTracePtr which happen when execute operation of cross chain call
-	ErrTraceIdxOutOfBounds              = errors.New("CrossChainCall: outputs traceIdx out-of-bound")
+	ErrOutputIdxOutOfBounds             = errors.New("CrossChainCall: outputs traceIdx out-of-bound")
 	ErrInvalidCrossChainCallInputLength = errors.New("CrossChainCall: invalid CrossChainCallInputLength")
 	ErrDisableExternalCall              = errors.New("CrossChainCall: disable external_call module")
 	ErrExternalCallNoActive             = errors.New("CrossChainCall: external_call is not active")
