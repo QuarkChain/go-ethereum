@@ -161,13 +161,13 @@ func (evm *EVM) CrossChainCallUnExpectErr() error {
 }
 
 // ExternalCallClient returns the external-call-client
-func (evm *EVM) ExternalCallClient() ExternalCallClient {
-	return evm.Config.ExternalCallClient
+func (evm *EVM) MindReadingClient() MindReadingClient {
+	return evm.Config.MindReadingClient
 }
 
 // SetCCCOutputs pre-sets the result of the cross-chain-call and is used when verifying the correctness of the transaction
 func (evm *EVM) SetCCCOutputs(result []byte) {
-	if evm.ExternalCallClient() == nil && evm.IsExternalCallEnabled() && len(result) != 0 {
+	if evm.MindReadingClient() == nil && evm.IsExternalCallEnabled() && len(result) != 0 {
 		evm.Interpreter().SetCCCOutputs(result)
 	}
 }

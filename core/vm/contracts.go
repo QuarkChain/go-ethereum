@@ -1325,26 +1325,26 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractCallEnv, input []byte, 
 	ctx := context.Background()
 	if bytes.Equal(input[0:4], getLogByTxHashId) {
 
-		var list *CrossChainCallResults
+		var crossChainCallOutput *CrossChainCallOutput
 
-		if env.evm.Config.relayExternalCalls {
+		if env.evm.Config.relayMindReading {
 			// The flag of relayExternalCalls is true means that the node will preset the external-call-result received through network
 			idx := env.evm.Interpreter().CCCOutputsIdx()
 			if idx >= uint64(len(env.evm.Interpreter().CCCOutputs())) {
 				// unexpect error
-				env.evm.setCrossChainCallUnexpectErr(ErrTraceIdxOutOfBounds)
-				return nil, 0, ErrTraceIdxOutOfBounds
+				env.evm.setCrossChainCallUnexpectErr(ErrOutputIdxOutOfBounds)
+				return nil, 0, ErrOutputIdxOutOfBounds
 			}
-			list = env.evm.Interpreter().CCCOutputs()[idx]
+			crossChainCallOutput = env.evm.Interpreter().CCCOutputs()[idx]
 			env.evm.Interpreter().CCCOutputsIdxIncrease()
 
-			if !list.Success {
-				return list.CallRes, list.GasUsed, ErrExecutionReverted
+			if !crossChainCallOutput.Success {
+				return crossChainCallOutput.Output, crossChainCallOutput.GasUsed, ErrExecutionReverted
 			}
 
 		} else {
 			// The flag of relayExternalCalls is false means that the node will produce the external-call-result by itself
-			if env.evm.ExternalCallClient() == nil {
+			if env.evm.MindReadingClient() == nil {
 				env.evm.setCrossChainCallUnexpectErr(ErrNoActiveClient)
 				return nil, 0, ErrNoActiveClient
 			}
@@ -1361,7 +1361,7 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractCallEnv, input []byte, 
 				return nil, 0, ErrUserConfirmsNoEnough
 			}
 
-			callres, expErr, unexpErr := GetExternalLog(ctx, env, chainId, txHash, logIdx, maxDataLen, confirms)
+			logData, expErr, unexpErr := GetExternalLog(ctx, env, chainId, txHash, logIdx, maxDataLen, confirms)
 
 			if unexpErr != nil {
 				env.evm.setCrossChainCallUnexpectErr(unexpErr)
@@ -1372,30 +1372,29 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractCallEnv, input []byte, 
 				return nil, 0, expErr
 			} else {
 				// calculate actual cost of gas
-				actualGasUsed := callres.GasCost(params.CrossChainCallDataPerByteGas)
+				actualGasUsed := logData.GasCost(params.CrossChainCallDataPerByteGas)
 				actualGasUsed += params.OnceCrossChainCallGas
 
-				resultValuePack, err := callres.ABIPack()
+				packedLogData, err := logData.ABIPack()
 				if err != nil {
 					env.evm.setCrossChainCallUnexpectErr(err)
 					return nil, 0, err
 				}
-				list = &CrossChainCallResults{
-					CallRes: resultValuePack,
+				crossChainCallOutput = &CrossChainCallOutput{
+					Output:  packedLogData,
 					Success: true,
 					GasUsed: actualGasUsed,
 				}
-				env.evm.Interpreter().AppendCCCOutputs(list)
+				env.evm.Interpreter().AppendCCCOutput(crossChainCallOutput)
 			}
 
 		}
 
-		if list.GasUsed > prePayGas {
-			// expect error
+		if crossChainCallOutput.GasUsed > prePayGas {
 			env.evm.setCrossChainCallUnexpectErr(ErrActualGasExceedChargedGas)
-			return list.CallRes, list.GasUsed, ErrActualGasExceedChargedGas
+			return crossChainCallOutput.Output, crossChainCallOutput.GasUsed, ErrActualGasExceedChargedGas
 		} else {
-			return list.CallRes, list.GasUsed, nil
+			return crossChainCallOutput.Output, crossChainCallOutput.GasUsed, nil
 		}
 
 	}
@@ -1405,7 +1404,7 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractCallEnv, input []byte, 
 }
 
 func GetExternalLog(ctx context.Context, env *PrecompiledContractCallEnv, chainId uint64, txHash common.Hash, logIdx uint64, maxDataLen uint64, confirms uint64) (cr *GetLogByTxHash, expErr *ExpectCallErr, unExpErr error) {
-	client := env.evm.ExternalCallClient()
+	client := env.evm.MindReadingClient()
 
 	if chainId != env.evm.ChainConfig().ExternalCall.SupportChainId {
 		// expect error
@@ -1451,12 +1450,12 @@ func GetExternalLog(ctx context.Context, env *PrecompiledContractCallEnv, chainI
 		copy(data, log.Data)
 	}
 
-	callres, err := NewGetLogByTxHash(log.Address, log.Topics, data)
+	logData, err := NewGetLogByTxHash(log.Address, log.Topics, data)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	return callres, nil, nil
+	return logData, nil, nil
 
 }
 
@@ -1519,26 +1518,25 @@ func (c *ExpectCallErr) Error() string {
 	return fmt.Sprintf("Expect Error:%s", c.ErrMsg)
 }
 
-type CrossChainCallResults struct {
-	CallRes []byte
-	// todo
-	Success bool // judge by expect error or unexpect error? // false condition:
+type CrossChainCallOutput struct {
+	Output  []byte
+	Success bool // Success is the flag to mark the status(success/failure) of CrossChainCall
 	GasUsed uint64
 }
 
-type CrossChainCallResultsWithVersion struct {
+type CrossChainCallOutputsWithVersion struct {
 	Version uint64
-	Results []*CrossChainCallResults
+	Outputs []*CrossChainCallOutput
 }
 
 // VerifyCrossChainCall is only used in tests to avoid circular reference
-func VerifyCrossChainCall(eClient ExternalCallClient, externalCallInput string) ([]byte, error) {
+func VerifyCrossChainCall(client MindReadingClient, externalCallInput string) ([]byte, error) {
 	p := &crossChainCall{}
 
 	gas := p.RequiredGas(common.FromHex(externalCallInput))
 
-	evmConfig := Config{ExternalCallClient: eClient}
-	chainId, err := eClient.ChainID(context.Background())
+	evmConfig := Config{MindReadingClient: client}
+	chainId, err := client.ChainID(context.Background())
 	if err != nil {
 		return nil, err
 	}
