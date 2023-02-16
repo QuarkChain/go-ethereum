@@ -21,7 +21,15 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/ethereum/go-ethereum"
+	"github.com/ethereum/go-ethereum/accounts/abi"
+	"github.com/ethereum/go-ethereum/consensus"
+	"github.com/ethereum/go-ethereum/consensus/clique"
+	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/ethereum/go-ethereum/params"
+	"github.com/ethereum/go-ethereum/rlp"
 	"log"
+	"math"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -658,4 +666,741 @@ func TestCrossChainCallPrecompile(t *testing.T) {
 		}
 	}
 
+}
+
+type WrapTendermint struct {
+	*clique.Clique
+	Client *ethclient.Client
+}
+
+func NewWrapTendermint(cli *clique.Clique, client *ethclient.Client) *WrapTendermint {
+	return &WrapTendermint{Clique: cli, Client: client}
+}
+
+type TestChainContext struct {
+	tm consensus.Engine
+}
+
+func NewTestChainContext(tm consensus.Engine) *TestChainContext {
+	return &TestChainContext{tm: tm}
+}
+
+func (ctx *TestChainContext) Engine() consensus.Engine {
+	return ctx.tm
+}
+
+func (ctx *TestChainContext) GetHeader(common.Hash, uint64) *types.Header {
+	return nil
+}
+
+type WrapTx struct {
+	Tx             *types.Transaction
+	GasUsed        uint64
+	Args           *CrossChainCallArgument
+	ExpectTxData   func() ([]byte, error)
+	ExpectTraces   []*ExpectTrace
+	ExpectCCRBytes []byte
+	happenError    error
+	Index          int
+}
+
+func (wt *WrapTx) SetExternalCallRes(crossChainCallRes []byte) {
+	wt.ExpectCCRBytes = crossChainCallRes
+}
+
+func (wt *WrapTx) SetUnexpectErr(err error) {
+	wt.happenError = err
+}
+
+func (wt *WrapTx) MarkTransitionIndex() string {
+	return fmt.Sprintf("[Transaction Index %d]", wt.Index)
+}
+
+func NewWrapTx(tx *types.Transaction, args *CrossChainCallArgument) *WrapTx {
+	return &WrapTx{Tx: tx, Args: args}
+}
+
+func (wt *WrapTx) VerifyCallResult(crossCallResult []byte, happenedError error, txIndex int, t *testing.T) {
+	if happenedError != nil {
+		if wt.happenError == nil {
+			t.Fatalf("[txIndex %d] happened err: %s", txIndex, happenedError.Error())
+			return
+		}
+
+		if happenedError.Error() != wt.happenError.Error() {
+			t.Fatalf("[txIndex %d] \nexpect happen err:%s\nactual happen err:%s", txIndex, wt.happenError, happenedError)
+		} else {
+			t.Logf("[txIndex %d] expect happen err match: %s", txIndex, happenedError.Error())
+		}
+		happenedError = nil
+		return
+	}
+
+	tracesWithVersion := &vm.CrossChainCallOutputsWithVersion{}
+	err := rlp.DecodeBytes(crossCallResult, tracesWithVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	actualTraces := tracesWithVersion.Outputs
+
+	if len(wt.ExpectTraces) != len(actualTraces) {
+		t.Fatalf("[txIndex %d] wrapTx.ExpectTraces length [%d] no match actualTraces length [%d]", txIndex, len(wt.ExpectTraces), len(actualTraces))
+	}
+
+	for i, v := range actualTraces {
+		cs := v.Output
+		wt.ExpectTraces[i].verifyRes(cs, t, txIndex, i, v.Success)
+	}
+
+}
+
+type ExpectTrace struct {
+	CallResultBytes []byte // call result
+	ExpectErrBytes  error
+	success         bool
+	UnExpectErr     error
+}
+
+func NewExpectTrace(callResultBytes []byte, expectErrBytes error, unExpectErr error) *ExpectTrace {
+	return &ExpectTrace{CallResultBytes: callResultBytes, ExpectErrBytes: expectErrBytes, UnExpectErr: unExpectErr}
+}
+
+func (et *ExpectTrace) compareRes(cs []byte) bool {
+	return bytes.Equal(et.CallResultBytes, cs)
+}
+
+func (et *ExpectTrace) verifyRes(cs []byte, t *testing.T, txIndex, outputIndex int, success bool) {
+
+	if success != true {
+		t.Error("the trace.Success should be true when execute succeed")
+	}
+	if bytes.Equal(et.CallResultBytes, cs) {
+		t.Logf("[txIndex %d][outputIndex %d] crossChainCall output match", txIndex, outputIndex)
+	} else {
+		t.Errorf("[txIndex %d][outputIndex %d] res no match ,expect : %s, actual: %s", txIndex, outputIndex, common.Bytes2Hex(et.CallResultBytes), common.Bytes2Hex(cs))
+	}
+
+}
+
+type CrossChainCallArgument struct {
+	ChainId     uint64
+	TxHash      common.Hash
+	LogIdx      uint64
+	MaxDataLen  uint64
+	Confirms    uint64
+	contractAbi abi.ABI
+	env         *vm.PrecompiledContractCallEnv
+}
+
+const CrossChainCallContract = `[
+	{
+		"inputs": [],
+		"name": "ErrMsg",
+		"outputs": [
+			{
+				"internalType": "string",
+				"name": "",
+				"type": "string"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "uint256",
+				"name": "chainId",
+				"type": "uint256"
+			},
+			{
+				"internalType": "bytes32",
+				"name": "txHash",
+				"type": "bytes32"
+			},
+			{
+				"internalType": "uint256",
+				"name": "logIdx",
+				"type": "uint256"
+			},
+			{
+				"internalType": "uint256",
+				"name": "maxDataLen",
+				"type": "uint256"
+			},
+			{
+				"internalType": "uint256",
+				"name": "confirms",
+				"type": "uint256"
+			},
+			{
+				"internalType": "uint256",
+				"name": "callTimes",
+				"type": "uint256"
+			}
+		],
+		"name": "batchCall",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "uint256",
+				"name": "chainId",
+				"type": "uint256"
+			},
+			{
+				"internalType": "bytes32",
+				"name": "txHash",
+				"type": "bytes32"
+			},
+			{
+				"internalType": "uint256",
+				"name": "logIdx",
+				"type": "uint256"
+			},
+			{
+				"internalType": "uint256",
+				"name": "maxDataLen",
+				"type": "uint256"
+			},
+			{
+				"internalType": "uint256",
+				"name": "confirms",
+				"type": "uint256"
+			}
+		],
+		"name": "callAndDealRes",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "uint256",
+				"name": "chainId",
+				"type": "uint256"
+			},
+			{
+				"internalType": "bytes32",
+				"name": "txHash",
+				"type": "bytes32"
+			},
+			{
+				"internalType": "uint256",
+				"name": "logIdx",
+				"type": "uint256"
+			},
+			{
+				"internalType": "uint256",
+				"name": "maxDataLen",
+				"type": "uint256"
+			},
+			{
+				"internalType": "uint256",
+				"name": "confirms",
+				"type": "uint256"
+			}
+		],
+		"name": "callAndDealResWithBytes",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "uint256",
+				"name": "chainId",
+				"type": "uint256"
+			},
+			{
+				"internalType": "bytes32",
+				"name": "txHash",
+				"type": "bytes32"
+			},
+			{
+				"internalType": "uint256",
+				"name": "logIdx",
+				"type": "uint256"
+			},
+			{
+				"internalType": "uint256",
+				"name": "maxDataLen",
+				"type": "uint256"
+			},
+			{
+				"internalType": "uint256",
+				"name": "confirms",
+				"type": "uint256"
+			}
+		],
+		"name": "callOnce",
+		"outputs": [
+			{
+				"internalType": "bytes",
+				"name": "",
+				"type": "bytes"
+			}
+		],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "uint256",
+				"name": "chainId",
+				"type": "uint256"
+			},
+			{
+				"internalType": "bytes32",
+				"name": "txHash",
+				"type": "bytes32"
+			},
+			{
+				"internalType": "uint256",
+				"name": "logIdx",
+				"type": "uint256"
+			},
+			{
+				"internalType": "uint256",
+				"name": "maxDataLen",
+				"type": "uint256"
+			},
+			{
+				"internalType": "uint256",
+				"name": "confirms",
+				"type": "uint256"
+			}
+		],
+		"name": "callTwice",
+		"outputs": [
+			{
+				"internalType": "bytes",
+				"name": "",
+				"type": "bytes"
+			},
+			{
+				"internalType": "bytes",
+				"name": "",
+				"type": "bytes"
+			}
+		],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [],
+		"name": "context",
+		"outputs": [
+			{
+				"internalType": "bytes",
+				"name": "",
+				"type": "bytes"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [],
+		"name": "count",
+		"outputs": [
+			{
+				"internalType": "uint256",
+				"name": "",
+				"type": "uint256"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [],
+		"name": "crossChainCallContract",
+		"outputs": [
+			{
+				"internalType": "address",
+				"name": "",
+				"type": "address"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [],
+		"name": "originContract",
+		"outputs": [
+			{
+				"internalType": "address",
+				"name": "",
+				"type": "address"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "uint256",
+				"name": "",
+				"type": "uint256"
+			}
+		],
+		"name": "topics",
+		"outputs": [
+			{
+				"internalType": "bytes32",
+				"name": "",
+				"type": "bytes32"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [],
+		"name": "value",
+		"outputs": [
+			{
+				"internalType": "uint256",
+				"name": "",
+				"type": "uint256"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	}
+]`
+
+func NewCrossChainCallArgument(chainconfig *params.ChainConfig, client *WrapClient, chainId uint64, txHash common.Hash, logIdx uint64, maxDataLen uint64, confirms uint64) *CrossChainCallArgument {
+	evmConfig := vm.Config{MindReadingClient: client}
+	evm := vm.NewEVM(vm.BlockContext{}, vm.TxContext{}, nil, chainconfig, evmConfig)
+	env := vm.NewPrecompiledContractCallEnv(evm, nil)
+	abi, err := abi.JSON(strings.NewReader(CrossChainCallContract))
+	if err != nil {
+		panic(err)
+	}
+	return &CrossChainCallArgument{ChainId: chainId, TxHash: txHash, LogIdx: logIdx, MaxDataLen: maxDataLen, Confirms: confirms, contractAbi: abi, env: env}
+}
+
+func (c *CrossChainCallArgument) CallOncePack() ([]byte, error) {
+	return c.contractAbi.Pack("callOnce", big.NewInt(int64(c.ChainId)), c.TxHash, big.NewInt(int64(c.LogIdx)), big.NewInt(int64(c.MaxDataLen)), big.NewInt(int64(c.Confirms)))
+}
+
+func (c *CrossChainCallArgument) CallOncePackWithoutErr() []byte {
+	data, _ := c.contractAbi.Pack("callOnce", big.NewInt(int64(c.ChainId)), c.TxHash, big.NewInt(int64(c.LogIdx)), big.NewInt(int64(c.MaxDataLen)), big.NewInt(int64(c.Confirms)))
+	return data
+}
+
+func (c *CrossChainCallArgument) BatchCallPackWithoutErr(times int64) []byte {
+	data, _ := c.contractAbi.Pack("batchCall", big.NewInt(int64(c.ChainId)), c.TxHash, big.NewInt(int64(c.LogIdx)), big.NewInt(int64(c.MaxDataLen)), big.NewInt(int64(c.Confirms)), big.NewInt(times))
+	return data
+}
+
+func (c *CrossChainCallArgument) BatchCallPack(times int64) ([]byte, error) {
+	return c.contractAbi.Pack("batchCall", big.NewInt(int64(c.ChainId)), c.TxHash, big.NewInt(int64(c.LogIdx)), big.NewInt(int64(c.MaxDataLen)), big.NewInt(int64(c.Confirms)), big.NewInt(times))
+}
+
+func (c *CrossChainCallArgument) CrossChainCallResult() (*vm.GetLogByTxHash, *vm.ExpectCallErr, error) {
+	return vm.GetExternalLog(context.Background(), c.env, c.ChainId, c.TxHash, c.LogIdx, c.MaxDataLen, c.Confirms)
+}
+
+func (c *CrossChainCallArgument) CrossChainCallResultToExpectCallResult() *ExpectTrace {
+	cs, expErr, unExpErr := vm.GetExternalLog(context.Background(), c.env, c.ChainId, c.TxHash, c.LogIdx, c.MaxDataLen, c.Confirms)
+	if unExpErr != nil {
+		return NewExpectTrace(nil, nil, unExpErr)
+	} else if expErr != nil {
+		return NewExpectTrace(nil, expErr, nil)
+	} else {
+		pack, err := cs.ABIPack()
+		if err != nil {
+			panic(err)
+		}
+		return NewExpectTrace(pack, nil, nil)
+	}
+}
+
+func TestApplyTransaction(t *testing.T) {
+	var (
+		config = &params.ChainConfig{
+			ChainID:             big.NewInt(3334),
+			HomesteadBlock:      big.NewInt(0),
+			DAOForkBlock:        nil,
+			DAOForkSupport:      true,
+			EIP150Block:         big.NewInt(0),
+			EIP155Block:         big.NewInt(0),
+			EIP158Block:         big.NewInt(0),
+			ByzantiumBlock:      big.NewInt(0),
+			ConstantinopleBlock: big.NewInt(0),
+			PetersburgBlock:     big.NewInt(0),
+			IstanbulBlock:       big.NewInt(0),
+			MuirGlacierBlock:    nil,
+			BerlinBlock:         big.NewInt(0),
+			LondonBlock:         big.NewInt(0),
+			PisaBlock:           big.NewInt(0),
+			ArrowGlacierBlock:   nil,
+			ExternalCall: &params.ExternalCallConfig{
+				EnableBlockNumber: big.NewInt(0),
+				Version:           1,
+				SupportChainId:    1337,
+			},
+		}
+		key1, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+		addr1   = crypto.PubkeyToAddress(key1.PublicKey)
+	)
+
+	var (
+		db           = rawdb.NewMemoryDatabase()
+		contractAddr = common.HexToAddress("0xa000000000000000000000000000000000000aaa")
+		gspec        = &core.Genesis{
+			Config: config,
+			Alloc: core.GenesisAlloc{
+				addr1: core.GenesisAccount{
+					Balance: big.NewInt(1000000000000000000), // 1 ether
+					Nonce:   0,
+				},
+				common.HexToAddress("0xfd0810DD14796680f72adf1a371963d0745BCc64"): core.GenesisAccount{
+					Balance: big.NewInt(1000000000000000000), // 1 ether
+					Nonce:   math.MaxUint64,
+				},
+				contractAddr: core.GenesisAccount{
+					Balance: big.NewInt(1000000000000000000), // 1 ether
+					Nonce:   math.MaxUint64,
+					Code:    common.FromHex("0x608060405234801561001057600080fd5b50600436106100b45760003560e01c80638c95e054116100715780638c95e054146101a45780639afb416c146101c2578063a25a92aa146101e0578063bb36008d146101fc578063d0496d6a14610218578063f9f8a58814610236576100b4565b806306661abd146100b957806318d9adab146100d757806320615362146101075780632fbc69e2146101385780633fa4f24514610156578063518a351014610174575b600080fd5b6100c1610252565b6040516100ce9190610dcc565b60405180910390f35b6100f160048036038101906100ec9190610e27565b610258565b6040516100fe9190610e6d565b60405180910390f35b610121600480360381019061011c9190610eb4565b61027c565b60405161012f929190610fbf565b60405180910390f35b610140610539565b60405161014d919061104b565b60405180910390f35b61015e6105c7565b60405161016b9190610dcc565b60405180910390f35b61018e60048036038101906101899190610eb4565b6105cd565b60405161019b919061106d565b60405180910390f35b6101ac61072a565b6040516101b991906110d0565b60405180910390f35b6101ca610731565b6040516101d791906110d0565b60405180910390f35b6101fa60048036038101906101f59190610eb4565b610755565b005b610216600480360381019061021191906110eb565b610955565b005b610220610acb565b60405161022d919061106d565b60405180910390f35b610250600480360381019061024b9190610eb4565b610b59565b005b60035481565b6001818154811061026857600080fd5b906000526020600020016000915090505481565b6060806000878787878760405160240161029a959493929190611178565b6040516020818303038152906040527f99e20070000000000000000000000000000000000000000000000000000000007bffffffffffffffffffffffffffffffffffffffffffffffffffffffff19166020820180517bffffffffffffffffffffffffffffffffffffffffffffffffffffffff838183161783525050505090506000806203330373ffffffffffffffffffffffffffffffffffffffff16836040516103449190611207565b6000604051808303816000865af19150503d8060008114610381576040519150601f19603f3d011682016040523d82523d6000602084013e610386565b606091505b5091509150816103cb576040517f08c379a00000000000000000000000000000000000000000000000000000000081526004016103c290611290565b60405180910390fd5b60008a8a60018b6103dc91906112df565b8a8a6040516024016103f2959493929190611178565b6040516020818303038152906040527f99e20070000000000000000000000000000000000000000000000000000000007bffffffffffffffffffffffffffffffffffffffffffffffffffffffff19166020820180517bffffffffffffffffffffffffffffffffffffffffffffffffffffffff838183161783525050505090506000806203330373ffffffffffffffffffffffffffffffffffffffff168360405161049c9190611207565b6000604051808303816000865af19150503d80600081146104d9576040519150601f19603f3d011682016040523d82523d6000602084013e6104de565b606091505b509150915081610523576040517f08c379a000000000000000000000000000000000000000000000000000000000815260040161051a90611385565b60405180910390fd5b8381975097505050505050509550959350505050565b60058054610546906113d4565b80601f0160208091040260200160405190810160405280929190818152602001828054610572906113d4565b80156105bf5780601f10610594576101008083540402835291602001916105bf565b820191906000526020600020905b8154815290600101906020018083116105a257829003601f168201915b505050505081565b60025481565b6060600086868686866040516024016105ea959493929190611178565b6040516020818303038152906040527f99e20070000000000000000000000000000000000000000000000000000000007bffffffffffffffffffffffffffffffffffffffffffffffffffffffff19166020820180517bffffffffffffffffffffffffffffffffffffffffffffffffffffffff838183161783525050505090506000806203330373ffffffffffffffffffffffffffffffffffffffff16836040516106949190611207565b6000604051808303816000865af19150503d80600081146106d1576040519150601f19603f3d011682016040523d82523d6000602084013e6106d6565b606091505b50915091508161071b576040517f08c379a000000000000000000000000000000000000000000000000000000000815260040161071290611451565b60405180910390fd5b80935050505095945050505050565b6203330381565b60008054906101000a900473ffffffffffffffffffffffffffffffffffffffff1681565b60008585858585604051602401610770959493929190611178565b6040516020818303038152906040527f99e20070000000000000000000000000000000000000000000000000000000007bffffffffffffffffffffffffffffffffffffffffffffffffffffffff19166020820180517bffffffffffffffffffffffffffffffffffffffffffffffffffffffff838183161783525050505090506000806203330373ffffffffffffffffffffffffffffffffffffffff168360405161081a9190611207565b6000604051808303816000865af19150503d8060008114610857576040519150601f19603f3d011682016040523d82523d6000602084013e61085c565b606091505b509150915081610891578080602001905181019061087a9190611597565b60059081610888919061178c565b5050505061094e565b6000806000838060200190518101906108aa9190611a1a565b925092509250826000806101000a81548173ffffffffffffffffffffffffffffffffffffffff021916908373ffffffffffffffffffffffffffffffffffffffff1602179055508160019080519060200190610906929190610d49565b506000806000838060200190518101906109209190611aba565b925092509250826002819055508160038190555080600490816109439190611b84565b505050505050505050505b5050505050565b60008686868686604051602401610970959493929190611178565b6040516020818303038152906040527f99e20070000000000000000000000000000000000000000000000000000000007bffffffffffffffffffffffffffffffffffffffffffffffffffffffff19166020820180517bffffffffffffffffffffffffffffffffffffffffffffffffffffffff8381831617835250505050905060005b82811015610ac1576000806203330373ffffffffffffffffffffffffffffffffffffffff1684604051610a259190611207565b6000604051808303816000865af19150503d8060008114610a62576040519150601f19603f3d011682016040523d82523d6000602084013e610a67565b606091505b509150915081610aac576040517f08c379a0000000000000000000000000000000000000000000000000000000008152600401610aa390611451565b60405180910390fd5b50508080610ab990611c56565b9150506109f2565b5050505050505050565b60048054610ad8906113d4565b80601f0160208091040260200160405190810160405280929190818152602001828054610b04906113d4565b8015610b515780601f10610b2657610100808354040283529160200191610b51565b820191906000526020600020905b815481529060010190602001808311610b3457829003601f168201915b505050505081565b60008585858585604051602401610b74959493929190611178565b6040516020818303038152906040527f99e20070000000000000000000000000000000000000000000000000000000007bffffffffffffffffffffffffffffffffffffffffffffffffffffffff19166020820180517bffffffffffffffffffffffffffffffffffffffffffffffffffffffff838183161783525050505090506000806203330373ffffffffffffffffffffffffffffffffffffffff1683604051610c1e9190611207565b6000604051808303816000865af19150503d8060008114610c5b576040519150601f19603f3d011682016040523d82523d6000602084013e610c60565b606091505b509150915081610c955780806020019051810190610c7e9190611597565b60059081610c8c919061178c565b50505050610d42565b600080600083806020019051810190610cae9190611a1a565b925092509250826000806101000a81548173ffffffffffffffffffffffffffffffffffffffff021916908373ffffffffffffffffffffffffffffffffffffffff1602179055508160019080519060200190610d0a929190610d49565b50600080600083806020019051810190610d249190611aba565b92509250925082600281905550816003819055505050505050505050505b5050505050565b828054828255906000526020600020908101928215610d85579160200282015b82811115610d84578251825591602001919060010190610d69565b5b509050610d929190610d96565b5090565b5b80821115610daf576000816000905550600101610d97565b5090565b6000819050919050565b610dc681610db3565b82525050565b6000602082019050610de16000830184610dbd565b92915050565b6000604051905090565b600080fd5b600080fd5b610e0481610db3565b8114610e0f57600080fd5b50565b600081359050610e2181610dfb565b92915050565b600060208284031215610e3d57610e3c610df1565b5b6000610e4b84828501610e12565b91505092915050565b6000819050919050565b610e6781610e54565b82525050565b6000602082019050610e826000830184610e5e565b92915050565b610e9181610e54565b8114610e9c57600080fd5b50565b600081359050610eae81610e88565b92915050565b600080600080600060a08688031215610ed057610ecf610df1565b5b6000610ede88828901610e12565b9550506020610eef88828901610e9f565b9450506040610f0088828901610e12565b9350506060610f1188828901610e12565b9250506080610f2288828901610e12565b9150509295509295909350565b600081519050919050565b600082825260208201905092915050565b60005b83811015610f69578082015181840152602081019050610f4e565b60008484015250505050565b6000601f19601f8301169050919050565b6000610f9182610f2f565b610f9b8185610f3a565b9350610fab818560208601610f4b565b610fb481610f75565b840191505092915050565b60006040820190508181036000830152610fd98185610f86565b90508181036020830152610fed8184610f86565b90509392505050565b600081519050919050565b600082825260208201905092915050565b600061101d82610ff6565b6110278185611001565b9350611037818560208601610f4b565b61104081610f75565b840191505092915050565b600060208201905081810360008301526110658184611012565b905092915050565b600060208201905081810360008301526110878184610f86565b905092915050565b600073ffffffffffffffffffffffffffffffffffffffff82169050919050565b60006110ba8261108f565b9050919050565b6110ca816110af565b82525050565b60006020820190506110e560008301846110c1565b92915050565b60008060008060008060c0878903121561110857611107610df1565b5b600061111689828a01610e12565b965050602061112789828a01610e9f565b955050604061113889828a01610e12565b945050606061114989828a01610e12565b935050608061115a89828a01610e12565b92505060a061116b89828a01610e12565b9150509295509295509295565b600060a08201905061118d6000830188610dbd565b61119a6020830187610e5e565b6111a76040830186610dbd565b6111b46060830185610dbd565b6111c16080830184610dbd565b9695505050505050565b600081905092915050565b60006111e182610f2f565b6111eb81856111cb565b93506111fb818560208601610f4b565b80840191505092915050565b600061121382846111d6565b915081905092915050565b7f63726f73732063616c6c2031206661696c20746f2063726f737320636861696e60008201527f2063616c6c000000000000000000000000000000000000000000000000000000602082015250565b600061127a602583611001565b91506112858261121e565b604082019050919050565b600060208201905081810360008301526112a98161126d565b9050919050565b7f4e487b7100000000000000000000000000000000000000000000000000000000600052601160045260246000fd5b60006112ea82610db3565b91506112f583610db3565b925082820190508082111561130d5761130c6112b0565b5b92915050565b7f63726f73732063616c6c2032206661696c20746f2063726f737320636861696e60008201527f2063616c6c000000000000000000000000000000000000000000000000000000602082015250565b600061136f602583611001565b915061137a82611313565b604082019050919050565b6000602082019050818103600083015261139e81611362565b9050919050565b7f4e487b7100000000000000000000000000000000000000000000000000000000600052602260045260246000fd5b600060028204905060018216806113ec57607f821691505b6020821081036113ff576113fe6113a5565b5b50919050565b7f6661696c20746f2063726f737320636861696e2063616c6c0000000000000000600082015250565b600061143b601883611001565b915061144682611405565b602082019050919050565b6000602082019050818103600083015261146a8161142e565b9050919050565b600080fd5b600080fd5b7f4e487b7100000000000000000000000000000000000000000000000000000000600052604160045260246000fd5b6114b382610f75565b810181811067ffffffffffffffff821117156114d2576114d161147b565b5b80604052505050565b60006114e5610de7565b90506114f182826114aa565b919050565b600067ffffffffffffffff8211156115115761151061147b565b5b61151a82610f75565b9050602081019050919050565b600061153a611535846114f6565b6114db565b90508281526020810184848401111561155657611555611476565b5b611561848285610f4b565b509392505050565b600082601f83011261157e5761157d611471565b5b815161158e848260208601611527565b91505092915050565b6000602082840312156115ad576115ac610df1565b5b600082015167ffffffffffffffff8111156115cb576115ca610df6565b5b6115d784828501611569565b91505092915050565b60008190508160005260206000209050919050565b60006020601f8301049050919050565b600082821b905092915050565b6000600883026116427fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff82611605565b61164c8683611605565b95508019841693508086168417925050509392505050565b6000819050919050565b600061168961168461167f84610db3565b611664565b610db3565b9050919050565b6000819050919050565b6116a38361166e565b6116b76116af82611690565b848454611612565b825550505050565b600090565b6116cc6116bf565b6116d781848461169a565b505050565b5b818110156116fb576116f06000826116c4565b6001810190506116dd565b5050565b601f82111561174057611711816115e0565b61171a846115f5565b81016020851015611729578190505b61173d611735856115f5565b8301826116dc565b50505b505050565b600082821c905092915050565b600061176360001984600802611745565b1980831691505092915050565b600061177c8383611752565b9150826002028217905092915050565b61179582610ff6565b67ffffffffffffffff8111156117ae576117ad61147b565b5b6117b882546113d4565b6117c38282856116ff565b600060209050601f8311600181146117f657600084156117e4578287015190505b6117ee8582611770565b865550611856565b601f198416611804866115e0565b60005b8281101561182c57848901518255600182019150602085019450602081019050611807565b868310156118495784890151611845601f891682611752565b8355505b6001600288020188555050505b505050505050565b60006118698261108f565b9050919050565b6118798161185e565b811461188457600080fd5b50565b60008151905061189681611870565b92915050565b600067ffffffffffffffff8211156118b7576118b661147b565b5b602082029050602081019050919050565b600080fd5b6000815190506118dc81610e88565b92915050565b60006118f56118f08461189c565b6114db565b90508083825260208201905060208402830185811115611918576119176118c8565b5b835b81811015611941578061192d88826118cd565b84526020840193505060208101905061191a565b5050509392505050565b600082601f8301126119605761195f611471565b5b81516119708482602086016118e2565b91505092915050565b600067ffffffffffffffff8211156119945761199361147b565b5b61199d82610f75565b9050602081019050919050565b60006119bd6119b884611979565b6114db565b9050828152602081018484840111156119d9576119d8611476565b5b6119e4848285610f4b565b509392505050565b600082601f830112611a0157611a00611471565b5b8151611a118482602086016119aa565b91505092915050565b600080600060608486031215611a3357611a32610df1565b5b6000611a4186828701611887565b935050602084015167ffffffffffffffff811115611a6257611a61610df6565b5b611a6e8682870161194b565b925050604084015167ffffffffffffffff811115611a8f57611a8e610df6565b5b611a9b868287016119ec565b9150509250925092565b600081519050611ab481610dfb565b92915050565b600080600060608486031215611ad357611ad2610df1565b5b6000611ae186828701611aa5565b9350506020611af286828701611aa5565b925050604084015167ffffffffffffffff811115611b1357611b12610df6565b5b611b1f868287016119ec565b9150509250925092565b60008190508160005260206000209050919050565b601f821115611b7f57611b5081611b29565b611b59846115f5565b81016020851015611b68578190505b611b7c611b74856115f5565b8301826116dc565b50505b505050565b611b8d82610f2f565b67ffffffffffffffff811115611ba657611ba561147b565b5b611bb082546113d4565b611bbb828285611b3e565b600060209050601f831160018114611bee5760008415611bdc578287015190505b611be68582611770565b865550611c4e565b601f198416611bfc86611b29565b60005b82811015611c2457848901518255600182019150602085019450602081019050611bff565b86831015611c415784890151611c3d601f891682611752565b8355505b6001600288020188555050505b505050505050565b6000611c6182610db3565b91507fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff8203611c9357611c926112b0565b5b60018201905091905056fea2646970667358221220ddc3c69b7750c0c0a5ec0b298c05e7eada30b737a3c6b585d8a90e472e959fdc64736f6c63430008110033"),
+				},
+			},
+		}
+
+		globalchainId = config.ChainID
+		genesis       = gspec.MustCommit(db)
+	)
+
+	rec, externalClient, err := newMuskBlockChain()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	targetTxHash := rec.TxHash
+	const txHashNotFound = "0x0000000000000000000000000000000000000000000000000000000000000001"
+
+	ctx := context.Background()
+	chainID, err := externalClient.ChainID(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	CallOnceArgs := NewCrossChainCallArgument(config, externalClient, chainID.Uint64(), targetTxHash, 0, 300, 10)
+	CallOnceArgsWithExpectErrAsLogIdxExceed := NewCrossChainCallArgument(config, externalClient, chainID.Uint64(), targetTxHash, 2, 300, 10)
+	CallOnceArgsWithExpectErrAsNotFound := NewCrossChainCallArgument(config, externalClient, chainID.Uint64(), common.HexToHash(txHashNotFound), 2, 300, 10)
+
+	BatchCallTrace0 := NewCrossChainCallArgument(config, externalClient, chainID.Uint64(), targetTxHash, 0, 300, 10)
+	BatchCallTrace1 := NewCrossChainCallArgument(config, externalClient, chainID.Uint64(), targetTxHash, 0, 300, 10)
+	BatchCallTrace2 := NewCrossChainCallArgument(config, externalClient, chainID.Uint64(), targetTxHash, 0, 300, 10)
+	BatchCallArgs := NewCrossChainCallArgument(config, externalClient, chainID.Uint64(), targetTxHash, 0, 300, 10)
+
+	Args_ExpectErrChainIdNoSupport := NewCrossChainCallArgument(config, externalClient, 5, targetTxHash, 0, 300, 10)
+
+	wrapTxs := []*WrapTx{
+		&WrapTx{
+			Tx: types.NewTx(&types.DynamicFeeTx{
+				ChainID:   globalchainId,
+				Nonce:     0,
+				To:        &contractAddr,
+				Value:     big.NewInt(0),
+				Gas:       5000000,
+				GasTipCap: big.NewInt(1000000000),
+				GasFeeCap: big.NewInt(6000000000),
+				Data:      CallOnceArgs.CallOncePackWithoutErr(),
+			}),
+			Args:         CallOnceArgs,
+			ExpectTxData: CallOnceArgs.CallOncePack,
+			ExpectTraces: []*ExpectTrace{
+				CallOnceArgs.CrossChainCallResultToExpectCallResult(),
+			},
+		},
+		// expect err match:CrossChainCall:logIdx out-of-bound
+		&WrapTx{
+			Tx: types.NewTx(&types.DynamicFeeTx{
+				ChainID:   globalchainId,
+				Nonce:     0,
+				To:        &contractAddr,
+				Value:     big.NewInt(0),
+				Gas:       5000000,
+				GasTipCap: big.NewInt(1000000000),
+				GasFeeCap: big.NewInt(6000000000),
+				Data:      CallOnceArgsWithExpectErrAsLogIdxExceed.CallOncePackWithoutErr(),
+			}),
+			Args:         CallOnceArgsWithExpectErrAsLogIdxExceed,
+			ExpectTxData: CallOnceArgsWithExpectErrAsLogIdxExceed.CallOncePack,
+			ExpectTraces: []*ExpectTrace{
+				CallOnceArgsWithExpectErrAsLogIdxExceed.CrossChainCallResultToExpectCallResult(),
+			},
+			happenError: vm.NewExpectCallErr("CrossChainCall: logIdx out-of-bound"),
+		},
+		// expect err txHash not found
+		&WrapTx{
+			Tx: types.NewTx(&types.DynamicFeeTx{
+				ChainID:   globalchainId,
+				Nonce:     0,
+				To:        &contractAddr,
+				Value:     big.NewInt(0),
+				Gas:       5000000,
+				GasTipCap: big.NewInt(1000000000),
+				GasFeeCap: big.NewInt(6000000000),
+				Data:      CallOnceArgsWithExpectErrAsNotFound.CallOncePackWithoutErr(),
+			}),
+			Args:         CallOnceArgsWithExpectErrAsNotFound,
+			ExpectTxData: CallOnceArgsWithExpectErrAsNotFound.CallOncePack,
+			happenError:  vm.NewExpectCallErr(ethereum.NotFound.Error()),
+		},
+		// expect err chainId no support
+		&WrapTx{
+			Tx: types.NewTx(&types.DynamicFeeTx{
+				ChainID:   globalchainId,
+				Nonce:     0,
+				To:        &contractAddr,
+				Value:     big.NewInt(0),
+				Gas:       5000000,
+				GasTipCap: big.NewInt(1000000000),
+				GasFeeCap: big.NewInt(6000000000),
+				Data:      Args_ExpectErrChainIdNoSupport.CallOncePackWithoutErr(),
+			}),
+			Args:         Args_ExpectErrChainIdNoSupport,
+			ExpectTxData: Args_ExpectErrChainIdNoSupport.CallOncePack,
+			happenError:  vm.NewExpectCallErr(fmt.Sprintf("CrossChainCall: chainId %d no support", Args_ExpectErrChainIdNoSupport.ChainId)),
+		},
+		// external call twice
+		&WrapTx{
+			Tx: types.NewTx(&types.DynamicFeeTx{
+				ChainID:   globalchainId,
+				Nonce:     0,
+				To:        &contractAddr,
+				Value:     big.NewInt(0),
+				Gas:       5000000,
+				GasTipCap: big.NewInt(1000000000),
+				GasFeeCap: big.NewInt(6000000000),
+				Data:      BatchCallArgs.BatchCallPackWithoutErr(3),
+			}),
+			Args: BatchCallArgs,
+			ExpectTraces: []*ExpectTrace{
+				BatchCallTrace0.CrossChainCallResultToExpectCallResult(),
+				BatchCallTrace1.CrossChainCallResultToExpectCallResult(),
+				BatchCallTrace2.CrossChainCallResultToExpectCallResult(),
+			},
+		},
+	}
+
+	var singedWrapTxs []*WrapTx
+	for i, wrapTx := range wrapTxs {
+		signer := types.LatestSignerForChainID(globalchainId)
+		signTx, err := types.SignTx(wrapTx.Tx, signer, key1)
+		if err != nil {
+			t.Error(err)
+		}
+
+		wrapTx.Tx = signTx
+
+		if wrapTx.ExpectTxData != nil {
+			txData, err := wrapTx.ExpectTxData()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if common.Bytes2Hex(txData) != common.Bytes2Hex(wrapTx.Tx.Data()) {
+				t.Fatalf("%d Tx data no match. wrapTx.ExpectTxData():%s ,", i, common.Bytes2Hex(wrapTx.Tx.Data()))
+			}
+		}
+
+		singedWrapTxs = append(singedWrapTxs, wrapTx)
+	}
+
+	// evm executes a transaction while the external calling client is active
+	for txIndex, stx := range singedWrapTxs {
+		// prepare chainContext
+		cli := &clique.Clique{}
+		wtm := NewWrapTendermint(cli, nil)
+		chainContext := NewTestChainContext(wtm)
+
+		// prepare block
+		block := genesis
+		gaspool := new(core.GasPool)
+		gaspool.AddGas(8000000000)
+
+		buf := new(bytes.Buffer)
+		w := bufio.NewWriter(buf)
+		tracer := logger.NewJSONLogger(&logger.Config{}, w)
+		vmconfig := vm.Config{Debug: true, Tracer: tracer, MindReadingClient: externalClient}
+
+		_, statedb := MakePreState(db, gspec.Alloc, false)
+
+		msg, err := stx.Tx.AsMessage(types.MakeSigner(config, block.Header().Number), block.Header().BaseFee)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Create a new context to be used in the EVM environment
+		blockContext := core.NewEVMBlockContext(block.Header(), chainContext, &addr1)
+		vmenv := vm.NewEVM(blockContext, vm.TxContext{}, statedb, config, vmconfig)
+		execResult, err := core.ApplyMessage(vmenv, msg, gaspool)
+		if err != nil {
+			stx.VerifyCallResult(nil, err, txIndex, t)
+		} else {
+			stx.VerifyCallResult(execResult.CCCOutputs, err, txIndex, t)
+			stx.SetExternalCallRes(execResult.CCCOutputs)
+		}
+	}
+
+	t.Log("================preset crossChainCall output=====================")
+	//evm executes a transaction while the external calling client is inactive
+	for txIndex, stx := range singedWrapTxs {
+		if stx.happenError != nil {
+			continue
+		}
+		// prepare chainContext
+		cli := &clique.Clique{}
+		wtm := NewWrapTendermint(cli, nil)
+		chainContext := NewTestChainContext(wtm)
+
+		// prepare block
+		block := genesis
+		gaspool := new(core.GasPool)
+		gaspool.AddGas(8000000000)
+
+		var actualUsedGas uint64 = 0
+		buf := new(bytes.Buffer)
+		w := bufio.NewWriter(buf)
+		tracer := logger.NewJSONLogger(&logger.Config{}, w)
+		// set the externalCallClient as nil
+		vmconfig := vm.Config{Debug: true, Tracer: tracer, MindReadingClient: nil, RelayMindReading: true}
+
+		_, statedb := MakePreState(db, gspec.Alloc, false)
+
+		msg, err := stx.Tx.AsMessage(types.MakeSigner(config, block.Header().Number), block.Header().BaseFee)
+		if err != nil {
+			t.Error(err)
+		}
+		// Create a new context to be used in the EVM environment
+		blockContext := core.NewEVMBlockContext(block.Header(), chainContext, &addr1)
+		vmenv := vm.NewEVM(blockContext, vm.TxContext{}, statedb, config, vmconfig)
+
+		// preset CrossChainCall outputs in evm
+		vmenv.SetCCCOutputs(stx.ExpectCCRBytes)
+		execResult, err := core.ApplyMessage(vmenv, msg, gaspool)
+
+		if err != nil {
+			stx.VerifyCallResult(nil, err, txIndex, t)
+		} else {
+			stx.VerifyCallResult(execResult.CCCOutputs, err, txIndex, t)
+		}
+
+		// compare gas use
+		if actualUsedGas != stx.GasUsed {
+			t.Errorf("The gas consumption is different when the client is nil and not nil, txIndex=[%d] , nil gas used (%d) , no nil gas used (%d) ", txIndex, actualUsedGas, stx.GasUsed)
+		}
+	}
 }
