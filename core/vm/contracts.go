@@ -53,6 +53,10 @@ type PrecompiledContractCallEnv struct {
 	caller ContractRef
 }
 
+func NewPrecompiledContractCallEnv(evm *EVM, caller ContractRef) *PrecompiledContractCallEnv {
+	return &PrecompiledContractCallEnv{evm: evm, caller: caller}
+}
+
 type PrecompiledContractWithEVM interface {
 	RunWith(env *PrecompiledContractCallEnv, input []byte) ([]byte, error)
 }
@@ -1327,7 +1331,7 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractCallEnv, input []byte, 
 
 		var crossChainCallOutput *CrossChainCallOutput
 
-		if env.evm.Config.relayMindReading {
+		if env.evm.Config.RelayMindReading {
 			// The flag of relayExternalCalls is true means that the node will preset the external-call-result received through network
 			idx := env.evm.Interpreter().CCCOutputsIdx()
 			if idx >= uint64(len(env.evm.Interpreter().CCCOutputs())) {
@@ -1408,7 +1412,7 @@ func GetExternalLog(ctx context.Context, env *PrecompiledContractCallEnv, chainI
 
 	if chainId != env.evm.ChainConfig().ExternalCall.SupportChainId {
 		// expect error
-		expErr = NewExpectCallErr(fmt.Sprintf("CrossChainCall:chainId %d no support", chainId))
+		expErr = NewExpectCallErr(fmt.Sprintf("CrossChainCall: chainId %d no support", chainId))
 		return nil, expErr, nil
 	}
 
@@ -1432,12 +1436,12 @@ func GetExternalLog(ctx context.Context, env *PrecompiledContractCallEnv, chainI
 
 	if latestBlockNumber-happenedBlockNumber.Uint64() < confirms {
 		// expect error
-		return nil, NewExpectCallErr("CrossChainCall:confirms no enough"), nil
+		return nil, NewExpectCallErr("CrossChainCall: confirms no enough"), nil
 	}
 
 	if logIdx >= uint64(len(receipt.Logs)) {
 		// expect error
-		return nil, NewExpectCallErr("CrossChainCall:logIdx out-of-bound"), nil
+		return nil, NewExpectCallErr("CrossChainCall: logIdx out-of-bound"), nil
 	}
 	log := receipt.Logs[logIdx]
 

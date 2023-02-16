@@ -40,7 +40,7 @@ type Config struct {
 	ExtraEips []int // Additional EIPS that are to be enabled
 	IsJsonRpc bool  // Whether the call is in context of JsonRpc
 
-	relayMindReading  bool              // relayMindReading is a flag to define whether the execution environment of crossChainCall precompile contract needs to obtain the results of external calls independently
+	RelayMindReading  bool              // RelayMindReading is a flag to define whether the execution environment of crossChainCall precompile contract needs to obtain the results of external calls independently
 	MindReadingClient MindReadingClient // MindReadingClient is responsible for responding to request from crossChainCall in the current version
 }
 
