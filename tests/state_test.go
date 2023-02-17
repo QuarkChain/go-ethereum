@@ -583,7 +583,7 @@ func TestCrossChainCallPrecompile(t *testing.T) {
 
 		_, err = vm.VerifyCrossChainCall(client, input)
 		if err != nil {
-			if err.Error() != "Expect Error:CrossChainCall:confirms no enough" {
+			if err.Error() != "Expect Error:CrossChainCall: confirms no enough" {
 				t.Error("The resulting error does not match the expected error")
 			}
 		} else {
@@ -609,7 +609,7 @@ func TestCrossChainCallPrecompile(t *testing.T) {
 
 		_, err = vm.VerifyCrossChainCall(client, input)
 		if err != nil {
-			if err.Error() != "Expect Error:CrossChainCall:logIdx out-of-bound" {
+			if err.Error() != "Expect Error:CrossChainCall: logIdx out-of-bound" {
 				t.Errorf("The resulting error does not match the expected error; actual err:%s", err.Error())
 			}
 		} else {
@@ -633,7 +633,7 @@ func TestCrossChainCallPrecompile(t *testing.T) {
 
 		_, err = vm.VerifyCrossChainCall(client, input)
 		if err != nil {
-			if err.Error() != "Expect Error:CrossChainCall:chainId 2 no support" {
+			if err.Error() != "Expect Error:CrossChainCall: chainId 2 no support" {
 				t.Errorf("The resulting error does not match the expected error; actual err:%s", err.Error())
 			}
 		} else {
