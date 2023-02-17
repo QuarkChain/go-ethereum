@@ -512,7 +512,7 @@ type ChainConfig struct {
 	Tendermint *TendermintConfig `json:"tendermint,omitempty"`
 
 	// external call config
-	ExternalCall *ExternalCallConfig `json:"externalCall,omitempty"`
+	MindReading *MindReadingConfig `json:"externalCall,omitempty"`
 }
 
 // EthashConfig is the consensus engine configs for proof-of-work based sealing.
@@ -544,7 +544,7 @@ type TendermintConfig struct {
 	ConsensusConfig        ConsensusConfig
 }
 
-type ExternalCallConfig struct {
+type MindReadingConfig struct {
 	EnableBlockNumber *big.Int `json:"enableBlockNumber"`
 	Version           uint64   `json:"version"`
 	SupportChainId    uint64   `json:"supportChainId"`
@@ -553,7 +553,7 @@ type ExternalCallConfig struct {
 }
 
 // String implements the stringer interface
-func (c *ExternalCallConfig) String() string {
+func (c *MindReadingConfig) String() string {
 	return "externalCallConfig"
 }
 

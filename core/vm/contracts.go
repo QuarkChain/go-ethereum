@@ -1360,7 +1360,7 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractCallEnv, input []byte, 
 			confirms := new(big.Int).SetBytes(getData(input, 4+128, 32)).Uint64()
 
 			// Ensure that the number of confirmations meets the minimum requirement which is defined by chainConfig
-			if confirms < env.evm.ChainConfig().ExternalCall.MinimumConfirms {
+			if confirms < env.evm.ChainConfig().MindReading.MinimumConfirms {
 				env.evm.setCrossChainCallUnexpectErr(ErrUserConfirmsNoEnough)
 				return nil, 0, ErrUserConfirmsNoEnough
 			}
@@ -1410,7 +1410,7 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractCallEnv, input []byte, 
 func GetExternalLog(ctx context.Context, env *PrecompiledContractCallEnv, chainId uint64, txHash common.Hash, logIdx uint64, maxDataLen uint64, confirms uint64) (cr *GetLogByTxHash, expErr *ExpectCallErr, unExpErr error) {
 	client := env.evm.MindReadingClient()
 
-	if chainId != env.evm.ChainConfig().ExternalCall.SupportChainId {
+	if chainId != env.evm.ChainConfig().MindReading.SupportChainId {
 		// expect error
 		expErr = NewExpectCallErr(fmt.Sprintf("CrossChainCall: chainId %d no support", chainId))
 		return nil, expErr, nil
@@ -1545,7 +1545,7 @@ func VerifyCrossChainCall(client MindReadingClient, externalCallInput string) ([
 		return nil, err
 	}
 	supportChainID := chainId.Uint64()
-	chainCfg := &params.ChainConfig{ExternalCall: &params.ExternalCallConfig{EnableBlockNumber: big.NewInt(0), SupportChainId: supportChainID, Version: 1}}
+	chainCfg := &params.ChainConfig{MindReading: &params.MindReadingConfig{EnableBlockNumber: big.NewInt(0), SupportChainId: supportChainID, Version: 1}}
 
 	evm := NewEVM(BlockContext{BlockNumber: big.NewInt(0)}, TxContext{}, nil, chainCfg, evmConfig)
 	evmInterpreter := NewEVMInterpreter(evm, evm.Config)

@@ -18,7 +18,6 @@ package core
 
 import (
 	"fmt"
-	"github.com/ethereum/go-ethereum/rlp"
 	"math"
 	"math/big"
 
@@ -28,6 +27,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/ethereum/go-ethereum/rlp"
 )
 
 var emptyCodeHash = crypto.Keccak256Hash(nil)
@@ -43,10 +43,8 @@ The state transitioning model does all the necessary work to work out a valid ne
 3) Create a new state object if the recipient is \0*32
 4) Value transfer
 == If contract creation ==
-
-	4a) Attempt to run transaction data
-	4b) If valid, use result as code for the new state object
-
+4a) Attempt to run transaction data
+4b) If valid, use result as code for the new state object
 == end ==
 5) Run Script section
 6) Derive new state root
@@ -358,8 +356,8 @@ func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
 		outputs := st.evm.Interpreter().CCCOutputs()
 
 		var version uint64
-		if st.evm.ChainConfig().ExternalCall.Version != 0 {
-			version = st.evm.ChainConfig().ExternalCall.Version
+		if st.evm.ChainConfig().MindReading.Version != 0 {
+			version = st.evm.ChainConfig().MindReading.Version
 		} else {
 			version = 0
 		}

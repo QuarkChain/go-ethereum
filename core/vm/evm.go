@@ -174,7 +174,7 @@ func (evm *EVM) SetCCCOutputs(result []byte) {
 
 // IsExternalCallEnabled returns true if the external-call module is active, otherwise returns false
 func (evm *EVM) IsExternalCallEnabled() bool {
-	if evm.ChainConfig().ExternalCall != nil && evm.ChainConfig().ExternalCall.EnableBlockNumber != nil && evm.Context.BlockNumber.Cmp(evm.ChainConfig().ExternalCall.EnableBlockNumber) != -1 {
+	if evm.ChainConfig().MindReading != nil && evm.ChainConfig().MindReading.EnableBlockNumber != nil && evm.Context.BlockNumber.Cmp(evm.ChainConfig().MindReading.EnableBlockNumber) != -1 {
 		return true
 	}
 	return false

@@ -1147,7 +1147,7 @@ func TestApplyTransaction(t *testing.T) {
 			LondonBlock:         big.NewInt(0),
 			PisaBlock:           big.NewInt(0),
 			ArrowGlacierBlock:   nil,
-			ExternalCall: &params.ExternalCallConfig{
+			MindReading: &params.MindReadingConfig{
 				EnableBlockNumber: big.NewInt(0),
 				Version:           1,
 				SupportChainId:    1337,
