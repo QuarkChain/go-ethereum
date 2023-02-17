@@ -196,7 +196,7 @@ func (request *NewBlockPacket) sanityCheck() error {
 	if err := request.Block.SanityCheck(); err != nil {
 		return err
 	}
-	//TD at mainnet block #7753254 is 76 bits. If it becomes 100 million times
+	// TD at mainnet block #7753254 is 76 bits. If it becomes 100 million times
 	// larger, it will still fit within 100 bits
 	if tdlen := request.TD.BitLen(); tdlen > 100 {
 		return fmt.Errorf("too large block TD: bitlen %d", tdlen)
@@ -286,6 +286,11 @@ type ReceiptsPacket [][]*types.Receipt
 type ReceiptsPacket66 struct {
 	RequestId uint64
 	ReceiptsPacket
+}
+
+type ReceiptsPacket66Complete struct {
+	RequestId      uint64
+	ReceiptsPacket [][]*types.ReceiptComplete
 }
 
 // ReceiptsRLPPacket is used for receipts, when we already have it encoded

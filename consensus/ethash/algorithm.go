@@ -48,6 +48,10 @@ const (
 	loopAccesses       = 64      // Number of accesses in hashimoto loop
 )
 
+func GetMixBytes() int {
+	return mixBytes
+}
+
 // cacheSize returns the size of the ethash verification cache that belongs to a certain
 // block number.
 func cacheSize(block uint64) uint64 {
@@ -69,14 +73,21 @@ func calcCacheSize(epoch int) uint64 {
 	return size
 }
 
-// datasetSize returns the size of the ethash mining dataset that belongs to a certain
+// DatasetSize returns the size of the ethash mining dataset that belongs to a certain
 // block number.
-func datasetSize(block uint64) uint64 {
+func DatasetSize(block uint64) uint64 {
 	epoch := int(block / epochLength)
 	if epoch < maxEpoch {
 		return datasetSizes[epoch]
 	}
 	return calcDatasetSize(epoch)
+}
+
+func DatasetSizeForEpoch(epoch uint64) uint64 {
+	if epoch < maxEpoch {
+		return datasetSizes[epoch]
+	}
+	return calcDatasetSize(int(epoch))
 }
 
 // calcDatasetSize calculates the dataset size for epoch. The dataset size grows linearly,
@@ -373,6 +384,51 @@ func hashimoto(hash []byte, nonce uint64, size uint64, lookup func(index uint32)
 		binary.LittleEndian.PutUint32(digest[i*4:], val)
 	}
 	return digest, crypto.Keccak256(append(seed, digest...))
+}
+
+func HashimotoForMask(seed []byte, size uint64, lookup func(index uint32) []uint32) []byte {
+	// Calculate the number of theoretical rows (we use one buffer nonetheless)
+	rows := uint32(size / mixBytes)
+
+	seed = crypto.Keccak512(seed)
+	seedHead := binary.LittleEndian.Uint32(seed)
+
+	// Start the mix with replicated seed
+	mix := make([]uint32, mixBytes/4)
+	for i := 0; i < len(mix); i++ {
+		mix[i] = binary.LittleEndian.Uint32(seed[i%16*4:])
+	}
+	// Mix in random dataset nodes
+	temp := make([]uint32, len(mix))
+
+	for i := 0; i < loopAccesses; i++ {
+		parent := fnv(uint32(i)^seedHead, mix[i%len(mix)]) % rows
+		for j := uint32(0); j < mixBytes/hashBytes; j++ {
+			copy(temp[j*hashWords:], lookup(2*parent+j))
+		}
+		fnvHash(mix, temp)
+	}
+
+	mixBytes := make([]byte, mixBytes)
+	for i, val := range mix {
+		binary.LittleEndian.PutUint32(mixBytes[i*4:], val)
+	}
+	return mixBytes
+}
+
+func HashimotoForMaskLight(size uint64, cache []uint32, hash []byte) []byte {
+	keccak512 := makeHasher(sha3.NewLegacyKeccak512())
+
+	lookup := func(index uint32) []uint32 {
+		rawData := generateDatasetItem(cache, index, keccak512)
+
+		data := make([]uint32, len(rawData)/4)
+		for i := 0; i < len(data); i++ {
+			data[i] = binary.LittleEndian.Uint32(rawData[i*4:])
+		}
+		return data
+	}
+	return HashimotoForMask(hash, size, lookup)
 }
 
 // hashimotoLight aggregates data from the full dataset (using only a small

@@ -772,7 +772,7 @@ func BenchmarkHashimotoLight(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		hashimotoLight(datasetSize(1), cache, hash, 0)
+		hashimotoLight(DatasetSize(1), cache, hash, 0)
 	}
 }
 

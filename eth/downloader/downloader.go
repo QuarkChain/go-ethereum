@@ -27,15 +27,19 @@ import (
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/rawdb"
+	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/state/snapshot"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/eth/protocols/eth"
 	"github.com/ethereum/go-ethereum/eth/protocols/snap"
+	"github.com/ethereum/go-ethereum/eth/protocols/sstorage"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
+	sstor "github.com/ethereum/go-ethereum/sstorage"
 )
 
 var (
@@ -129,7 +133,9 @@ type Downloader struct {
 
 	snapSync       bool         // Whether to run state sync over the snap protocol
 	SnapSyncer     *snap.Syncer // TODO(karalabe): make private! hack for now
+	SstorSyncer    *sstorage.Syncer
 	stateSyncStart chan *stateSync
+	sstorSyncStart chan *sstorSync
 
 	// Cancellation and termination
 	cancelPeer string         // Identifier of the peer currently being used as the master (cancel on drop)
@@ -198,6 +204,23 @@ type BlockChain interface {
 
 	// Snapshots returns the blockchain snapshot tree to paused it during sync.
 	Snapshots() *snapshot.Tree
+
+	// StateAt returns a new mutable state based on a particular point in time.
+	StateAt(root common.Hash) (*state.StateDB, error)
+
+	// VerifyAndWriteKV verify a list KV data using the metadata saved in the local level DB and write successfully verified
+	// KVs to the sstorage file. And return the inserted KV index list.
+	VerifyAndWriteKV(contract common.Address, data map[uint64][]byte) (uint64, uint64, []uint64, error)
+
+	// ReadMaskedKVsByIndexList Read the masked KVs by a list of KV index.
+	ReadMaskedKVsByIndexList(contract common.Address, indexes []uint64) ([]*core.KV, error)
+
+	// ReadMaskedKVsByIndexRange Read masked KVs sequentially starting from origin until the index exceeds the limit or
+	// the amount of data read is greater than the bytes.
+	ReadMaskedKVsByIndexRange(contract common.Address, origin uint64, limit uint64, bytes uint64) ([]*core.KV, error)
+
+	// GetSstorageLastKvIdx get LastKvIdx from a sstorage contract with latest stateDB.
+	GetSstorageLastKvIdx(contract common.Address) (uint64, error)
 }
 
 // New creates a new downloader to fetch hashes and blocks from remote peers.
@@ -217,9 +240,17 @@ func New(checkpoint uint64, stateDb ethdb.Database, mux *event.TypeMux, chain Bl
 		headerProcCh:   make(chan *headerTask, 1),
 		quitCh:         make(chan struct{}),
 		SnapSyncer:     snap.NewSyncer(stateDb),
+		SstorSyncer:    sstorage.NewSyncer(stateDb, chain, sstor.Shards()),
 		stateSyncStart: make(chan *stateSync),
+		sstorSyncStart: make(chan *sstorSync),
+	}
+
+	cfg, _ := stateDb.PruneConfig()
+	if cfg != nil && cfg.DurationBlocks != 0 {
+		fullMaxForkAncestry = cfg.DurationBlocks
 	}
 	go dl.stateFetcher()
+	go dl.sstorageFetcher()
 	return dl
 }
 
@@ -322,6 +353,9 @@ func (d *Downloader) UnregisterPeer(id string) error {
 // adding various sanity checks as well as wrapping it with various log entries.
 func (d *Downloader) Synchronise(id string, head common.Hash, td *big.Int, mode SyncMode) error {
 	err := d.synchronise(id, head, td, mode)
+	if err == nil && len(sstor.Shards()) > 0 {
+		d.sstorState()
+	}
 
 	switch err {
 	case nil, errBusy, errCanceled:
@@ -1611,6 +1645,19 @@ func (d *Downloader) DeliverSnapPacket(peer *snap.Peer, packet snap.Packet) erro
 	case *snap.TrieNodesPacket:
 		return d.SnapSyncer.OnTrieNodes(peer, packet.ID, packet.Nodes)
 
+	default:
+		return fmt.Errorf("unexpected snap packet type: %T", packet)
+	}
+}
+
+// DeliverSstoragePacket is invoked from a peer's message handler when it transmits a
+// data packet for the local node to consume.
+func (d *Downloader) DeliverSstoragePacket(peer *sstorage.Peer, packet sstorage.Packet) error {
+	switch packet := packet.(type) {
+	case *sstorage.KVsPacket:
+		return d.SstorSyncer.OnKVs(peer, packet.ID, packet.KVs)
+	case *sstorage.KVRangePacket:
+		return d.SstorSyncer.OnKVRange(peer, packet.ID, packet.KVs)
 	default:
 		return fmt.Errorf("unexpected snap packet type: %T", packet)
 	}

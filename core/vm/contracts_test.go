@@ -18,13 +18,19 @@ package vm
 
 import (
 	"bytes"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"math/big"
 	"testing"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/rawdb"
+	"github.com/ethereum/go-ethereum/core/state"
+	"github.com/ethereum/go-ethereum/params"
+	"github.com/ethereum/go-ethereum/sstorage"
 )
 
 // precompiledTest defines the input/output pairs for precompiled contract tests.
@@ -299,6 +305,95 @@ func benchJson(name, addr string, b *testing.B) {
 	}
 	for _, test := range tests {
 		benchmarkPrecompiled(addr, test, b)
+	}
+}
+
+func TestUnmaskDaggerData(t *testing.T) {
+	sstorage.InitializeConfig()
+	p := &sstoragePisa{}
+
+	hash := common.Hash{0x01, 0x2}
+	epoch := big.NewInt(1)
+	maskedChunk := [4 * 1024]byte{0x03, 0x4}
+	input := unmaskDaggerDataInput{Epoch: epoch, Hash: hash, MaskedChunk: maskedChunk[:]}
+	packed, err := unmaskDaggerDataInputAbi.Pack(epoch, hash, maskedChunk[:])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	caller := sstorage.ShardInfos[0].Contract
+	expected, err := unmaskDaggerDataImpl(caller, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	test := precompiledTest{
+		Name:     "TestUnmaskDaggerData",
+		Input:    hex.EncodeToString(unmaskDaggerData) + hex.EncodeToString(packed),
+		Expected: hex.EncodeToString(expected),
+	}
+	in := common.Hex2Bytes(test.Input)
+	gas := p.RequiredGas(in)
+	test.Gas = gas
+
+	statedb, _ := state.New(common.Hash{}, state.NewDatabase(rawdb.NewMemoryDatabase()), nil)
+
+	vmctx := BlockContext{
+		BlockNumber: big.NewInt(0),
+		CanTransfer: func(_ StateDB, _ common.Address, toAmount *big.Int) bool {
+			return true
+		},
+		Transfer: func(StateDB, common.Address, common.Address, *big.Int) {},
+	}
+	vmenv := NewEVM(vmctx, TxContext{}, statedb, params.AllEthashProtocolChanges, Config{})
+
+	env := &PrecompiledContractCallEnv{vmenv, AccountRef(caller)}
+
+	t.Run(fmt.Sprintf("%s-Gas=%d", test.Name, gas), func(t *testing.T) {
+		if res, _, err := RunPrecompiledContract(env, p, in, gas); err != nil {
+			t.Error(err)
+		} else if common.Bytes2Hex(res) != test.Expected {
+			t.Errorf("Expected %v, got %v", test.Expected, common.Bytes2Hex(res))
+		}
+		if expGas := test.Gas; expGas != gas {
+			t.Errorf("%v: gas wrong, expected %d, got %d", test.Name, expGas, gas)
+		}
+		// Verify that the precompile did not touch the input buffer
+		exp := common.Hex2Bytes(test.Input)
+		if !bytes.Equal(in, exp) {
+			t.Errorf("Precompiled modified input data: %d vs %d", len(in), len(exp))
+		}
+	})
+}
+
+func TestUnmaskDaggerDataArgs(t *testing.T) {
+	hash := common.Hash{0x01, 0x2}
+	epoch := big.NewInt(1)
+	maskedChunk := [4 * 1024]byte{0x03, 0x4}
+	packed, err := unmaskDaggerDataInputAbi.Pack(epoch, hash, maskedChunk[:])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	values, err := unmaskDaggerDataInputAbi.Unpack(packed)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var decoded unmaskDaggerDataInput
+	err = unmaskDaggerDataInputAbi.Copy(&decoded, values)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Epoch.Cmp(epoch) != 0 {
+		t.Fatal("height mismatch")
+	}
+
+	if decoded.Hash != hash {
+		t.Fatal("hash mismatch")
+	}
+	if !bytes.Equal(decoded.MaskedChunk, maskedChunk[:]) {
+		t.Fatal("maskedChunk mismatch")
 	}
 }
 

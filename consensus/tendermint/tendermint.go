@@ -334,7 +334,9 @@ func (c *Tendermint) VerifyHeaders(chain consensus.ChainHeaderReader, headers []
 
 	go func() {
 		for i, header := range headers {
-			err := c.verifyHeader(chain, header, headers[:i], seals[i])
+			// force to check signatures for checkpoint headers
+			checkpoint := (header.Number.Uint64() % c.config.Epoch) == 0
+			err := c.verifyHeader(chain, header, headers[:i], seals[i] || checkpoint)
 
 			select {
 			case <-abort:

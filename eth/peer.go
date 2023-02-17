@@ -19,8 +19,10 @@ package eth
 import (
 	"math/big"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/eth/protocols/eth"
 	"github.com/ethereum/go-ethereum/eth/protocols/snap"
+	"github.com/ethereum/go-ethereum/eth/protocols/sstorage"
 )
 
 // ethPeerInfo represents a short summary of the `eth` sub-protocol metadata known
@@ -36,6 +38,7 @@ type ethPeer struct {
 	*eth.Peer
 	snapExt  *snapPeer     // Satellite `snap` connection
 	snapWait chan struct{} // Notification channel for snap connections
+	sstorExt *sstoragePeer
 }
 
 // info gathers and returns some `eth` protocol metadata known about a peer.
@@ -64,5 +67,25 @@ type snapPeer struct {
 func (p *snapPeer) info() *snapPeerInfo {
 	return &snapPeerInfo{
 		Version: p.Version(),
+	}
+}
+
+// snapPeerInfo represents a short summary of the `snap` sub-protocol metadata known
+// about a connected peer.
+type sstoragePeerInfo struct {
+	Version uint                        `json:"version"` // SStorage protocol version negotiated
+	Shards  map[common.Address][]uint64 `json:"shards"`  // Shards the peer support
+}
+
+// snapPeer is a wrapper around snap.Peer to maintain a few extra metadata.
+type sstoragePeer struct {
+	*sstorage.Peer
+}
+
+// info gathers and returns some `snap` protocol metadata known about a peer.
+func (p *sstoragePeerInfo) info() *sstoragePeerInfo {
+	return &sstoragePeerInfo{
+		Version: p.Version,
+		Shards:  p.Shards,
 	}
 }

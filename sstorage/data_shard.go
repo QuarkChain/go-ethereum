@@ -29,7 +29,7 @@ func (ds *DataShard) AddDataFile(df *DataFile) {
 
 // Returns whether the shard has all data files to cover all entries
 func (ds *DataShard) IsComplete() bool {
-	chunkIdx := ds.ChunkIdx()
+	chunkIdx := ds.StartChunkIdx()
 	chunkIdxEnd := (ds.shardIdx + 1) * ds.chunksPerKv * ds.kvEntries
 	for chunkIdx < chunkIdxEnd {
 		found := false
@@ -50,7 +50,7 @@ func (ds *DataShard) Contains(kvIdx uint64) bool {
 	return kvIdx >= ds.shardIdx*ds.kvEntries && kvIdx < (ds.shardIdx+1)*ds.kvEntries
 }
 
-func (ds *DataShard) ChunkIdx() uint64 {
+func (ds *DataShard) StartChunkIdx() uint64 {
 	return ds.shardIdx * ds.chunksPerKv * ds.kvEntries
 }
 
@@ -82,7 +82,7 @@ func (ds *DataShard) Read(kvIdx uint64, readLen int, hash common.Hash, isMasked 
 		}
 		readLen = readLen - chunkReadLen
 
-		chunkIdx := ds.ChunkIdx() + kvIdx*ds.chunksPerKv + i
+		chunkIdx := kvIdx*ds.chunksPerKv + i
 		cdata, err := ds.ReadChunk(chunkIdx, chunkReadLen, hash, isMasked)
 		if err != nil {
 			return nil, err
@@ -111,7 +111,7 @@ func (ds *DataShard) Write(kvIdx uint64, b []byte, isMasked bool) error {
 			writeLen = int(CHUNK_SIZE)
 		}
 
-		chunkIdx := ds.ChunkIdx() + kvIdx*ds.chunksPerKv + i
+		chunkIdx := kvIdx*ds.chunksPerKv + i
 		err := ds.WriteChunk(chunkIdx, b[off:off+writeLen], isMasked)
 		if err != nil {
 			return nil

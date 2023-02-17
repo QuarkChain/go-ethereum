@@ -30,11 +30,14 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/math"
+	"github.com/ethereum/go-ethereum/consensus/ethash"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/crypto/blake2b"
 	"github.com/ethereum/go-ethereum/crypto/bls12381"
 	"github.com/ethereum/go-ethereum/crypto/bn256"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/ethereum/go-ethereum/sstorage"
+	"github.com/ethereum/go-ethereum/sstorage/pora"
 
 	//lint:ignore SA1019 Needed for precompile
 	"golang.org/x/crypto/ripemd160"
@@ -719,9 +722,11 @@ var (
 	putRawMethodId, _    = hex.DecodeString("4fb03390") // putRaw(uint256,bytes)
 	getRawMethodId, _    = hex.DecodeString("f835367f") // getRaw(bytes32,uint256,uint256,uint256)
 	removeRawMethodId, _ = hex.DecodeString("6c4b6776") // removeRaw(uint256,uint256)
+	unmaskDaggerData, _  = hex.DecodeString("5485e190") // unmaskDaggerData(uint256,bytes24,bytes)
 )
 
-type sstoragePisa struct{}
+type sstoragePisa struct {
+}
 
 func (l *sstoragePisa) RequiredGas(input []byte) uint64 {
 	if len(input) < 4 {
@@ -732,6 +737,8 @@ func (l *sstoragePisa) RequiredGas(input []byte) uint64 {
 		return params.SstoreResetGasEIP2200
 	} else if bytes.Equal(input[0:4], getRawMethodId) {
 		return params.SloadGasEIP2200
+	} else if bytes.Equal(input[0:4], unmaskDaggerData) {
+		return params.UnmaskDaggerDataGas
 	} else {
 		// TODO: remove is not supported yet
 		return 0
@@ -791,9 +798,105 @@ func (l *sstoragePisa) RunWith(env *PrecompiledContractCallEnv, input []byte) ([
 		binary.BigEndian.PutUint64(pb[32-8:32], 32)
 		binary.BigEndian.PutUint64(pb[64-8:64], uint64(len(b)))
 		return append(pb, b...), nil
+	} else if bytes.Equal(input[0:4], unmaskDaggerData) {
+
+		values, err := unmaskDaggerDataInputAbi.Unpack(input[4:])
+		if err != nil {
+			return nil, fmt.Errorf("Arguments.Unpack failed:%v", err)
+		}
+		var decoded unmaskDaggerDataInput
+		err = unmaskDaggerDataInputAbi.Copy(&decoded, values)
+		if err != nil {
+			return nil, fmt.Errorf("Arguments.Copy failed:%v", err)
+		}
+
+		return unmaskDaggerDataImpl(caller, decoded)
 	}
 	// TODO: remove is not supported yet
 	return nil, errors.New("unsupported method")
+}
+
+func unmaskDaggerDataImpl(caller common.Address, decoded unmaskDaggerDataInput) ([]byte, error) {
+	if uint64(len(decoded.MaskedChunk)) > sstorage.CHUNK_SIZE {
+		return nil, fmt.Errorf("invalid chunk size")
+	}
+
+	epoch := decoded.Epoch.Uint64()
+	cache := pora.Cache(epoch)
+
+	size := ethash.DatasetSizeForEpoch(epoch)
+
+	shardMgr := sstorage.ContractToShardManager[caller]
+	if shardMgr == nil {
+		return nil, fmt.Errorf("invalid caller")
+	}
+	realHash := make([]byte, len(decoded.Hash)+8)
+	copy(realHash, decoded.Hash[:])
+
+	// in order to not touch the input buffer
+	copyBytes := make([]byte, len(decoded.MaskedChunk))
+	copy(copyBytes, decoded.MaskedChunk)
+	decoded.MaskedChunk = copyBytes
+
+	for i := 0; i < len(decoded.MaskedChunk)/ethash.GetMixBytes(); i++ {
+		pora.ToRealHash(decoded.Hash, shardMgr.MaxKvSize(), uint64(i), realHash, false)
+		mask := ethash.HashimotoForMaskLight(size, cache.Cache, realHash)
+		if len(mask) != ethash.GetMixBytes() {
+			panic("#mask != MixBytes")
+		}
+		for j := 0; j < ethash.GetMixBytes(); j++ {
+			decoded.MaskedChunk[i*ethash.GetMixBytes()+j] ^= mask[j]
+		}
+	}
+	tailBytes := len(decoded.MaskedChunk) % ethash.GetMixBytes()
+	if tailBytes > 0 {
+		i := len(decoded.MaskedChunk) / ethash.GetMixBytes()
+		pora.ToRealHash(decoded.Hash, shardMgr.MaxKvSize(), uint64(i), realHash, false)
+		mask := ethash.HashimotoForMaskLight(size, cache.Cache, realHash)
+		if len(mask) != ethash.GetMixBytes() {
+			panic("#mask != MixBytes")
+		}
+		for j := 0; j < tailBytes; j++ {
+			decoded.MaskedChunk[i*ethash.GetMixBytes()+j] ^= mask[j]
+		}
+	}
+
+	return unmaskDaggerDataOutputAbi.Pack(decoded.MaskedChunk)
+}
+
+var (
+	unmaskDaggerDataInputAbi, unmaskDaggerDataOutputAbi abi.Arguments
+)
+
+type unmaskDaggerDataInput struct {
+	Epoch       *big.Int
+	Hash        common.Hash
+	MaskedChunk []byte
+}
+
+func init() {
+	BytesTy, err := abi.NewType("bytes", "", nil)
+	if err != nil {
+		panic(err)
+	}
+	Bytes32Ty, err := abi.NewType("bytes32", "", nil)
+	if err != nil {
+		panic(err)
+	}
+	IntTy, err := abi.NewType("uint256", "", nil)
+	if err != nil {
+		panic(err)
+	}
+
+	unmaskDaggerDataInputAbi = abi.Arguments{
+		{Type: IntTy, Name: "epoch"},
+		{Type: Bytes32Ty, Name: "hash"},
+		{Type: BytesTy, Name: "maskedChunk"},
+	}
+
+	unmaskDaggerDataOutputAbi = abi.Arguments{
+		{Type: BytesTy, Name: "unmaskedChunk"},
+	}
 }
 
 var (
