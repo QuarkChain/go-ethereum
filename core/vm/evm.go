@@ -94,7 +94,7 @@ type TxContext struct {
 	GasPrice *big.Int       // Provides information for GASPRICE
 }
 
-// MindReadingContext provides the execution enviroment of MindReading
+// MindReadingContext provides the execution environment of MindReading
 type MindReadingContext struct {
 	MRClient         MindReadingClient
 	RelayMindReading bool
