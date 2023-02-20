@@ -80,6 +80,7 @@ type Backend interface {
 	// so this method should be called with the parent.
 	StateAtBlock(ctx context.Context, block *types.Block, reexec uint64, base *state.StateDB, checkLive, preferDisk bool) (*state.StateDB, error)
 	StateAtTransaction(ctx context.Context, block *types.Block, txIndex int, reexec uint64) (core.Message, vm.BlockContext, *state.StateDB, error)
+	MindReading() core.MindReadingEnv
 }
 
 // API is the collection of tracing APIs exposed over the private debugging endpoint.
@@ -274,12 +275,20 @@ func (api *API) traceChain(ctx context.Context, start, end *types.Block, config 
 				signer := types.MakeSigner(api.backend.ChainConfig(), task.block.Number())
 				blockCtx := core.NewEVMBlockContext(task.block.Header(), api.chainContext(localctx), nil)
 				// Trace all the transactions contained within
+				var mrOutput []byte
 				for i, tx := range task.block.Transactions() {
+					for _, uncle := range task.block.Uncles() {
+						if uncle.TxHash == tx.Hash() {
+							mrOutput = uncle.Extra
+						}
+					}
+
 					msg, _ := tx.AsMessage(signer, task.block.BaseFee())
 					txctx := &Context{
 						BlockHash: task.block.Hash(),
 						TxIndex:   i,
 						TxHash:    tx.Hash(),
+						MrOutput:  mrOutput,
 					}
 					res, err := api.traceTx(localctx, msg, txctx, blockCtx, task.statedb, config)
 					if err != nil {
@@ -524,13 +533,22 @@ func (api *API) IntermediateRoots(ctx context.Context, hash common.Hash, config 
 		chainConfig        = api.backend.ChainConfig()
 		vmctx              = core.NewEVMBlockContext(block.Header(), api.chainContext(ctx), nil)
 		deleteEmptyObjects = chainConfig.IsEIP158(block.Number())
+		uncleIndex         = 0
 	)
 	for i, tx := range block.Transactions() {
 		var (
 			msg, _    = tx.AsMessage(signer, block.BaseFee())
 			txContext = core.NewEVMTxContext(msg)
-			vmenv     = vm.NewEVM(vmctx, txContext, statedb, chainConfig, vm.Config{})
+			mrContext = api.backend.MindReading().GenerateVMMindReadingCtx(block.Number(), true)
+			vmenv     = vm.NewEVMWithMRC(vmctx, txContext, mrContext, statedb, chainConfig, vm.Config{})
 		)
+		if len(block.Uncles()) > uncleIndex {
+			expectMROutput := block.Uncles()[uncleIndex].GetMindReadingOutput(tx)
+			if expectMROutput != nil {
+				uncleIndex++
+				vmenv.SetCCCOutputs(expectMROutput)
+			}
+		}
 		statedb.Prepare(tx.Hash(), i)
 		if _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(msg.Gas())); err != nil {
 			log.Warn("Tracing intermediate roots did not complete", "txindex", i, "txhash", tx.Hash(), "err", err)
@@ -617,6 +635,7 @@ func (api *API) traceBlock(ctx context.Context, block *types.Block, config *Trac
 	}
 	// Feed the transactions into the tracers and return
 	var failed error
+	var uncleIndex int
 	blockCtx := core.NewEVMBlockContext(block.Header(), api.chainContext(ctx), nil)
 	for i, tx := range txs {
 		// Send the trace task over for execution
@@ -625,7 +644,16 @@ func (api *API) traceBlock(ctx context.Context, block *types.Block, config *Trac
 		// Generate the next state snapshot fast without tracing
 		msg, _ := tx.AsMessage(signer, block.BaseFee())
 		statedb.Prepare(tx.Hash(), i)
-		vmenv := vm.NewEVM(blockCtx, core.NewEVMTxContext(msg), statedb, api.backend.ChainConfig(), vm.Config{})
+		mrCtx := api.backend.MindReading().GenerateVMMindReadingCtx(block.Number(), true)
+		vmenv := vm.NewEVMWithMRC(blockCtx, core.NewEVMTxContext(msg), mrCtx, statedb, api.backend.ChainConfig(), vm.Config{})
+		if len(block.Uncles()) > uncleIndex {
+			expectMROutput := block.Uncles()[uncleIndex].GetMindReadingOutput(tx)
+			if expectMROutput != nil {
+				uncleIndex++
+				vmenv.SetCCCOutputs(expectMROutput)
+			}
+		}
+
 		if _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(msg.Gas())); err != nil {
 			failed = err
 			break
@@ -895,9 +923,10 @@ func (api *API) traceTx(ctx context.Context, message core.Message, txctx *Contex
 	default:
 		tracer = logger.NewStructLogger(config.Config)
 	}
+	mrContext := api.backend.MindReading().GenerateVMMindReadingCtx(vmctx.BlockNumber, true)
 	// Run the transaction with tracing enabled.
-	vmenv := vm.NewEVM(vmctx, txContext, statedb, api.backend.ChainConfig(), vm.Config{Debug: true, Tracer: tracer, NoBaseFee: true})
-
+	vmenv := vm.NewEVMWithMRC(vmctx, txContext, mrContext, statedb, api.backend.ChainConfig(), vm.Config{Debug: true, Tracer: tracer, NoBaseFee: true})
+	vmenv.SetCCCOutputs(txctx.MrOutput)
 	// Call Prepare to clear out the statedb access list
 	statedb.Prepare(txctx.TxHash, txctx.TxIndex)
 
