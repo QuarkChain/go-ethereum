@@ -182,15 +182,15 @@ func NewEVMWithMRC(blockCtx BlockContext, txCtx TxContext, mRCtx *MindReadingCon
 	return evm
 }
 
-// setCrossChainCallUnexpectErr record error that occur during cross-chain-call
+// setCCCSystemError record error that occur during cross-chain-call
 func (evm *EVM) setCCCSystemError(err error) {
 	if evm.MRContext.cCCSystemError == nil {
 		evm.MRContext.cCCSystemError = err
 	}
 }
 
-// CrossChainCallUnExpectErr return error that occur during cross-chain-call
-func (evm *EVM) CrossChainCallUnExpectErr() error {
+// CCCSystemError return error that occur during cross-chain-call
+func (evm *EVM) CCCSystemError() error {
 	if evm.IsMindReadingEnabled() {
 		return evm.MRContext.cCCSystemError
 	} else {

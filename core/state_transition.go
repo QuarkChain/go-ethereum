@@ -337,8 +337,8 @@ func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
 	}
 
 	// return the error directly if the error occurs when invoking crossChainCall
-	if st.evm.CrossChainCallUnExpectErr() != nil {
-		return nil, st.evm.CrossChainCallUnExpectErr()
+	if st.evm.CCCSystemError() != nil {
+		return nil, st.evm.CCCSystemError()
 	}
 
 	if !london {
