@@ -106,7 +106,7 @@ type MindReadingContext struct {
 	cCCOutputs    []*CrossChainCallOutput
 	cCCOutputsIdx uint64
 	// cCCSystemError is an error occurred during the cross-chain-call process
-	CCCSystemError error
+	cCCSystemError error
 }
 
 func NewMindReadingContext(MRClient MindReadingClient, relayMindReading bool, mrEnable bool, config *params.ChainConfig) *MindReadingContext {
@@ -184,15 +184,15 @@ func NewEVMWithMRC(blockCtx BlockContext, txCtx TxContext, mRCtx *MindReadingCon
 
 // setCrossChainCallUnexpectErr record error that occur during cross-chain-call
 func (evm *EVM) setCCCSystemError(err error) {
-	if evm.MRContext.CCCSystemError == nil {
-		evm.MRContext.CCCSystemError = err
+	if evm.MRContext.cCCSystemError == nil {
+		evm.MRContext.cCCSystemError = err
 	}
 }
 
 // CrossChainCallUnExpectErr return error that occur during cross-chain-call
 func (evm *EVM) CrossChainCallUnExpectErr() error {
 	if evm.IsMindReadingEnabled() {
-		return evm.MRContext.CCCSystemError
+		return evm.MRContext.cCCSystemError
 	} else {
 		return nil
 	}
