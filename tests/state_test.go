@@ -1081,8 +1081,9 @@ const CrossChainCallContract = `[
 ]`
 
 func NewCrossChainCallArgument(chainconfig *params.ChainConfig, client *WrapClient, chainId uint64, txHash common.Hash, logIdx uint64, maxDataLen uint64, confirms uint64) *CrossChainCallArgument {
-	evmConfig := vm.Config{MindReadingClient: client}
-	evm := vm.NewEVM(vm.BlockContext{}, vm.TxContext{}, nil, chainconfig, evmConfig)
+	evmConfig := vm.Config{}
+	mrctx := &vm.MindReadingContext{MREnable: true, MRClient: client, ChainId: chainconfig.MindReading.SupportChainId, MinimumConfirms: chainconfig.MindReading.MinimumConfirms}
+	evm := vm.NewEVMWithMRC(vm.BlockContext{}, vm.TxContext{}, mrctx, nil, chainconfig, evmConfig)
 	env := vm.NewPrecompiledContractCallEnv(evm, nil)
 	abi, err := abi.JSON(strings.NewReader(CrossChainCallContract))
 	if err != nil {
@@ -1335,8 +1336,8 @@ func TestApplyTransaction(t *testing.T) {
 		buf := new(bytes.Buffer)
 		w := bufio.NewWriter(buf)
 		tracer := logger.NewJSONLogger(&logger.Config{}, w)
-		vmconfig := vm.Config{Debug: true, Tracer: tracer, MindReadingClient: externalClient}
-
+		vmconfig := vm.Config{Debug: true, Tracer: tracer}
+		mrCtx := vm.NewMindReadingContext(externalClient, false, true, config)
 		_, statedb := MakePreState(db, gspec.Alloc, false)
 
 		msg, err := stx.Tx.AsMessage(types.MakeSigner(config, block.Header().Number), block.Header().BaseFee)
@@ -1345,7 +1346,7 @@ func TestApplyTransaction(t *testing.T) {
 		}
 		// Create a new context to be used in the EVM environment
 		blockContext := core.NewEVMBlockContext(block.Header(), chainContext, &addr1)
-		vmenv := vm.NewEVM(blockContext, vm.TxContext{}, statedb, config, vmconfig)
+		vmenv := vm.NewEVMWithMRC(blockContext, vm.TxContext{}, mrCtx, statedb, config, vmconfig)
 		execResult, err := core.ApplyMessage(vmenv, msg, gaspool)
 		if err != nil {
 			stx.VerifyCallResult(nil, err, txIndex, t)
@@ -1376,7 +1377,10 @@ func TestApplyTransaction(t *testing.T) {
 		w := bufio.NewWriter(buf)
 		tracer := logger.NewJSONLogger(&logger.Config{}, w)
 		// set the externalCallClient as nil
-		vmconfig := vm.Config{Debug: true, Tracer: tracer, MindReadingClient: nil, RelayMindReading: true}
+		//
+		vmconfig := vm.Config{Debug: true, Tracer: tracer}
+
+		mrCtx := vm.NewMindReadingContext(nil, true, true, config)
 
 		_, statedb := MakePreState(db, gspec.Alloc, false)
 
@@ -1386,7 +1390,7 @@ func TestApplyTransaction(t *testing.T) {
 		}
 		// Create a new context to be used in the EVM environment
 		blockContext := core.NewEVMBlockContext(block.Header(), chainContext, &addr1)
-		vmenv := vm.NewEVM(blockContext, vm.TxContext{}, statedb, config, vmconfig)
+		vmenv := vm.NewEVMWithMRC(blockContext, vm.TxContext{}, mrCtx, statedb, config, vmconfig)
 
 		// preset CrossChainCall outputs in evm
 		vmenv.SetCCCOutputs(stx.ExpectCCRBytes)
