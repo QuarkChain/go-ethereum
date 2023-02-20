@@ -2643,3 +2643,7 @@ func (bc *BlockChain) IsMindReadingEnable(headerNum *big.Int) bool {
 		return false
 	}
 }
+
+func (bc *BlockChain) MindReading() MindReadingEnv {
+	return bc.mindReading
+}

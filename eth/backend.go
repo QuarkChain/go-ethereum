@@ -637,3 +637,7 @@ func (s *Ethereum) Stop() error {
 
 	return nil
 }
+
+func (s *Ethereum) MindReading() core.MindReadingEnv {
+	return s.blockchain.MindReading()
+}
