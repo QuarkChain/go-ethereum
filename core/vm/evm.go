@@ -17,6 +17,7 @@
 package vm
 
 import (
+	"github.com/ethereum/go-ethereum/rlp"
 	"math/big"
 	"sync/atomic"
 	"time"
@@ -93,6 +94,25 @@ type TxContext struct {
 	GasPrice *big.Int       // Provides information for GASPRICE
 }
 
+// MindReadingContext provides the execution enviroment of MindReading
+type MindReadingContext struct {
+	MRClient         MindReadingClient
+	RelayMindReading bool
+	MREnable         bool
+	ChainId          uint64
+	MinimumConfirms  uint64
+	// cCCOutputs means 'crossChainCallOutputs` will store the return value of each cross-chain call
+	// cCCOutputsIdx increases by 1 after each invoking to CrossChainCall in order to point to the corresponding CCROutput
+	cCCOutputs    []*CrossChainCallOutput
+	cCCOutputsIdx uint64
+	// cCCSystemError is an error occurred during the cross-chain-call process
+	CCCSystemError error
+}
+
+func NewMindReadingContext(MRClient MindReadingClient, relayMindReading bool, mrEnable bool, config *params.ChainConfig) *MindReadingContext {
+	return &MindReadingContext{MRClient: MRClient, RelayMindReading: relayMindReading, MREnable: mrEnable, ChainId: config.MindReading.SupportChainId, MinimumConfirms: config.MindReading.MinimumConfirms}
+}
+
 // EVM is the Ethereum Virtual Machine base object and provides
 // the necessary tools to run a contract on the given state with
 // the provided context. It should be noted that any error
@@ -106,6 +126,7 @@ type EVM struct {
 	// Context provides auxiliary blockchain related information
 	Context BlockContext
 	TxContext
+	MRContext *MindReadingContext
 	// StateDB gives access to the underlying state
 	StateDB StateDB
 	// Depth is the current call stack
@@ -128,9 +149,6 @@ type EVM struct {
 	// available gas is calculated in gasCall* according to the 63/64 rule and later
 	// applied in opCall*.
 	callGasTemp uint64
-
-	// crossChainCallUnExpectErr is an error occurred during the cross-chain-call process
-	crossChainCallUnExpectErr error
 }
 
 // NewEVM returns a new EVM. The returned EVM is not thread safe and should
@@ -148,36 +166,100 @@ func NewEVM(blockCtx BlockContext, txCtx TxContext, statedb StateDB, chainConfig
 	return evm
 }
 
+// NewEVMWithMRC returns a new EVM with a configured MindReadingContext. The returned EVM is not thread safe and should
+// only ever be used *once*.
+func NewEVMWithMRC(blockCtx BlockContext, txCtx TxContext, mRCtx *MindReadingContext, statedb StateDB, chainConfig *params.ChainConfig, config Config) *EVM {
+	evm := &EVM{
+		Context:     blockCtx,
+		TxContext:   txCtx,
+		MRContext:   mRCtx,
+		StateDB:     statedb,
+		Config:      config,
+		chainConfig: chainConfig,
+		chainRules:  chainConfig.Rules(blockCtx.BlockNumber, blockCtx.Random != nil),
+	}
+	evm.interpreter = NewEVMInterpreter(evm, config)
+	return evm
+}
+
 // setCrossChainCallUnexpectErr record error that occur during cross-chain-call
-func (evm *EVM) setCrossChainCallUnexpectErr(err error) {
-	if evm.crossChainCallUnExpectErr == nil {
-		evm.crossChainCallUnExpectErr = err
+func (evm *EVM) setCCCSystemError(err error) {
+	if evm.MRContext.CCCSystemError == nil {
+		evm.MRContext.CCCSystemError = err
 	}
 }
 
 // CrossChainCallUnExpectErr return error that occur during cross-chain-call
 func (evm *EVM) CrossChainCallUnExpectErr() error {
-	return evm.crossChainCallUnExpectErr
+	if evm.IsMindReadingEnabled() {
+		return evm.MRContext.CCCSystemError
+	} else {
+		return nil
+	}
 }
 
-// ExternalCallClient returns the external-call-client
+// MindReadingClient returns the external-call-client
 func (evm *EVM) MindReadingClient() MindReadingClient {
-	return evm.Config.MindReadingClient
+	return evm.MRContext.MRClient
+}
+
+// IsMindReadingEnabled returns true if the MindReading module is active, otherwise returns false
+func (evm *EVM) IsMindReadingEnabled() bool {
+	if evm.MRContext == nil {
+		return false
+	} else {
+		return evm.MRContext.MREnable
+	}
+}
+
+// IsRelayMindReadingModule return
+func (evm *EVM) IsRelayMindReadingModule() bool {
+	return evm.MRContext.RelayMindReading
 }
 
 // SetCCCOutputs pre-sets the result of the cross-chain-call and is used when verifying the correctness of the transaction
 func (evm *EVM) SetCCCOutputs(result []byte) {
-	if evm.MindReadingClient() == nil && evm.IsExternalCallEnabled() && len(result) != 0 {
-		evm.Interpreter().SetCCCOutputs(result)
+	if evm.IsMindReadingEnabled() && evm.IsRelayMindReadingModule() {
+		evm.setCCCOutputs(result)
 	}
 }
 
-// IsExternalCallEnabled returns true if the external-call module is active, otherwise returns false
-func (evm *EVM) IsExternalCallEnabled() bool {
-	if evm.ChainConfig().MindReading != nil && evm.ChainConfig().MindReading.EnableBlockNumber != nil && evm.Context.BlockNumber.Cmp(evm.ChainConfig().MindReading.EnableBlockNumber) != -1 {
-		return true
+func (evm *EVM) setCCCOutputs(b []byte) error {
+	outputsWithVersion := &CrossChainCallOutputsWithVersion{}
+	err := rlp.DecodeBytes(b, outputsWithVersion)
+	if err != nil {
+		return err
 	}
-	return false
+	evm.MRContext.cCCOutputs = outputsWithVersion.Outputs
+	return nil
+}
+
+func (evm *EVM) CCCOutputsIdx() uint64 {
+	return evm.MRContext.cCCOutputsIdx
+}
+
+func (evm *EVM) CCCOutputsIdxIncrease() {
+	evm.MRContext.cCCOutputsIdx++
+}
+
+func (evm *EVM) CCCOutputs() []*CrossChainCallOutput {
+	if evm.IsMindReadingEnabled() {
+		return evm.MRContext.cCCOutputs
+	} else {
+		return nil
+	}
+}
+
+func (evm *EVM) AppendCCCOutput(trace *CrossChainCallOutput) []*CrossChainCallOutput {
+	evm.MRContext.cCCOutputs = append(evm.MRContext.cCCOutputs, trace)
+	return evm.MRContext.cCCOutputs
+}
+
+func (evm *EVM) resetCCCOutputs() {
+	if evm.IsMindReadingEnabled() {
+		evm.MRContext.cCCOutputs = nil
+		evm.MRContext.cCCOutputsIdx = 0
+	}
 }
 
 // Reset resets the EVM with a new transaction context.Reset
@@ -185,7 +267,7 @@ func (evm *EVM) IsExternalCallEnabled() bool {
 func (evm *EVM) Reset(txCtx TxContext, statedb StateDB) {
 	evm.TxContext = txCtx
 	evm.StateDB = statedb
-	evm.interpreter.resetCCCOuputs()
+	evm.resetCCCOutputs()
 }
 
 // Cancel cancels any running EVM operation. This may be called concurrently and

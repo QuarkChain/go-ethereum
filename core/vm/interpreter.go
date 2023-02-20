@@ -25,7 +25,6 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/log"
-	"github.com/ethereum/go-ethereum/rlp"
 )
 
 // Config are the configuration options for the Interpreter
@@ -39,9 +38,6 @@ type Config struct {
 
 	ExtraEips []int // Additional EIPS that are to be enabled
 	IsJsonRpc bool  // Whether the call is in context of JsonRpc
-
-	RelayMindReading  bool              // RelayMindReading is a flag to define whether the execution environment of crossChainCall precompile contract needs to obtain the results of external calls independently
-	MindReadingClient MindReadingClient // MindReadingClient is responsible for responding to request from crossChainCall in the current version
 }
 
 type MindReadingClient interface {
@@ -76,11 +72,6 @@ type EVMInterpreter struct {
 
 	readOnly   bool   // Whether to throw on stateful modifications
 	returnData []byte // Last CALL's return data for subsequent reuse
-
-	// cCCOutputs means 'crossChainCallOutputs` will store the return value of each cross-chain call
-	// cCCOutputsIdx increases by 1 after each invoking to CrossChainCall in order to point to the corresponding CCROutput
-	cCCOutputs    []*CrossChainCallOutput
-	cCCOutputsIdx uint64
 }
 
 // NewEVMInterpreter returns a new instance of the Interpreter.
@@ -124,38 +115,6 @@ func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 		evm: evm,
 		cfg: cfg,
 	}
-}
-
-func (in *EVMInterpreter) CCCOutputsIdx() uint64 {
-	return in.cCCOutputsIdx
-}
-
-func (in *EVMInterpreter) CCCOutputsIdxIncrease() {
-	in.cCCOutputsIdx++
-}
-
-func (in *EVMInterpreter) CCCOutputs() []*CrossChainCallOutput {
-	return in.cCCOutputs
-}
-
-func (in *EVMInterpreter) AppendCCCOutput(trace *CrossChainCallOutput) []*CrossChainCallOutput {
-	in.cCCOutputs = append(in.cCCOutputs, trace)
-	return in.cCCOutputs
-}
-
-func (in *EVMInterpreter) SetCCCOutputs(b []byte) error {
-	outputsWithVersion := &CrossChainCallOutputsWithVersion{}
-	err := rlp.DecodeBytes(b, outputsWithVersion)
-	if err != nil {
-		return err
-	}
-	in.cCCOutputs = outputsWithVersion.Outputs
-	return nil
-}
-
-func (in *EVMInterpreter) resetCCCOuputs() {
-	in.cCCOutputs = nil
-	in.cCCOutputsIdx = 0
 }
 
 // Run loops and evaluates the contract's code with the given input data and returns

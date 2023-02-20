@@ -1425,7 +1425,7 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractCallEnv, input []byte, 
 		return nil, 0, ErrInvalidCrossChainCallInputLength
 	}
 
-	if !env.evm.IsExternalCallEnabled() {
+	if !env.evm.IsMindReadingEnabled() {
 		return nil, 0, ErrExternalCallNoActive
 	}
 
@@ -1434,16 +1434,16 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractCallEnv, input []byte, 
 
 		var crossChainCallOutput *CrossChainCallOutput
 
-		if env.evm.Config.RelayMindReading {
+		if env.evm.MRContext.RelayMindReading {
 			// The flag of relayExternalCalls is true means that the node will preset the external-call-result received through network
-			idx := env.evm.Interpreter().CCCOutputsIdx()
-			if idx >= uint64(len(env.evm.Interpreter().CCCOutputs())) {
+			idx := env.evm.CCCOutputsIdx()
+			if idx >= uint64(len(env.evm.CCCOutputs())) {
 				// unexpect error
-				env.evm.setCrossChainCallUnexpectErr(ErrOutputIdxOutOfBounds)
+				env.evm.setCCCSystemError(ErrOutputIdxOutOfBounds)
 				return nil, 0, ErrOutputIdxOutOfBounds
 			}
-			crossChainCallOutput = env.evm.Interpreter().CCCOutputs()[idx]
-			env.evm.Interpreter().CCCOutputsIdxIncrease()
+			crossChainCallOutput = env.evm.CCCOutputs()[idx]
+			env.evm.CCCOutputsIdxIncrease()
 
 			if !crossChainCallOutput.Success {
 				return crossChainCallOutput.Output, crossChainCallOutput.GasUsed, ErrExecutionReverted
@@ -1451,8 +1451,8 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractCallEnv, input []byte, 
 
 		} else {
 			// The flag of relayExternalCalls is false means that the node will produce the external-call-result by itself
-			if env.evm.MindReadingClient() == nil {
-				env.evm.setCrossChainCallUnexpectErr(ErrNoActiveClient)
+			if env.evm.MRContext.MRClient == nil {
+				env.evm.setCCCSystemError(ErrNoActiveClient)
 				return nil, 0, ErrNoActiveClient
 			}
 
@@ -1464,18 +1464,18 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractCallEnv, input []byte, 
 
 			// Ensure that the number of confirmations meets the minimum requirement which is defined by chainConfig
 			if confirms < env.evm.ChainConfig().MindReading.MinimumConfirms {
-				env.evm.setCrossChainCallUnexpectErr(ErrUserConfirmsNoEnough)
+				env.evm.setCCCSystemError(ErrUserConfirmsNoEnough)
 				return nil, 0, ErrUserConfirmsNoEnough
 			}
 
 			logData, expErr, unexpErr := GetExternalLog(ctx, env, chainId, txHash, logIdx, maxDataLen, confirms)
 
 			if unexpErr != nil {
-				env.evm.setCrossChainCallUnexpectErr(unexpErr)
+				env.evm.setCCCSystemError(unexpErr)
 				return nil, 0, unexpErr
 			} else if expErr != nil {
 				// expect error uses the same error handling method as unexpect err
-				env.evm.setCrossChainCallUnexpectErr(expErr)
+				env.evm.setCCCSystemError(expErr)
 				return nil, 0, expErr
 			} else {
 				// calculate actual cost of gas
@@ -1484,7 +1484,7 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractCallEnv, input []byte, 
 
 				packedLogData, err := logData.ABIPack()
 				if err != nil {
-					env.evm.setCrossChainCallUnexpectErr(err)
+					env.evm.setCCCSystemError(err)
 					return nil, 0, err
 				}
 				crossChainCallOutput = &CrossChainCallOutput{
@@ -1492,13 +1492,13 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractCallEnv, input []byte, 
 					Success: true,
 					GasUsed: actualGasUsed,
 				}
-				env.evm.Interpreter().AppendCCCOutput(crossChainCallOutput)
+				env.evm.AppendCCCOutput(crossChainCallOutput)
 			}
 
 		}
 
 		if crossChainCallOutput.GasUsed > prePayGas {
-			env.evm.setCrossChainCallUnexpectErr(ErrActualGasExceedChargedGas)
+			env.evm.setCCCSystemError(ErrActualGasExceedChargedGas)
 			return crossChainCallOutput.Output, crossChainCallOutput.GasUsed, ErrActualGasExceedChargedGas
 		} else {
 			return crossChainCallOutput.Output, crossChainCallOutput.GasUsed, nil
@@ -1506,7 +1506,7 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractCallEnv, input []byte, 
 
 	}
 
-	env.evm.setCrossChainCallUnexpectErr(ErrUnsupportMethod)
+	env.evm.setCCCSystemError(ErrUnsupportMethod)
 	return nil, 0, ErrUnsupportMethod
 }
 
@@ -1642,7 +1642,7 @@ func VerifyCrossChainCall(client MindReadingClient, externalCallInput string) ([
 
 	gas := p.RequiredGas(common.FromHex(externalCallInput))
 
-	evmConfig := Config{MindReadingClient: client}
+	evmConfig := Config{}
 	chainId, err := client.ChainID(context.Background())
 	if err != nil {
 		return nil, err
@@ -1650,9 +1650,16 @@ func VerifyCrossChainCall(client MindReadingClient, externalCallInput string) ([
 	supportChainID := chainId.Uint64()
 	chainCfg := &params.ChainConfig{MindReading: &params.MindReadingConfig{EnableBlockNumber: big.NewInt(0), SupportChainId: supportChainID, Version: 1}}
 
-	evm := NewEVM(BlockContext{BlockNumber: big.NewInt(0)}, TxContext{}, nil, chainCfg, evmConfig)
-	evmInterpreter := NewEVMInterpreter(evm, evm.Config)
-	evm.interpreter = evmInterpreter
+	mrctx := &MindReadingContext{
+		MRClient:         client,
+		MREnable:         true,
+		RelayMindReading: false,
+		ChainId:          chainId.Uint64(),
+		MinimumConfirms:  10,
+	}
+	evm := NewEVMWithMRC(BlockContext{BlockNumber: big.NewInt(0)}, TxContext{}, mrctx, nil, chainCfg, evmConfig)
+	//evmInterpreter := NewEVMInterpreter(evm, evm.Config)
+	//evm.interpreter = evmInterpreter
 
 	if res, _, err := RunPrecompiledContract(&PrecompiledContractCallEnv{evm: evm}, p, common.FromHex(externalCallInput), gas); err != nil {
 		return nil, err
