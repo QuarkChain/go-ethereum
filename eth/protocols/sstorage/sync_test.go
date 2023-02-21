@@ -281,7 +281,12 @@ func createKVRequestResponse(t *testPeer, id uint64, stateDB *state.StateDB, con
 				return nil
 			}
 			bs, _, _ := sm.EncodeKV(idx, data, common.BytesToHash(meta.HashInMeta))
-			values = append(values, &core.KV{Idx: idx, Data: bs[:meta.KVSize]})
+			if uint64(len(bs)) > meta.KVSize {
+				values = append(values, &core.KV{Idx: idx, Data: bs[:meta.KVSize]})
+			} else {
+				values = append(values, &core.KV{Idx: idx, Data: bs})
+			}
+
 		}
 	}
 
@@ -304,7 +309,7 @@ func setupSyncer(shards map[common.Address][]uint64, stateDB *state.StateDB, las
 	var block types.Block
 	rlp.DecodeBytes(blockEnc, &block)
 	chain := blockChain{block: &block, stateDB: stateDB}
-	chain.lastKvIdx = lastKvIdx - 1
+	chain.lastKvIdx = lastKvIdx
 	syncer := NewSyncer(db, &chain, shards)
 	for _, peer := range peers {
 		syncer.Register(peer)
