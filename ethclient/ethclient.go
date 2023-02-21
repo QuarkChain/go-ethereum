@@ -286,6 +286,26 @@ func (ec *Client) TransactionReceipt(ctx context.Context, txHash common.Hash) (*
 	return r, err
 }
 
+type MindReadingOutput struct {
+	BlockHash          common.Hash `json:"blockHash"`
+	BlockNumber        uint64      `json:"blockNumber"`
+	TxHash             common.Hash `json:"transactionHash"`
+	TxIndex            uint64      `json:"transactionIndex"`
+	ExternalCallResult []byte      `json:"externalCallResult"`
+}
+
+// MindReadingOutput returns the MindReadingOutput for the given transaction hash
+func (ec *Client) MindReadingOutput(ctx context.Context, txHash common.Hash) (*MindReadingOutput, error) {
+	var r *MindReadingOutput
+	err := ec.c.CallContext(ctx, &r, "eth_getExternalCallResult", txHash)
+	if err == nil {
+		if r == nil {
+			return nil, ethereum.NotFound
+		}
+	}
+	return r, err
+}
+
 // SyncProgress retrieves the current progress of the sync algorithm. If there's
 // no sync currently running, it returns nil.
 func (ec *Client) SyncProgress(ctx context.Context) (*ethereum.SyncProgress, error) {
