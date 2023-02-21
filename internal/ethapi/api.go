@@ -1679,7 +1679,7 @@ func (s *PublicTransactionPoolAPI) GetTransactionReceipt(ctx context.Context, ha
 	if receipt.ContractAddress != (common.Address{}) {
 		fields["contractAddress"] = receipt.ContractAddress
 	}
-	ß
+
 	if mindReadingOutput != nil {
 		fields["mindReadingOutput"] = hexutil.Bytes(mindReadingOutput)
 	}
