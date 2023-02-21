@@ -219,6 +219,12 @@ type Config struct {
 	ValChainId             uint64
 	ValidatorChangeEpochId uint64
 
+	//MindReading Config
+	IsMiner                      bool
+	MindReadingEnableBlockNumber *big.Int
+	MindReadingSupportChainId    uint64
+	MindReadingCallRpc           string
+
 	// Sstorage config
 	SstorageFiles  []string `toml:",omitempty"`
 	SstorageShards []string `toml:",omitempty"`

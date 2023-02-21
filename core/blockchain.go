@@ -19,6 +19,7 @@ package core
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -2615,7 +2616,7 @@ func (bc *BlockChain) GetSstorageLastKvIdx(contract common.Address) (uint64, err
 	return new(big.Int).SetBytes(val.Bytes()).Uint64(), nil
 }
 
-func (bc *BlockChain) configureMindReading(chainConfig *params.ChainConfig) error {
+func (bc *BlockChain) setMindReading(chainConfig *params.ChainConfig) error {
 	if chainConfig.MindReading != nil {
 		bc.mindReading.EnableBlockNumber = chainConfig.MindReading.EnableBlockNumber
 		bc.mindReading.Version = chainConfig.MindReading.Version
@@ -2625,6 +2626,13 @@ func (bc *BlockChain) configureMindReading(chainConfig *params.ChainConfig) erro
 			newClient, err := ethclient.Dial(bc.chainConfig.MindReading.CallRpc)
 			if err != nil {
 				return err
+			}
+			cid, err := newClient.ChainID(context.Background())
+			if err != nil {
+				return err
+			}
+			if cid.Uint64() != bc.mindReading.SupportChainId {
+				return fmt.Errorf("supportChainId [%d] no match with chainId [%d] connected with ethclient", bc.mindReading.SupportChainId, cid.Uint64())
 			}
 			bc.mindReading.MRClient = newClient
 		}

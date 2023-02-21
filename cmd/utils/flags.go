@@ -198,6 +198,18 @@ var (
 		Name:  "validator.rpc",
 		Usage: "rpc for Validator to update validator set",
 	}
+	MindReadingEnableBlockNumberFlag = cli.StringFlag{
+		Name:  "mindreading.enableblocknumber",
+		Usage: "define in which blockNumber the MindReading is supported",
+	}
+	MindReadingCallRpcFlag = cli.StringFlag{
+		Name:  "mindreading.callrpc",
+		Usage: "rpc to launch independent MindReading client",
+	}
+	MindReadingSupportChainIdFlag = cli.Uint64Flag{
+		Name:  "mindreading.supportchainid",
+		Usage: "chainId of the target chain of the MindReading",
+	}
 	DeveloperFlag = cli.BoolFlag{
 		Name:  "dev",
 		Usage: "Ephemeral proof-of-authority network with a pre-funded developer account, mining enabled",
@@ -1495,6 +1507,25 @@ func setTendermint(ctx *cli.Context, cfg *ethconfig.Config) {
 	}
 }
 
+func setMindReading(ctx *cli.Context, cfg *ethconfig.Config) {
+	if ctx.GlobalIsSet(MiningEnabledFlag.Name) {
+		cfg.IsMiner = true
+	}
+
+	if ctx.GlobalIsSet(MindReadingEnableBlockNumberFlag.Name) {
+		cfg.MindReadingEnableBlockNumber.SetString(ctx.GlobalString(MindReadingEnableBlockNumberFlag.Name), 10)
+	}
+
+	if ctx.GlobalIsSet(MindReadingCallRpcFlag.Name) {
+		cfg.MindReadingCallRpc = ctx.GlobalString(MindReadingCallRpcFlag.Name)
+	}
+
+	if ctx.GlobalIsSet(MindReadingSupportChainIdFlag.Name) {
+		cfg.MindReadingSupportChainId = ctx.GlobalUint64(MindReadingSupportChainIdFlag.Name)
+	}
+
+}
+
 func setMiner(ctx *cli.Context, cfg *miner.Config) {
 	if ctx.GlobalIsSet(MinerNotifyFlag.Name) {
 		cfg.Notify = strings.Split(ctx.GlobalString(MinerNotifyFlag.Name), ",")
@@ -1606,6 +1637,7 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	setTxPool(ctx, &cfg.TxPool)
 	setEthash(ctx, cfg)
 	setTendermint(ctx, cfg)
+	setMindReading(ctx, cfg)
 	setMiner(ctx, &cfg.Miner)
 	setWhitelist(ctx, cfg)
 	setLes(ctx, cfg)
