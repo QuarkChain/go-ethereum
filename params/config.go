@@ -257,8 +257,10 @@ var (
 	}
 
 	Web3QTestnetValBootnodes = []string{
-		"/ip4/68.183.157.114/udp/33333/quic/p2p/12D3KooWEZ94qZgJgUNYiLwXahknkniYgozxw5eocijZJkew6Mj5",
-		"/ip4/128.199.102.174/udp/33333/quic/p2p/12D3KooWNjKALie7Cdpb4KG8axgABA4VCCsKoBQdvYvRhVZhbtPk",
+		//"/ip4/68.183.157.114/udp/33333/quic/p2p/12D3KooWEZ94qZgJgUNYiLwXahknkniYgozxw5eocijZJkew6Mj5",
+		//"/ip4/128.199.102.174/udp/33333/quic/p2p/12D3KooWNjKALie7Cdpb4KG8axgABA4VCCsKoBQdvYvRhVZhbtPk",
+		"/ip4/127.0.0.1/udp/33333/quic/p2p/12D3KooWEZ94qZgJgUNYiLwXahknkniYgozxw5eocijZJkew6Mj5",
+		"/ip4/127.0.0.1/udp/33334/quic/p2p/12D3KooWRAPv94qoUn8dAa3NQpZGKjaBcdiaqCETrcuyo2rT2ZvV",
 	}
 
 	// Web3QTestnetChainConfig contains the chain parameters to run a node on the Web3Q test network.
@@ -279,7 +281,7 @@ var (
 		LondonBlock:         big.NewInt(0),
 		ArrowGlacierBlock:   nil,
 		Tendermint: &TendermintConfig{
-			Epoch:                  1000,
+			Epoch:                  10080,
 			ValidatorContract:      "",
 			ContractChainID:        0,
 			ValidatorChangeEpochId: 0,
@@ -303,6 +305,12 @@ var (
 				DoubleSignCheckHeight:        uint64(0),
 				ConsensusSyncRequestDuration: 500 * time.Millisecond,
 			},
+		},
+		MindReading: &MindReadingConfig{
+			EnableBlockNumber: big.NewInt(0),
+			Version:           1,
+			SupportChainId:    5,
+			CallRpc:           "https://goerli.infura.io/v3/63aa34e959614d01a9a65d3f93b70e66",
 		},
 	}
 
