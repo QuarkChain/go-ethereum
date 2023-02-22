@@ -6,16 +6,16 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/detailyang/go-fallocate"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/log"
 )
 
 const (
-	NO_MASK         = iota
-	MASK_KECCAK_256 = NO_MASK + 1
-	MASK_END        = MASK_KECCAK_256
-	// TODO: randomx
+	NO_ENCODE = iota
+	ENCODE_KECCAK_256
+	ENCODE_ETHASH
+	ENCODE_END = ENCODE_ETHASH
 
 	// keccak256(b'Web3Q Large Storage')[0:8]
 	MAGIC   = uint64(0xcf20bd770c22b2e1)
@@ -24,11 +24,14 @@ const (
 	CHUNK_SIZE = uint64(4096)
 )
 
+// A DataFile represents a local file for a consective chunks
 type DataFile struct {
 	file          *os.File
 	chunkIdxStart uint64
 	chunkIdxLen   uint64
-	maskType      uint64
+	encodeType    uint64
+	maxKvSize     uint64
+	miner         common.Address // storage provider key
 }
 
 type DataFileHeader struct {
@@ -36,24 +39,10 @@ type DataFileHeader struct {
 	version       uint64
 	chunkIdxStart uint64
 	chunkIdxLen   uint64
-	maskType      uint64
+	encodeType    uint64
+	maxKvSize     uint64
+	miner         common.Address
 	status        uint64
-}
-
-func getMaskData(chunkIdx uint64, maskType uint64) []byte {
-	if maskType > MASK_END {
-		panic("unsupported mask type")
-	}
-
-	if maskType == NO_MASK {
-		return bytes.Repeat([]byte{0}, int(CHUNK_SIZE))
-	}
-
-	seed := make([]byte, 16)
-	binary.BigEndian.PutUint64(seed, MAGIC)
-	binary.BigEndian.PutUint64(seed[8:], chunkIdx)
-	bs := crypto.Keccak256(seed)
-	return bytes.Repeat(bs, int(CHUNK_SIZE)/len(bs))
 }
 
 // Mask the data in place
@@ -78,24 +67,24 @@ func UnmaskDataInPlace(userData []byte, maskData []byte) []byte {
 	return userData
 }
 
-func Create(filename string, chunkIdxStart uint64, chunkIdxLen uint64, maskType uint64) (*DataFile, error) {
+func Create(filename string, chunkIdxStart uint64, chunkIdxLen uint64, epoch, maxKvSize uint64, encodeType uint64, miner common.Address) (*DataFile, error) {
 	log.Info("Creating file", "filename", filename)
 	file, err := os.Create(filename)
 	if err != nil {
 		return nil, err
 	}
-	for i := uint64(0); i < chunkIdxLen; i++ {
-		chunkIdx := chunkIdxStart + i
-		_, err := file.WriteAt(getMaskData(chunkIdx, maskType), int64((chunkIdx+1)*CHUNK_SIZE))
-		if err != nil {
-			return nil, err
-		}
+	// actual initialization is done when synchronize
+	err = fallocate.Fallocate(file, int64(CHUNK_SIZE*chunkIdxLen), int64(CHUNK_SIZE))
+	if err != nil {
+		return nil, err
 	}
 	dataFile := &DataFile{
 		file:          file,
 		chunkIdxStart: chunkIdxStart,
 		chunkIdxLen:   chunkIdxLen,
-		maskType:      maskType,
+		encodeType:    encodeType,
+		maxKvSize:     maxKvSize,
+		miner:         miner,
 	}
 	dataFile.writeHeader()
 	return dataFile, nil
@@ -120,9 +109,13 @@ func (df *DataFile) ChunkIdxEnd() uint64 {
 	return df.chunkIdxStart + df.chunkIdxLen
 }
 
-func (df *DataFile) Read(chunkIdx uint64, len int, hash common.Hash, isMasked bool) ([]byte, error) {
+// Read raw chunk data from the storage file.
+func (df *DataFile) Read(chunkIdx uint64, len int) ([]byte, error) {
 	if !df.Contains(chunkIdx) {
 		return nil, fmt.Errorf("chunk not found")
+	}
+	if len > int(CHUNK_SIZE) {
+		return nil, fmt.Errorf(("read too large"))
 	}
 	md := make([]byte, len)
 	n, err := df.file.ReadAt(md, int64(chunkIdx+1)*int64(CHUNK_SIZE))
@@ -132,14 +125,11 @@ func (df *DataFile) Read(chunkIdx uint64, len int, hash common.Hash, isMasked bo
 	if n != len {
 		return nil, fmt.Errorf("not full read")
 	}
-	if isMasked {
-		return md, nil
-	} else {
-		return UnmaskDataInPlace(md, getMaskData(chunkIdx, df.maskType)), nil
-	}
+	return md, nil
 }
 
-func (df *DataFile) Write(chunkIdx uint64, b []byte, isMasked bool) error {
+// Write the chunk bytes to the file.
+func (df *DataFile) Write(chunkIdx uint64, b []byte) error {
 	if !df.Contains(chunkIdx) {
 		return fmt.Errorf("chunk not found")
 	}
@@ -148,9 +138,6 @@ func (df *DataFile) Write(chunkIdx uint64, b []byte, isMasked bool) error {
 		return fmt.Errorf("write data too large")
 	}
 
-	if !isMasked {
-		b = MaskDataInPlace(getMaskData(chunkIdx, df.maskType), b)
-	}
 	_, err := df.file.WriteAt(b, int64(chunkIdx+1)*int64(CHUNK_SIZE))
 	return err
 }
@@ -161,7 +148,9 @@ func (df *DataFile) writeHeader() error {
 		version:       VERSION,
 		chunkIdxStart: df.chunkIdxStart,
 		chunkIdxLen:   df.chunkIdxLen,
-		maskType:      df.maskType,
+		encodeType:    df.encodeType,
+		maxKvSize:     df.maxKvSize,
+		miner:         df.miner,
 		status:        0,
 	}
 
@@ -178,8 +167,18 @@ func (df *DataFile) writeHeader() error {
 	if err := binary.Write(buf, binary.BigEndian, header.chunkIdxLen); err != nil {
 		return err
 	}
-	if err := binary.Write(buf, binary.BigEndian, header.maskType); err != nil {
+	if err := binary.Write(buf, binary.BigEndian, header.encodeType); err != nil {
 		return err
+	}
+	if err := binary.Write(buf, binary.BigEndian, header.maxKvSize); err != nil {
+		return err
+	}
+	n, err := buf.Write(header.miner[:])
+	if err != nil {
+		return err
+	}
+	if n != len(header.miner) {
+		return fmt.Errorf("short write for header.miner, n=%d", n)
 	}
 	if err := binary.Write(buf, binary.BigEndian, header.status); err != nil {
 		return err
@@ -191,14 +190,7 @@ func (df *DataFile) writeHeader() error {
 }
 
 func (df *DataFile) readHeader() error {
-	header := DataFileHeader{
-		magic:         MAGIC,
-		version:       VERSION,
-		chunkIdxStart: df.chunkIdxStart,
-		chunkIdxLen:   df.chunkIdxLen,
-		maskType:      df.maskType,
-		status:        0,
-	}
+	header := DataFileHeader{}
 
 	b := make([]byte, CHUNK_SIZE)
 	n, err := df.file.ReadAt(b, 0)
@@ -222,8 +214,18 @@ func (df *DataFile) readHeader() error {
 	if err := binary.Read(buf, binary.BigEndian, &header.chunkIdxLen); err != nil {
 		return err
 	}
-	if err := binary.Read(buf, binary.BigEndian, &header.maskType); err != nil {
+	if err := binary.Read(buf, binary.BigEndian, &header.encodeType); err != nil {
 		return err
+	}
+	if err := binary.Read(buf, binary.BigEndian, &header.maxKvSize); err != nil {
+		return err
+	}
+	n, err = buf.Read(header.miner[:])
+	if err != nil {
+		return err
+	}
+	if n != len(header.miner) {
+		return fmt.Errorf("short read for header.miner, n=%d", n)
 	}
 	if err := binary.Read(buf, binary.BigEndian, &header.status); err != nil {
 		return err
@@ -236,13 +238,15 @@ func (df *DataFile) readHeader() error {
 	if header.version > VERSION {
 		return fmt.Errorf("unsupported version")
 	}
-	if header.maskType > MASK_END {
+	if header.encodeType > ENCODE_END {
 		return fmt.Errorf("unknown mask type")
 	}
 
 	df.chunkIdxStart = header.chunkIdxStart
 	df.chunkIdxLen = header.chunkIdxLen
-	df.maskType = header.maskType
+	df.encodeType = header.encodeType
+	df.maxKvSize = header.maxKvSize
+	df.miner = header.miner
 
 	return nil
 }
