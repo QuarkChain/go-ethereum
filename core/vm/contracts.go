@@ -24,6 +24,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/ethereum/go-ethereum/log"
 	"math/big"
 
 	"github.com/ethereum/go-ethereum"
@@ -1430,6 +1431,7 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractCallEnv, input []byte, 
 	}
 
 	ctx := context.Background()
+	log.Warn("CrossChainCall Precompile Running")
 	if bytes.Equal(input[0:4], getLogByTxHashId) {
 
 		var crossChainCallOutput *CrossChainCallOutput

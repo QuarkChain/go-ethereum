@@ -76,6 +76,7 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 	blockContext := NewEVMBlockContext(header, p.bc, nil)
 
 	mindReadingEnable := p.bc.IsMindReadingEnable(block.Number())
+	log.Warn("mindReading enable", "enable", mindReadingEnable)
 	var mrctx *vm.MindReadingContext
 	if mindReadingEnable {
 		mrctx = p.bc.mindReading.GenerateVMMindReadingCtx(blockNumber, relayMindReadingOutput)
@@ -187,6 +188,7 @@ func ApplyTransaction(config *params.ChainConfig, bc *BlockChain, author *common
 	// Create a new context to be used in the EVM environment
 	blockContext := NewEVMBlockContext(header, bc, author)
 	mrctx := bc.mindReading.GenerateVMMindReadingCtx(header.Number, false)
+	log.Warn("vm MindReadingContext", "ctx", *mrctx)
 	vmenv := vm.NewEVMWithMRC(blockContext, vm.TxContext{}, mrctx, statedb, config, cfg)
 	return applyTransaction(msg, config, bc, author, gp, statedb, header.Number, header.Hash(), tx, usedGas, vmenv, nil)
 }
