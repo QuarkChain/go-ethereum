@@ -1422,16 +1422,17 @@ func (c *crossChainCall) Run(input []byte) ([]byte, error) {
 }
 
 func (c *crossChainCall) RunWith(env *PrecompiledContractCallEnv, input []byte, prePayGas uint64) ([]byte, uint64, error) {
+	log.Warn("CrossChainCall Precompile Running 1")
 	if len(input) != CrossChainCallInputLength {
 		return nil, 0, ErrInvalidCrossChainCallInputLength
 	}
-
+	log.Warn("CrossChainCall Precompile Running 2")
 	if !env.evm.IsMindReadingEnabled() {
 		return nil, 0, ErrExternalCallNoActive
 	}
 
 	ctx := context.Background()
-	log.Warn("CrossChainCall Precompile Running")
+	log.Warn("CrossChainCall Precompile Running3")
 	if bytes.Equal(input[0:4], getLogByTxHashId) {
 
 		var crossChainCallOutput *CrossChainCallOutput

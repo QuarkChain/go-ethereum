@@ -229,7 +229,7 @@ type MindReadingEnv struct {
 
 func (mr MindReadingEnv) GenerateVMMindReadingCtx(blockNumber *big.Int, RelayMindReadingOutput bool) *vm.MindReadingContext {
 	var enable bool
-	if mr.EnableBlockNumber != nil && mr.EnableBlockNumber.Cmp(blockNumber) >= 0 {
+	if mr.EnableBlockNumber != nil && blockNumber.Cmp(mr.EnableBlockNumber) >= 0 {
 		enable = true
 	}
 	return &vm.MindReadingContext{
