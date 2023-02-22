@@ -279,6 +279,7 @@ var (
 		MuirGlacierBlock:    nil,
 		BerlinBlock:         big.NewInt(0),
 		LondonBlock:         big.NewInt(0),
+		PisaBlock:           big.NewInt(0),
 		ArrowGlacierBlock:   nil,
 		Tendermint: &TendermintConfig{
 			Epoch:                  10080,
