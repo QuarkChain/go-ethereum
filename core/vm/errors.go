@@ -46,6 +46,7 @@ var (
 	ErrNoActiveClient                   = errors.New("CrossChainCall: no active external-call-client")
 	ErrUserConfirmsNoEnough             = errors.New("CrossChainCall: the number of confirms defined by the user is too small")
 	ErrActualGasExceedChargedGas        = errors.New("CrossChainCall: the gas charged in advance cannot cover the actual gas consumption")
+	ErrMaxDataLenOutOfLimit             = errors.New("CrossChainCall: maxDataLen is out of limit")
 	ErrUnsupportMethod                  = errors.New("unsupported method")
 
 	// errStopToken is an internal token indicating interpreter loop termination,
