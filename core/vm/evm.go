@@ -17,10 +17,11 @@
 package vm
 
 import (
-	"github.com/ethereum/go-ethereum/rlp"
 	"math/big"
 	"sync/atomic"
 	"time"
+
+	"github.com/ethereum/go-ethereum/rlp"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -96,11 +97,11 @@ type TxContext struct {
 
 // MindReadingContext provides the execution environment of MindReading
 type MindReadingContext struct {
-	MRClient         MindReadingClient
-	RelayMindReading bool
-	MREnable         bool
-	ChainId          uint64
-	MinimumConfirms  uint64
+	MRClient          MindReadingClient
+	ReplayMindReading bool
+	MREnable          bool
+	ChainId           uint64
+	MinimumConfirms   uint64
 	// cCCOutputs means 'crossChainCallOutputs` will store the return value of each cross-chain call
 	// cCCOutputsIdx increases by 1 after each invoking to CrossChainCall in order to point to the corresponding CCROutput
 	cCCOutputs    []*CrossChainCallOutput
@@ -110,7 +111,7 @@ type MindReadingContext struct {
 }
 
 func NewMindReadingContext(MRClient MindReadingClient, relayMindReading bool, mrEnable bool, config *params.ChainConfig) *MindReadingContext {
-	return &MindReadingContext{MRClient: MRClient, RelayMindReading: relayMindReading, MREnable: mrEnable, ChainId: config.MindReading.SupportChainId, MinimumConfirms: config.MindReading.MinimumConfirms}
+	return &MindReadingContext{MRClient: MRClient, ReplayMindReading: relayMindReading, MREnable: mrEnable, ChainId: config.MindReading.SupportChainId, MinimumConfirms: config.MindReading.MinimumConfirms}
 }
 
 // EVM is the Ethereum Virtual Machine base object and provides
@@ -214,13 +215,21 @@ func (evm *EVM) IsMindReadingEnabled() bool {
 
 // IsRelayMindReadingModule return
 func (evm *EVM) IsRelayMindReadingModule() bool {
-	return evm.MRContext.RelayMindReading
+	return evm.MRContext.ReplayMindReading
 }
 
 // SetCCCOutputs pre-sets the result of the cross-chain-call and is used when verifying the correctness of the transaction
 func (evm *EVM) SetCCCOutputs(result []byte) {
 	if evm.IsMindReadingEnabled() && evm.IsRelayMindReadingModule() {
 		evm.setCCCOutputs(result)
+	}
+}
+
+func (evm *EVM) GetCCCOutputs() []*CrossChainCallOutput {
+	if evm.IsMindReadingEnabled() {
+		return evm.MRContext.cCCOutputs
+	} else {
+		return nil
 	}
 }
 
@@ -234,20 +243,12 @@ func (evm *EVM) setCCCOutputs(b []byte) error {
 	return nil
 }
 
-func (evm *EVM) CCCOutputsIdx() uint64 {
-	return evm.MRContext.cCCOutputsIdx
-}
-
-func (evm *EVM) CCCOutputsIdxIncrease() {
-	evm.MRContext.cCCOutputsIdx++
-}
-
-func (evm *EVM) CCCOutputs() []*CrossChainCallOutput {
-	if evm.IsMindReadingEnabled() {
-		return evm.MRContext.cCCOutputs
-	} else {
+func (evm EVM) GetNextReplayableCCCOutput() *CrossChainCallOutput {
+	if evm.MRContext.cCCOutputsIdx >= uint64(len(evm.MRContext.cCCOutputs)) {
 		return nil
 	}
+	evm.MRContext.cCCOutputsIdx++
+	return evm.MRContext.cCCOutputs[evm.MRContext.cCCOutputsIdx-1]
 }
 
 func (evm *EVM) AppendCCCOutput(trace *CrossChainCallOutput) []*CrossChainCallOutput {
