@@ -122,18 +122,18 @@ var PrecompiledContractsBerlin = map[common.Address]PrecompiledContract{
 // PrecompiledContractsPisa contains the default set of pre-compiled Ethereum
 // contracts used in the Berlin release.
 var PrecompiledContractsPisa = map[common.Address]PrecompiledContract{
-	common.BytesToAddress([]byte{1}):          &ecrecover{},
-	common.BytesToAddress([]byte{2}):          &sha256hash{},
-	common.BytesToAddress([]byte{3}):          &ripemd160hash{},
-	common.BytesToAddress([]byte{4}):          &dataCopy{},
-	common.BytesToAddress([]byte{5}):          &bigModExp{eip2565: true},
-	common.BytesToAddress([]byte{6}):          &bn256AddIstanbul{},
-	common.BytesToAddress([]byte{7}):          &bn256ScalarMulIstanbul{},
-	common.BytesToAddress([]byte{8}):          &bn256PairingIstanbul{},
-	common.BytesToAddress([]byte{9}):          &blake2F{},
-	common.BytesToAddress([]byte{3, 0x33, 1}): &systemContractDeployer{},
-	common.BytesToAddress([]byte{3, 0x33, 2}): &sstoragePisa{},
-	common.BytesToAddress([]byte{3, 0x33, 3}): &crossChainCall{},
+	common.BytesToAddress([]byte{1}):             &ecrecover{},
+	common.BytesToAddress([]byte{2}):             &sha256hash{},
+	common.BytesToAddress([]byte{3}):             &ripemd160hash{},
+	common.BytesToAddress([]byte{4}):             &dataCopy{},
+	common.BytesToAddress([]byte{5}):             &bigModExp{eip2565: true},
+	common.BytesToAddress([]byte{6}):             &bn256AddIstanbul{},
+	common.BytesToAddress([]byte{7}):             &bn256ScalarMulIstanbul{},
+	common.BytesToAddress([]byte{8}):             &bn256PairingIstanbul{},
+	common.BytesToAddress([]byte{9}):             &blake2F{},
+	common.BytesToAddress([]byte{3, 0x33, 1}):    &systemContractDeployer{},
+	common.BytesToAddress([]byte{3, 0x33, 2}):    &sstoragePisa{},
+	common.BytesToAddress([]byte{3, 0x33, 0x21}): &crossChainCall{},
 }
 
 // PrecompiledContractsBLS contains the set of pre-compiled Ethereum
@@ -1325,27 +1325,20 @@ func (c *bls12381MapG2) Run(input []byte) ([]byte, error) {
 	return g.EncodePoint(r), nil
 }
 
-var (
-	// getLogByTxHash(uint256 chainId , bytes32 txHash, uint256 logIdx ,uint256 maxDataLen, uint256 confirms)
-	getLogByTxHashId, _ = hex.DecodeString("99e20070") // getLogByTxHash(uint256,bytes32,uint256,uint256,uint256)
-)
-
 type crossChainCall struct {
 }
 
-// ErrGasEstimationWhenCrossChainCall as a very large gas will be charged when an overflow occurs to avoid the program continue to run
-const ErrGasEstimationWhenCrossChainCall = math.MaxUint64
-const CrossChainCallInputLength = 164
+const CrossChainCallInputLength = 160
+const MaxDataLenLimitation = 100000
 
 // RequiredGas is the maximum gas consumption that will calculate the cross_chain_call
 func (c *crossChainCall) RequiredGas(input []byte) uint64 {
 	var (
-		overflow           bool
-		packedTopicAddrLen uint64
-		packedDataLen      uint64
-		packedTotalLen     uint64
-		outputDataGasCost  uint64
-		totalGasCost       uint64
+		packedAddrTopicsLen uint64
+		packedDataLen       uint64
+		packedTotalLen      uint64
+		outputDataGasCost   uint64
+		totalGasCost        uint64
 	)
 
 	if len(input) != CrossChainCallInputLength {
@@ -1353,164 +1346,142 @@ func (c *crossChainCall) RequiredGas(input []byte) uint64 {
 		return 0
 	}
 
-	maxDataLen := new(big.Int).SetBytes(getData(input, 4+3*32, 32)).Uint64()
+	// The gas calculation formula is as follows：
+	// gas_overpay =  CrossChainCallDataPerByteGas * (address_len + topics_len + data_len) + OnceCrossChainCallGas
+	//
+	// For example with 2 topics:
+	// 000000000000000000000000751320c36f413a6280ad54487766ae0f780b6f58 (32-byte contract address)
+	// 0000000000000000000000000000000000000000000000000000000000000060 (topics start offest)
+	// 00000000000000000000000000000000000000000000000000000000000000c0 (topics end offset)
+	// 0000000000000000000000000000000000000000000000000000000000000002 (2 topics)
+	// dce721dc2d078c030530aeb5511eb76663a705797c2a4a4d41a70dddfb8efca9 (topic0)
+	// 0000000000000000000000000000000000000000000000000000000000000000 (topic1)
+	// 00000000000000000000000000000000000000000000000000000000000000c0 (data length, any size, may not be 32-aligned)
+	// 0000000000000000000000000000000000000000000000000000000000000002 (0..32 packed data)
+	// 0000000000000000000000000000000000000000000000000000000000000001 (32..64 packed data)
+	// 0000000000000000000000000000000000000000000000000000000000000060 (64..96 packed data)
+	// 0000000000000000000000000000000000000000000000000000000000000028 (96..128 packed data)
+	// bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb (128..160 packed data)
+	// bbbbbbbbbbbbbbbb000000000000000000000000000000000000000000000000 (160..192 packed data)
 
-	// we must consider this case that 'maxDataLen' is not divisible by 32 when calculating 'packedDataLen'
+	maxDataLen := new(big.Int).SetBytes(getData(input, 3*32, 32)).Uint64()
+	if maxDataLen > MaxDataLenLimitation {
+		return 0
+	}
+
+	// ABI.packed data len will be round up to 32-aligned (see above example).
 	if maxDataLen%32 != 0 {
 		tmp := 32 + 32 - maxDataLen%32
-		if packedDataLen, overflow = math.SafeAdd(maxDataLen, tmp); overflow {
-			return ErrGasEstimationWhenCrossChainCall
-		}
+		packedDataLen, _ = math.SafeAdd(maxDataLen, tmp)
 	} else {
-		if packedDataLen, overflow = math.SafeAdd(maxDataLen, 32); overflow {
-			return ErrGasEstimationWhenCrossChainCall
-		}
+		packedDataLen, _ = math.SafeAdd(maxDataLen, 32)
 	}
 
-	// the sum of address len and topics len (address_len = 32 , topics_len = 7 * 32)
-	packedTopicAddrLen = 8 * 32
-	if packedTotalLen, overflow = math.SafeAdd(packedTopicAddrLen, packedDataLen); overflow {
-		return ErrGasEstimationWhenCrossChainCall
-	}
+	// the sum of address len and topics len (address_len = 32 , max_topics_len = 7 * 32)
+	packedAddrTopicsLen = 8 * 32
+	packedTotalLen, _ = math.SafeAdd(packedAddrTopicsLen, packedDataLen)
 
 	// calculate gas cost of outputData
-	if outputDataGasCost, overflow = math.SafeMul(packedTotalLen, params.CrossChainCallDataPerByteGas); overflow {
-		return ErrGasEstimationWhenCrossChainCall
-	}
+	outputDataGasCost, _ = math.SafeMul(packedTotalLen, params.CrossChainCallDataPerByteGas)
 
-	if totalGasCost, overflow = math.SafeAdd(outputDataGasCost, params.OnceCrossChainCallGas); overflow {
-		return ErrGasEstimationWhenCrossChainCall
-	}
+	totalGasCost, _ = math.SafeAdd(outputDataGasCost, params.OnceCrossChainCallGas)
 
 	return totalGasCost
-
-	/*
-		The gas calculation formula is as follows：
-		gas_overpay =  CrossChainCallDataPerByteGas * (address_len + topics_len + data_len) + OnceCrossChainCallGas
-
-		address_len = 32
-		000000000000000000000000751320c36f413a6280ad54487766ae0f780b6f58
-
-		topics_len = 3 * 32 + 32 * 4
-		Note:
-			the first 3 * 32 is the prefix of topics which generated after executing ABIPack(address,topics,data) when the number of topics is 4
-			the last 4 is the maxNumber of topics
-		0000000000000000000000000000000000000000000000000000000000000060
-		00000000000000000000000000000000000000000000000000000000000000c0
-		0000000000000000000000000000000000000000000000000000000000000002
-		dce721dc2d078c030530aeb5511eb76663a705797c2a4a4d41a70dddfb8efca9
-		000000000000000000000000000000000000000000000000000000000000000
-
-		if maxDataLen % 32 != 0
-			data_len= 32 + (32 - maxDataLen % 32) + maxDatalen
-		if maxDataLen % 32 == 0
-			data_len= 32 + maxDatalen
-		Note:
-			the first 32 is the length of data which generated after ABIPack(address,topics,data)
-		00000000000000000000000000000000000000000000000000000000000000c0
-		0000000000000000000000000000000000000000000000000000000000000002
-		0000000000000000000000000000000000000000000000000000000000000001
-		0000000000000000000000000000000000000000000000000000000000000060
-		0000000000000000000000000000000000000000000000000000000000000028
-		bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
-		bbbbbbbbbbbbbbbb000000000000000000000000000000000000000000000000
-	*/
 }
 
 func (c *crossChainCall) Run(input []byte) ([]byte, error) {
 	return nil, ErrUnsupportMethod
 }
 
-func (c *crossChainCall) RunWith(env *PrecompiledContractCallEnv, input []byte, prePayGas uint64) ([]byte, uint64, error) {
-	log.Warn("CrossChainCall Precompile Running 1")
+func (c *crossChainCall) RunWith(env *PrecompiledContractCallEnv, input []byte, prepaidGas uint64) ([]byte, uint64, error) {
 	if len(input) != CrossChainCallInputLength {
 		return nil, 0, ErrInvalidCrossChainCallInputLength
 	}
-	log.Warn("CrossChainCall Precompile Running 2")
+	log.Warn("CrossChainCall Precompile Running 1")
 	if !env.evm.IsMindReadingEnabled() {
 		return nil, 0, ErrExternalCallNoActive
 	}
 
 	ctx := context.Background()
-	log.Warn("CrossChainCall Precompile Running3")
-	if bytes.Equal(input[0:4], getLogByTxHashId) {
-
-		var crossChainCallOutput *CrossChainCallOutput
-
-		if env.evm.MRContext.RelayMindReading {
-			// The flag of relayExternalCalls is true means that the node will preset the external-call-result received through network
-			idx := env.evm.CCCOutputsIdx()
-			if idx >= uint64(len(env.evm.CCCOutputs())) {
-				// unexpect error
-				env.evm.setCCCSystemError(ErrOutputIdxOutOfBounds)
-				return nil, 0, ErrOutputIdxOutOfBounds
-			}
-			crossChainCallOutput = env.evm.CCCOutputs()[idx]
-			env.evm.CCCOutputsIdxIncrease()
-
-			if !crossChainCallOutput.Success {
-				return crossChainCallOutput.Output, crossChainCallOutput.GasUsed, ErrExecutionReverted
-			}
-
-		} else {
-			// The flag of relayExternalCalls is false means that the node will produce the external-call-result by itself
-			if env.evm.MRContext.MRClient == nil {
-				env.evm.setCCCSystemError(ErrNoActiveClient)
-				return nil, 0, ErrNoActiveClient
-			}
-
-			chainId := new(big.Int).SetBytes(getData(input, 4, 32)).Uint64()
-			txHash := common.BytesToHash(getData(input, 4+32, 32))
-			logIdx := new(big.Int).SetBytes(getData(input, 4+64, 32)).Uint64()
-			maxDataLen := new(big.Int).SetBytes(getData(input, 4+96, 32)).Uint64()
-			confirms := new(big.Int).SetBytes(getData(input, 4+128, 32)).Uint64()
-
-			// Ensure that the number of confirmations meets the minimum requirement which is defined by chainConfig
-			if confirms < env.evm.ChainConfig().MindReading.MinimumConfirms {
-				env.evm.setCCCSystemError(ErrUserConfirmsNoEnough)
-				return nil, 0, ErrUserConfirmsNoEnough
-			}
-
-			logData, expErr, unexpErr := GetExternalLog(ctx, env, chainId, txHash, logIdx, maxDataLen, confirms)
-
-			if unexpErr != nil {
-				env.evm.setCCCSystemError(unexpErr)
-				return nil, 0, unexpErr
-			} else if expErr != nil {
-				// expect error uses the same error handling method as unexpect err
-				env.evm.setCCCSystemError(expErr)
-				return nil, 0, expErr
-			} else {
-				// calculate actual cost of gas
-				actualGasUsed := logData.GasCost(params.CrossChainCallDataPerByteGas)
-				actualGasUsed += params.OnceCrossChainCallGas
-
-				packedLogData, err := logData.ABIPack()
-				if err != nil {
-					env.evm.setCCCSystemError(err)
-					return nil, 0, err
-				}
-				crossChainCallOutput = &CrossChainCallOutput{
-					Output:  packedLogData,
-					Success: true,
-					GasUsed: actualGasUsed,
-				}
-				env.evm.AppendCCCOutput(crossChainCallOutput)
-			}
-
+	var crossChainCallOutput *CrossChainCallOutput
+	if env.evm.MRContext.ReplayMindReading {
+		// we are replaying the cross chain calls with the majority votes of the validators (and trust them).
+		crossChainCallOutput = env.evm.GetNextReplayableCCCOutput()
+		if crossChainCallOutput == nil {
+			// we are out of call outputs, are the validators broken (or the local node is broken)?
+			env.evm.setCCCSystemError(ErrOutputIdxOutOfBounds)
+			return nil, 0, ErrOutputIdxOutOfBounds
 		}
 
-		if crossChainCallOutput.GasUsed > prePayGas {
-			env.evm.setCCCSystemError(ErrActualGasExceedChargedGas)
-			return crossChainCallOutput.Output, crossChainCallOutput.GasUsed, ErrActualGasExceedChargedGas
+		if !crossChainCallOutput.Success {
+			return crossChainCallOutput.Output, crossChainCallOutput.GasUsed, ErrExecutionReverted
 		} else {
+			// the gas metering differs from the local node, it may be broken validators or the node.
+			if crossChainCallOutput.GasUsed > prepaidGas {
+				env.evm.setCCCSystemError(ErrActualGasExceedChargedGas)
+				return crossChainCallOutput.Output, crossChainCallOutput.GasUsed, ErrActualGasExceedChargedGas
+			}
 			return crossChainCallOutput.Output, crossChainCallOutput.GasUsed, nil
 		}
-
 	}
 
-	env.evm.setCCCSystemError(ErrUnsupportMethod)
-	return nil, 0, ErrUnsupportMethod
+	// The flag of ReplayMindReading is false means that the node will produce the cross-chain-call output by itself
+
+	if env.evm.MRContext.MRClient == nil {
+		env.evm.setCCCSystemError(ErrNoActiveClient)
+		return nil, 0, ErrNoActiveClient
+	}
+
+	chainId := new(big.Int).SetBytes(getData(input, 0, 32)).Uint64()
+	txHash := common.BytesToHash(getData(input, 32, 32))
+	logIdx := new(big.Int).SetBytes(getData(input, 64, 32)).Uint64()
+	maxDataLen := new(big.Int).SetBytes(getData(input, 96, 32)).Uint64()
+	confirms := new(big.Int).SetBytes(getData(input, 128, 32)).Uint64()
+
+	if maxDataLen > MaxDataLenLimitation {
+		env.evm.setCCCSystemError(ErrMaxDataLenOutOfLimit)
+		return nil, 0, ErrMaxDataLenOutOfLimit
+	}
+
+	// Ensure that the number of confirmations meets the minimum requirement which is defined by chainConfig
+	if confirms < env.evm.MRContext.MinimumConfirms {
+		env.evm.setCCCSystemError(ErrUserConfirmsNoEnough)
+		return nil, 0, ErrUserConfirmsNoEnough
+	}
+
+	logData, expErr, unexpErr := GetExternalLog(ctx, env, chainId, txHash, logIdx, maxDataLen, confirms)
+
+	if unexpErr != nil {
+		env.evm.setCCCSystemError(unexpErr)
+		return nil, 0, unexpErr
+	} else if expErr != nil {
+		// expect error uses the same error handling method as unexpect err
+		env.evm.setCCCSystemError(expErr)
+		return nil, 0, expErr
+	} else {
+		// calculate actual cost of gas
+		actualGasUsed := logData.GasCost(params.CrossChainCallDataPerByteGas)
+		actualGasUsed += params.OnceCrossChainCallGas
+
+		packedLogData, err := logData.ABIPack()
+		if err != nil {
+			env.evm.setCCCSystemError(err)
+			return nil, 0, err
+		}
+		crossChainCallOutput = &CrossChainCallOutput{
+			Output:  packedLogData,
+			Success: true,
+			GasUsed: actualGasUsed,
+		}
+		env.evm.AppendCCCOutput(crossChainCallOutput)
+	}
+
+	if crossChainCallOutput.GasUsed > prepaidGas {
+		env.evm.setCCCSystemError(ErrActualGasExceedChargedGas)
+		return crossChainCallOutput.Output, crossChainCallOutput.GasUsed, ErrActualGasExceedChargedGas
+	} else {
+		return crossChainCallOutput.Output, crossChainCallOutput.GasUsed, nil
+	}
 }
 
 func GetExternalLog(ctx context.Context, env *PrecompiledContractCallEnv, chainId uint64, txHash common.Hash, logIdx uint64, maxDataLen uint64, confirms uint64) (cr *GetLogByTxHash, expErr *ExpectCallErr, unExpErr error) {
@@ -1630,7 +1601,7 @@ func (c *ExpectCallErr) Error() string {
 
 type CrossChainCallOutput struct {
 	Output  []byte
-	Success bool // Success is the flag to mark the status(success/failure) of CrossChainCall
+	Success bool // Success is the flag to mark the status(success/failure) of cross-chain-call execution
 	GasUsed uint64
 }
 
@@ -1654,11 +1625,11 @@ func VerifyCrossChainCall(client MindReadingClient, externalCallInput string) ([
 	chainCfg := &params.ChainConfig{MindReading: &params.MindReadingConfig{EnableBlockNumber: big.NewInt(0), SupportChainId: supportChainID, Version: 1}}
 
 	mrctx := &MindReadingContext{
-		MRClient:         client,
-		MREnable:         true,
-		RelayMindReading: false,
-		ChainId:          chainId.Uint64(),
-		MinimumConfirms:  10,
+		MRClient:          client,
+		MREnable:          true,
+		ReplayMindReading: false,
+		ChainId:           chainId.Uint64(),
+		MinimumConfirms:   10,
 	}
 	evm := NewEVMWithMRC(BlockContext{BlockNumber: big.NewInt(0)}, TxContext{}, mrctx, nil, chainCfg, evmConfig)
 	//evmInterpreter := NewEVMInterpreter(evm, evm.Config)
