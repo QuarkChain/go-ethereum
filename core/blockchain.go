@@ -233,11 +233,11 @@ func (mr MindReadingEnv) GenerateVMMindReadingCtx(blockNumber *big.Int, RelayMin
 		enable = true
 	}
 	return &vm.MindReadingContext{
-		MRClient:         mr.MRClient,
-		RelayMindReading: RelayMindReadingOutput,
-		MREnable:         enable,
-		ChainId:          mr.SupportChainId,
-		MinimumConfirms:  mr.MinimumConfirms,
+		MRClient:          mr.MRClient,
+		ReplayMindReading: RelayMindReadingOutput,
+		MREnable:          enable,
+		ChainId:           mr.SupportChainId,
+		MinimumConfirms:   mr.MinimumConfirms,
 	}
 }
 
