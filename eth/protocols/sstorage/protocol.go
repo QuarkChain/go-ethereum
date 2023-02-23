@@ -73,10 +73,11 @@ type GetKVsPacket struct {
 
 // KVsPacket represents a KVs query response.
 type KVsPacket struct {
-	ID       uint64         // ID of the request this is a response for
-	Contract common.Address // Contract of the sharded storage
-	ShardId  uint64         // ShardId
-	KVs      []*core.KV     // List of the returning KVs data
+	ID           uint64         // ID of the request this is a response for
+	Contract     common.Address // Contract of the sharded storage
+	ShardId      uint64
+	ProviderAddr common.Address
+	KVs          []*core.KV // List of the returning KVs data
 }
 
 // GetKVRangePacket represents a KVs query.
@@ -91,10 +92,11 @@ type GetKVRangePacket struct {
 
 // KVRangePacket represents a KVs query response.
 type KVRangePacket struct {
-	ID       uint64         // ID of the request this is a response for
-	Contract common.Address // Contract of the sharded storage
-	ShardId  uint64         // ShardId
-	KVs      []*core.KV     // List of the returning KVs data
+	ID           uint64         // ID of the request this is a response for
+	Contract     common.Address // Contract of the sharded storage
+	ShardId      uint64
+	ProviderAddr common.Address
+	KVs          []*core.KV // List of the returning KVs data
 }
 
 type ShardListPacket struct {
