@@ -17,10 +17,8 @@
 package vm
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"encoding/binary"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"math/big"
@@ -121,7 +119,9 @@ var PrecompiledContractsPisa = map[common.Address]PrecompiledContract{
 	common.BytesToAddress([]byte{8}):          &bn256PairingIstanbul{},
 	common.BytesToAddress([]byte{9}):          &blake2F{},
 	common.BytesToAddress([]byte{3, 0x33, 1}): &systemContractDeployer{},
-	common.BytesToAddress([]byte{3, 0x33, 2}): &sstoragePisa{},
+	common.BytesToAddress([]byte{3, 0x33, 2}): &sstoragePisaPutRaw{},
+	common.BytesToAddress([]byte{3, 0x33, 3}): &sstoragePisaGetRaw{},
+	common.BytesToAddress([]byte{3, 0x33, 4}): &sstoragePisaUnmaskDaggerData{},
 }
 
 // PrecompiledContractsBLS contains the set of pre-compiled Ethereum
@@ -703,42 +703,18 @@ func (l *systemContractDeployer) RunWith(env *PrecompiledContractCallEnv, input 
 	}
 }
 
-var (
-	putRawMethodId, _    = hex.DecodeString("4fb03390") // putRaw(uint256,bytes)
-	getRawMethodId, _    = hex.DecodeString("f835367f") // getRaw(bytes32,uint256,uint256,uint256)
-	removeRawMethodId, _ = hex.DecodeString("6c4b6776") // removeRaw(uint256,uint256)
-	unmaskDaggerData, _  = hex.DecodeString("5485e190") // unmaskDaggerData(uint256,bytes24,bytes)
-)
-
-type sstoragePisa struct {
+type sstoragePisaPutRaw struct {
 }
 
-func (l *sstoragePisa) RequiredGas(input []byte) uint64 {
-	if len(input) < 4 {
-		return 0
-	}
-
-	if bytes.Equal(input[0:4], putRawMethodId) {
-		return params.SstoreResetGasEIP2200
-	} else if bytes.Equal(input[0:4], getRawMethodId) {
-		return params.SloadGasEIP2200
-	} else if bytes.Equal(input[0:4], unmaskDaggerData) {
-		return params.UnmaskDaggerDataGas
-	} else {
-		// TODO: remove is not supported yet
-		return 0
-	}
+func (s *sstoragePisaPutRaw) RequiredGas(input []byte) uint64 {
+	return params.SstoreResetGasEIP2200
 }
 
-func (l *sstoragePisa) Run(input []byte) ([]byte, error) {
+func (l *sstoragePisaPutRaw) Run(input []byte) ([]byte, error) {
 	panic("not supported")
 }
 
-func (l *sstoragePisa) RunWith(env *PrecompiledContractCallEnv, input []byte) ([]byte, error) {
-	if len(input) < 4 {
-		return nil, errors.New("invalid input length")
-	}
-
+func (l *sstoragePisaPutRaw) RunWith(env *PrecompiledContractCallEnv, input []byte) ([]byte, error) {
 	evm := env.evm
 	caller := env.caller.Address()
 	maxKVSize := evm.StateDB.SstorageMaxKVSize(caller)
@@ -746,59 +722,100 @@ func (l *sstoragePisa) RunWith(env *PrecompiledContractCallEnv, input []byte) ([
 		return nil, errors.New("invalid caller")
 	}
 
-	if bytes.Equal(input[0:4], putRawMethodId) {
-		if evm.interpreter.readOnly {
-			return nil, ErrWriteProtection
-		}
-		kvIdx := new(big.Int).SetBytes(getData(input, 4, 32)).Uint64()
-		dataPtr := new(big.Int).SetBytes(getData(input, 4+32, 32)).Uint64()
-		if 4+dataPtr > uint64(len(input)) {
-			return nil, errors.New("dataptr too large")
-		}
-		putLen := new(big.Int).SetBytes(getData(input, 4+dataPtr, 32)).Uint64()
-
-		if putLen > maxKVSize {
-			return nil, errors.New("put len too large")
-		}
-		evm.StateDB.SstorageWrite(caller, kvIdx, getData(input, 4+dataPtr+32, putLen))
-		return nil, nil
-	} else if bytes.Equal(input[0:4], getRawMethodId) {
-		if !evm.Config.IsJsonRpc {
-			return nil, errors.New("getRaw() must be called in JSON RPC")
-		}
-		// TODO: check hash correctness
-		hash := common.BytesToHash(getData(input, 4, 4+32))
-		kvIdx := new(big.Int).SetBytes(getData(input, 4+32, 32)).Uint64()
-		kvOff := new(big.Int).SetBytes(getData(input, 4+64, 32)).Uint64()
-		kvLen := new(big.Int).SetBytes(getData(input, 4+96, 32)).Uint64()
-		fb, ok, err := evm.StateDB.SstorageRead(caller, kvIdx, int(kvLen+kvOff), hash)
-		if err != nil {
-			return nil, err
-		}
-		if !ok {
-			return nil, fmt.Errorf("shard data not found: %s, %d", common.Bytes2Hex(env.caller.Address().Bytes()), kvIdx)
-		}
-		b := fb[kvOff:]
-		pb := make([]byte, 64)
-		binary.BigEndian.PutUint64(pb[32-8:32], 32)
-		binary.BigEndian.PutUint64(pb[64-8:64], uint64(len(b)))
-		return append(pb, b...), nil
-	} else if bytes.Equal(input[0:4], unmaskDaggerData) {
-
-		values, err := unmaskDaggerDataInputAbi.Unpack(input[4:])
-		if err != nil {
-			return nil, fmt.Errorf("Arguments.Unpack failed:%v", err)
-		}
-		var decoded unmaskDaggerDataInput
-		err = unmaskDaggerDataInputAbi.Copy(&decoded, values)
-		if err != nil {
-			return nil, fmt.Errorf("Arguments.Copy failed:%v", err)
-		}
-
-		return unmaskDaggerDataImpl(caller, decoded)
+	if evm.interpreter.readOnly {
+		return nil, ErrWriteProtection
 	}
-	// TODO: remove is not supported yet
-	return nil, errors.New("unsupported method")
+	kvIdx := new(big.Int).SetBytes(getData(input, 0, 32)).Uint64()
+	dataPtr := new(big.Int).SetBytes(getData(input, 32, 32)).Uint64()
+	if dataPtr > uint64(len(input)) {
+		return nil, errors.New("dataptr too large")
+	}
+	putLen := new(big.Int).SetBytes(getData(input, dataPtr, 32)).Uint64()
+
+	if putLen > maxKVSize {
+		return nil, errors.New("put len too large")
+	}
+	evm.StateDB.SstorageWrite(caller, kvIdx, getData(input, dataPtr+32, putLen))
+	return nil, nil
+
+}
+
+type sstoragePisaGetRaw struct {
+}
+
+func (s *sstoragePisaGetRaw) RequiredGas(input []byte) uint64 {
+	return params.SloadGasEIP2200
+}
+
+func (l *sstoragePisaGetRaw) Run(input []byte) ([]byte, error) {
+	panic("not supported")
+}
+
+func (l *sstoragePisaGetRaw) RunWith(env *PrecompiledContractCallEnv, input []byte) ([]byte, error) {
+	evm := env.evm
+	caller := env.caller.Address()
+	maxKVSize := evm.StateDB.SstorageMaxKVSize(caller)
+	if maxKVSize == 0 {
+		return nil, errors.New("invalid caller")
+	}
+
+	if !evm.Config.IsJsonRpc {
+		return nil, errors.New("getRaw() must be called in JSON RPC")
+	}
+	// TODO: check hash correctness
+	hash := common.BytesToHash(getData(input, 0, 32))
+	kvIdx := new(big.Int).SetBytes(getData(input, 32, 32)).Uint64()
+	kvOff := new(big.Int).SetBytes(getData(input, 64, 32)).Uint64()
+	kvLen := new(big.Int).SetBytes(getData(input, 96, 32)).Uint64()
+	fb, ok, err := evm.StateDB.SstorageRead(caller, kvIdx, int(kvLen+kvOff), hash)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, fmt.Errorf("shard data not found: %s, %d", common.Bytes2Hex(env.caller.Address().Bytes()), kvIdx)
+	}
+	b := fb[kvOff:]
+	pb := make([]byte, 64)
+	binary.BigEndian.PutUint64(pb[32-8:32], 32)
+	binary.BigEndian.PutUint64(pb[64-8:64], uint64(len(b)))
+	return append(pb, b...), nil
+}
+
+type sstoragePisaUnmaskDaggerData struct {
+}
+
+func (s *sstoragePisaUnmaskDaggerData) RequiredGas(input []byte) uint64 {
+	return params.UnmaskDaggerDataGas
+}
+
+func (l *sstoragePisaUnmaskDaggerData) Run(input []byte) ([]byte, error) {
+	panic("not supported")
+}
+
+func (l *sstoragePisaUnmaskDaggerData) RunWith(env *PrecompiledContractCallEnv, input []byte) ([]byte, error) {
+	evm := env.evm
+	caller := env.caller.Address()
+	maxKVSize := evm.StateDB.SstorageMaxKVSize(caller)
+	if maxKVSize == 0 {
+		return nil, errors.New("invalid caller")
+	}
+
+	values, err := unmaskDaggerDataInputAbi.Unpack(input[:])
+	if err != nil {
+		return nil, fmt.Errorf("Arguments.Unpack failed:%v", err)
+	}
+	var decoded unmaskDaggerDataInput
+	err = unmaskDaggerDataInputAbi.Copy(&decoded, values)
+	if err != nil {
+		return nil, fmt.Errorf("Arguments.Copy failed:%v", err)
+	}
+
+	return unmaskDaggerDataImpl(caller, decoded)
+
+}
+
+// TODO: remove is not supported yet
+type sstoragePisaRemoveRaw struct {
 }
 
 func unmaskDaggerDataImpl(caller common.Address, decoded unmaskDaggerDataInput) ([]byte, error) {
