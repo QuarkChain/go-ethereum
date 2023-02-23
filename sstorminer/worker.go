@@ -94,7 +94,6 @@ type environment struct {
 	header   *types.Header
 	txs      []*types.Transaction
 	receipts []*types.Receipt
-	uncles   map[common.Hash]*types.Header
 }
 
 // copy creates a deep copy of environment.
@@ -108,7 +107,6 @@ func (env *environment) copy() *environment {
 		totalCalldata: env.totalCalldata,
 		coinbase:      env.coinbase,
 		header:        types.CopyHeader(env.header),
-		receipts:      copyReceipts(env.receipts),
 	}
 	if env.gasPool != nil {
 		gasPool := *env.gasPool
@@ -118,20 +116,10 @@ func (env *environment) copy() *environment {
 	// to do the expensive deep copy for them.
 	cpy.txs = make([]*types.Transaction, len(env.txs))
 	copy(cpy.txs, env.txs)
-	cpy.uncles = make(map[common.Hash]*types.Header)
 	for hash, uncle := range env.uncles {
 		cpy.uncles[hash] = uncle
 	}
 	return cpy
-}
-
-// unclelist returns the contained uncles as the list format.
-func (env *environment) unclelist() []*types.Header {
-	var uncles []*types.Header
-	for _, uncle := range env.uncles {
-		uncles = append(uncles, uncle)
-	}
-	return uncles
 }
 
 // discard terminates the background prefetcher go-routine. It should
@@ -204,10 +192,8 @@ type worker struct {
 
 	wg sync.WaitGroup
 
-	current      *environment                 // An environment for current running cycle.
-	localUncles  map[common.Hash]*types.Block // A set of side blocks generated locally as the possible uncle blocks.
-	remoteUncles map[common.Hash]*types.Block // A set of side blocks as the possible uncle blocks.
-	unconfirmed  *unconfirmedBlocks           // A set of locally mined blocks pending canonicalness confirmations.
+	current     *environment       // An environment for current running cycle.
+	unconfirmed *unconfirmedBlocks // A set of locally mined blocks pending canonicalness confirmations.
 
 	mu       sync.RWMutex // The lock used to protect the coinbase and extra fields
 	coinbase common.Address
@@ -251,8 +237,6 @@ func newWorker(config *Config, chainConfig *params.ChainConfig, engine consensus
 		mux:                mux,
 		chain:              eth.BlockChain(),
 		isLocalBlock:       isLocalBlock,
-		localUncles:        make(map[common.Hash]*types.Block),
-		remoteUncles:       make(map[common.Hash]*types.Block),
 		unconfirmed:        newUnconfirmedBlocks(eth.BlockChain(), sealingLogAtDepth),
 		pendingTasks:       make(map[common.Hash]*task),
 		chainHeadCh:        make(chan core.ChainHeadEvent, chainHeadChanSize),
@@ -308,14 +292,6 @@ func (w *worker) setExtra(extra []byte) {
 	w.extra = extra
 }
 
-// setRecommitInterval updates the interval for miner sealing work recommitting.
-func (w *worker) setRecommitInterval(interval time.Duration) {
-	select {
-	case w.resubmitIntervalCh <- interval:
-	case <-w.exitCh:
-	}
-}
-
 // disablePreseal disables pre-sealing feature
 func (w *worker) disablePreseal() {
 	atomic.StoreUint32(&w.noempty, 1)
@@ -324,33 +300,6 @@ func (w *worker) disablePreseal() {
 // enablePreseal enables pre-sealing feature
 func (w *worker) enablePreseal() {
 	atomic.StoreUint32(&w.noempty, 0)
-}
-
-// pending returns the pending state and corresponding block.
-func (w *worker) pending() (*types.Block, *state.StateDB) {
-	// return a snapshot to avoid contention on currentMu mutex
-	w.snapshotMu.RLock()
-	defer w.snapshotMu.RUnlock()
-	if w.snapshotState == nil {
-		return nil, nil
-	}
-	return w.snapshotBlock, w.snapshotState.Copy()
-}
-
-// pendingBlock returns pending block.
-func (w *worker) pendingBlock() *types.Block {
-	// return a snapshot to avoid contention on currentMu mutex
-	w.snapshotMu.RLock()
-	defer w.snapshotMu.RUnlock()
-	return w.snapshotBlock
-}
-
-// pendingBlockAndReceipts returns pending block and corresponding receipts.
-func (w *worker) pendingBlockAndReceipts() (*types.Block, types.Receipts) {
-	// return a snapshot to avoid contention on currentMu mutex
-	w.snapshotMu.RLock()
-	defer w.snapshotMu.RUnlock()
-	return w.snapshotBlock, w.snapshotReceipts
 }
 
 func (w *worker) init() {
@@ -728,28 +677,6 @@ func (w *worker) makeEnv(parent *types.Block, header *types.Header, coinbase com
 	env.tcount = 0
 	env.totalCalldata = 0
 	return env, nil
-}
-
-// commitUncle adds the given block to uncle block set, returns error if failed to add.
-func (w *worker) commitUncle(env *environment, uncle *types.Header) error {
-	if w.isTTDReached(env.header) {
-		return errors.New("ignore uncle for beacon block")
-	}
-	hash := uncle.Hash()
-	if _, exist := env.uncles[hash]; exist {
-		return errors.New("uncle not unique")
-	}
-	if env.header.ParentHash == uncle.ParentHash {
-		return errors.New("uncle is sibling")
-	}
-	if !env.ancestors.Contains(uncle.ParentHash) {
-		return errors.New("uncle's parent unknown")
-	}
-	if env.family.Contains(hash) {
-		return errors.New("uncle already included")
-	}
-	env.uncles[hash] = uncle
-	return nil
 }
 
 // updateSnapshot updates pending snapshot block, receipts and state.
@@ -1141,24 +1068,6 @@ func (w *worker) getSealingBlock(parent common.Hash, timestamp uint64, coinbase 
 func (w *worker) isTTDReached(header *types.Header) bool {
 	td, ttd := w.chain.GetTd(header.ParentHash, header.Number.Uint64()-1), w.chain.Config().TerminalTotalDifficulty
 	return td != nil && ttd != nil && td.Cmp(ttd) >= 0
-}
-
-// copyReceipts makes a deep copy of the given receipts.
-func copyReceipts(receipts []*types.Receipt) []*types.Receipt {
-	result := make([]*types.Receipt, len(receipts))
-	for i, l := range receipts {
-		cpy := *l
-		result[i] = &cpy
-	}
-	return result
-}
-
-// postSideBlock fires a side chain event, only use it for testing.
-func (w *worker) postSideBlock(event core.ChainSideEvent) {
-	select {
-	case w.chainSideCh <- event:
-	case <-w.exitCh:
-	}
 }
 
 // totalFees computes total consumed miner fees in ETH. Block transactions and receipts have to have the same order.

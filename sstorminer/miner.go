@@ -184,66 +184,7 @@ func (miner *Miner) SetExtra(extra []byte) error {
 	return nil
 }
 
-// SetRecommitInterval sets the interval for sealing work resubmitting.
-func (miner *Miner) SetRecommitInterval(interval time.Duration) {
-	miner.worker.setRecommitInterval(interval)
-}
-
-// Pending returns the currently pending block and associated state.
-func (miner *Miner) Pending() (*types.Block, *state.StateDB) {
-	return miner.worker.pending()
-}
-
-// PendingBlock returns the currently pending block.
-//
-// Note, to access both the pending block and the pending state
-// simultaneously, please use Pending(), as the pending state can
-// change between multiple method calls
-func (miner *Miner) PendingBlock() *types.Block {
-	return miner.worker.pendingBlock()
-}
-
-// PendingBlockAndReceipts returns the currently pending block and corresponding receipts.
-func (miner *Miner) PendingBlockAndReceipts() (*types.Block, types.Receipts) {
-	return miner.worker.pendingBlockAndReceipts()
-}
-
 func (miner *Miner) SetEtherbase(addr common.Address) {
 	miner.coinbase = addr
 	miner.worker.setEtherbase(addr)
-}
-
-// SetGasCeil sets the gaslimit to strive for when mining blocks post 1559.
-// For pre-1559 blocks, it sets the ceiling.
-func (miner *Miner) SetGasCeil(ceil uint64) {
-	miner.worker.setGasCeil(ceil)
-}
-
-// EnablePreseal turns on the preseal mining feature. It's enabled by default.
-// Note this function shouldn't be exposed to API, it's unnecessary for users
-// (miners) to actually know the underlying detail. It's only for outside project
-// which uses this library.
-func (miner *Miner) EnablePreseal() {
-	miner.worker.enablePreseal()
-}
-
-// DisablePreseal turns off the preseal mining feature. It's necessary for some
-// fake consensus engine which can seal blocks instantaneously.
-// Note this function shouldn't be exposed to API, it's unnecessary for users
-// (miners) to actually know the underlying detail. It's only for outside project
-// which uses this library.
-func (miner *Miner) DisablePreseal() {
-	miner.worker.disablePreseal()
-}
-
-// GetSealingBlock retrieves a sealing block based on the given parameters.
-// The returned block is not sealed but all other fields should be filled.
-func (miner *Miner) GetSealingBlock(parent common.Hash, timestamp uint64, coinbase common.Address, random common.Hash) (*types.Block, error) {
-	return miner.worker.getSealingBlock(parent, timestamp, coinbase, random)
-}
-
-// SubscribePendingLogs starts delivering logs from pending transactions
-// to the given channel.
-func (miner *Miner) SubscribePendingLogs(ch chan<- []*types.Log) event.Subscription {
-	return miner.worker.pendingLogsFeed.Subscribe(ch)
 }
