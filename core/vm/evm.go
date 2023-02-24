@@ -188,6 +188,7 @@ func (evm *EVM) setCCCSystemError(err error) {
 	if evm.MRContext.cCCSystemError == nil {
 		evm.MRContext.cCCSystemError = err
 	}
+	evm.Cancel()
 }
 
 // CCCSystemError return error that occur during cross-chain-call
