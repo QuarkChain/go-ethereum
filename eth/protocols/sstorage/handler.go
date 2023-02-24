@@ -18,6 +18,7 @@ package sstorage
 
 import (
 	"fmt"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/p2p"
@@ -171,13 +172,13 @@ func HandleMessage(backend Backend, peer *Peer) error {
 // ServiceGetKVRangeQuery assembles the response to a kvs query.
 // It is exposed to allow external packages to test protocol behavior.
 func ServiceGetKVsQuery(chain *core.BlockChain, req *GetKVsPacket) ([]*core.KV, error) {
-	return chain.ReadMaskedKVsByIndexList(req.Contract, req.KVList)
+	return chain.ReadEncodedKVsByIndexList(req.Contract, req.KVList)
 }
 
 // ServiceGetKVRangeQuery assembles the response to a kvs query.
 // It is exposed to allow external packages to test protocol behavior.
 func ServiceGetKVRangeQuery(chain *core.BlockChain, req *GetKVRangePacket) ([]*core.KV, error) {
-	return chain.ReadMaskedKVsByIndexRange(req.Contract, req.Origin, req.Limit, req.Bytes)
+	return chain.ReadEncodedKVsByIndexRange(req.Contract, req.Origin, req.Limit, req.Bytes)
 }
 
 // NodeInfo represents a short summary of the `sstorage` sub-protocol metadata
