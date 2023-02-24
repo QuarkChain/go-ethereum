@@ -2417,45 +2417,40 @@ func GetSstorageMetadata(s *state.StateDB, contract common.Address, index uint64
 		nil
 }
 
-// verifyKV verify kv using SstorageMetadata
-func verifyKV(sm *sstorage.ShardManager, idx uint64, val []byte, meta *SstorageMetadata, isMasked bool) error {
+// VerifyKV verify kv using SstorageMetadata
+func VerifyKV(sm *sstorage.ShardManager, idx uint64, val []byte, meta *SstorageMetadata, isEncoded bool) ([]byte, error) {
 	if idx != meta.KVIdx {
-		return fmt.Errorf("verifyKV fail: kv Idx mismatch; idx: %d; MetaHash KVIdx: %d", idx, meta.KVIdx)
+		return nil, fmt.Errorf("verifyKV fail: kv Idx mismatch; idx: %d; MetaHash KVIdx: %d", idx, meta.KVIdx)
 	}
 
-	data := make([]byte, len(val))
-	copy(data, val)
-	if isMasked {
+	data := val
+	if isEncoded {
 		if sm == nil {
-			return fmt.Errorf("empty sm to verify KV")
+			return nil, fmt.Errorf("empty sm to verify KV")
 		}
-		d, r, err := sm.UnmaskKV(meta.KVIdx, data, common.BytesToHash(meta.HashInMeta))
+		d, r, err := sm.DecodeKV(meta.KVIdx, val, common.BytesToHash(meta.HashInMeta))
 		if !r || err != nil {
-			return fmt.Errorf("Unmask KV fail, err: %v", err)
+			return nil, fmt.Errorf("unmask KV fail, err: %v", err)
 		}
 
 		if meta.KVSize != uint64(len(data)) {
-			return fmt.Errorf("verifyKV fail: size error; Data size: %d; MetaHash KVSize: %d", len(val), meta.KVSize)
+			return nil, fmt.Errorf("verifyKV fail: size error; Data size: %d; MetaHash KVSize: %d", len(val), meta.KVSize)
 		}
 		data = d
 	}
 
-	hasher := sha3.NewLegacyKeccak256().(crypto.KeccakState)
-	hasher.Write(data)
-	hash := common.Hash{}
-	hasher.Read(hash[:])
-
-	if bytes.Compare(hash[:24], meta.HashInMeta) != 0 {
-		return fmt.Errorf("verifyKV fail: size error; Data hash: %s; MetaHash hash (24): %s",
+	hash := crypto.Keccak256Hash(data)
+	if !bytes.Equal(hash[:24], meta.HashInMeta) {
+		return nil, fmt.Errorf("verifyKV fail: size error; Data hash: %s; MetaHash hash (24): %s",
 			common.Bytes2Hex(hash[:24]), common.Bytes2Hex(meta.HashInMeta))
 	}
 
-	return nil
+	return data, nil
 }
 
-// VerifyAndWriteKV verify a list KV data using the metadata saved in the local level DB and write successfully verified
+// VerifyAndWriteKV verify a list of raw KV data using the metadata saved in the local level DB and write successfully verified
 // KVs to the sstorage file. And return the inserted KV index list.
-func (bc *BlockChain) VerifyAndWriteKV(contract common.Address, data map[uint64][]byte) (uint64, uint64, []uint64, error) {
+func (bc *BlockChain) VerifyAndWriteKV(contract common.Address, data map[uint64][]byte, providerAddr common.Address) (uint64, uint64, []uint64, error) {
 	var (
 		synced      uint64
 		syncedBytes uint64
@@ -2482,12 +2477,12 @@ func (bc *BlockChain) VerifyAndWriteKV(contract common.Address, data map[uint64]
 			continue
 		}
 
-		err = verifyKV(sm, idx, val, meta, true)
+		rawData, err := VerifyKV(sm, idx, val, meta, true)
 		if err != nil {
 			log.Warn("processKVResponse: verify vkv fail", "error", err)
 			continue
 		}
-		vkvs = append(vkvs, &verifiedKV{idx, val, metaHash})
+		vkvs = append(vkvs, &verifiedKV{idx, rawData, metaHash})
 	}
 
 	bc.chainmu.TryLock()
@@ -2499,6 +2494,8 @@ func (bc *BlockChain) VerifyAndWriteKV(contract common.Address, data map[uint64]
 	}
 
 	for _, vkv := range vkvs {
+		// Retrieve with latest hash with lock.  This will ensure that we will write with the latest on-chain hash.
+		// If the verification fails, then the KV data should be updated with block data (unless re-org happens).
 		metaHash, meta, err := GetSstorageMetadata(state, contract, vkv.Idx)
 		if err != nil || meta == nil {
 			log.Warn("get vkv MetaHash for write vkv fail", "error", err)
@@ -2506,11 +2503,15 @@ func (bc *BlockChain) VerifyAndWriteKV(contract common.Address, data map[uint64]
 		}
 
 		if metaHash != vkv.MetaHash {
+			// TODO: verify the storage data again before returning error
 			log.Warn("verify vkv fail", "error", err)
 			continue
 		}
 
-		success, err := sm.TryWriteMaskedKV(vkv.Idx, vkv.Data)
+		success, err := sm.TryWrite(vkv.Idx, vkv.Data, vkv.MetaHash)
+		if err != nil {
+			log.Warn("write kv fail", "error", err)
+		}
 		if success {
 			inserted = append(inserted, vkv.Idx)
 		}
@@ -2518,8 +2519,8 @@ func (bc *BlockChain) VerifyAndWriteKV(contract common.Address, data map[uint64]
 	return synced, syncedBytes, inserted, nil
 }
 
-// ReadMaskedKVsByIndexList Read the masked KVs by a list of KV index.
-func (bc *BlockChain) ReadMaskedKVsByIndexList(contract common.Address, indexes []uint64) ([]*KV, error) {
+// ReadEncodedKVsByIndexList Read the masked KVs by a list of KV index.
+func (bc *BlockChain) ReadEncodedKVsByIndexList(contract common.Address, indexes []uint64) ([]*KV, error) {
 	sm := sstorage.ContractToShardManager[contract]
 	if sm == nil {
 		return nil, fmt.Errorf("shard manager for contract %s is not support", contract.Hex())
@@ -2535,7 +2536,7 @@ func (bc *BlockChain) ReadMaskedKVsByIndexList(contract common.Address, indexes 
 		if err != nil {
 			continue
 		}
-		data, ok, err := sm.TryReadMaskedKV(idx, int(meta.KVSize), common.BytesToHash(meta.HashInMeta))
+		data, ok, err := sm.TryReadEncoded(idx, int(meta.KVSize))
 		if ok && err == nil {
 			kv := KV{idx, data}
 			res = append(res, &kv)
@@ -2545,9 +2546,9 @@ func (bc *BlockChain) ReadMaskedKVsByIndexList(contract common.Address, indexes 
 	return res, nil
 }
 
-// ReadMaskedKVsByIndexRange Read masked KVs sequentially starting from origin until the index exceeds the limit or
+// ReadEncodedKVsByIndexRange Read masked KVs sequentially starting from origin until the index exceeds the limit or
 // the amount of data read is greater than the bytes.
-func (bc *BlockChain) ReadMaskedKVsByIndexRange(contract common.Address, origin uint64, limit uint64, bytes uint64) ([]*KV, error) {
+func (bc *BlockChain) ReadEncodedKVsByIndexRange(contract common.Address, origin uint64, limit uint64, bytes uint64) ([]*KV, error) {
 	sm := sstorage.ContractToShardManager[contract]
 	if sm == nil {
 		return nil, fmt.Errorf("shard manager for contract %s is not support", contract.Hex())
@@ -2564,9 +2565,9 @@ func (bc *BlockChain) ReadMaskedKVsByIndexRange(contract common.Address, origin 
 		if err != nil {
 			continue
 		}
-		data, ok, err := sm.TryReadMaskedKV(idx, int(meta.KVSize), common.BytesToHash(meta.HashInMeta))
+		data, ok, err := sm.TryReadEncoded(idx, int(meta.KVSize))
 		if ok && err == nil {
-			kv := KV{idx, data}
+			kv := KV{Idx: idx, Data: data}
 			res = append(res, &kv)
 			read += meta.KVSize
 			if read > bytes {
