@@ -498,10 +498,7 @@ func TestCrossChainCallPackedData(t *testing.T) {
 	// 0~32byte  0x02
 	// 32~64byte 0x01
 	data := common.Hex2Bytes("00000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000001")
-	result, err := NewGetLogByTxHash(addr, topics, data)
-	if err != nil {
-		t.Fatal(err)
-	}
+	result := NewGetLogByTxHash(addr, topics, data)
 
 	packedData, err := result.ABIPack()
 	if err != nil {
