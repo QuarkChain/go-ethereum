@@ -26,7 +26,6 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/math"
@@ -35,6 +34,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto/blake2b"
 	"github.com/ethereum/go-ethereum/crypto/bls12381"
 	"github.com/ethereum/go-ethereum/crypto/bn256"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/sstorage"
 	"github.com/ethereum/go-ethereum/sstorage/pora"
@@ -1409,6 +1409,7 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractCallEnv, input []byte, 
 		crossChainCallOutput = env.evm.GetNextReplayableCCCOutput()
 		if crossChainCallOutput == nil {
 			// we are out of call outputs, are the validators broken (or the local node is broken)?
+			log.Error("Out of CrossChainCall")
 			env.evm.setCCCSystemError(ErrOutputIdxOutOfBounds)
 			return nil, 0, ErrOutputIdxOutOfBounds
 		}
@@ -1418,6 +1419,7 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractCallEnv, input []byte, 
 		} else {
 			// the gas metering differs from the local node, it may be broken validators or the node.
 			if crossChainCallOutput.GasUsed > prepaidGas {
+				log.Error("CrossChainCall actual gas > prepaid Gas", "actual", crossChainCallOutput.GasUsed, "prepaid", prepaidGas)
 				env.evm.setCCCSystemError(ErrActualGasExceedChargedGas)
 				return crossChainCallOutput.Output, crossChainCallOutput.GasUsed, ErrActualGasExceedChargedGas
 			}
@@ -1426,8 +1428,9 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractCallEnv, input []byte, 
 	}
 
 	// The flag of ReplayMindReading is false means that the node will produce the cross-chain-call output by itself
-
+	// Reaching here means the node is a validator in consensus mode or a node in JSON-RPC eth_call.
 	if env.evm.MRContext.MRClient == nil {
+		log.Error("No active external call client")
 		env.evm.setCCCSystemError(ErrNoActiveClient)
 		return nil, 0, ErrNoActiveClient
 	}
@@ -1439,24 +1442,21 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractCallEnv, input []byte, 
 	confirms := new(big.Int).SetBytes(getData(input, 128, 32)).Uint64()
 
 	if maxDataLen > MaxDataLenLimitation {
-		env.evm.setCCCSystemError(ErrMaxDataLenOutOfLimit)
 		return nil, 0, ErrMaxDataLenOutOfLimit
 	}
 
 	// Ensure that the number of confirmations meets the minimum requirement which is defined by chainConfig
 	if confirms < env.evm.MRContext.MinimumConfirms {
-		env.evm.setCCCSystemError(ErrUserConfirmsNoEnough)
 		return nil, 0, ErrUserConfirmsNoEnough
 	}
 
 	logData, expErr, unexpErr := GetExternalLog(ctx, env, chainId, txHash, logIdx, maxDataLen, confirms)
 
 	if unexpErr != nil {
+		log.Error("External call client unexpected error", "error", unexpErr)
 		env.evm.setCCCSystemError(unexpErr)
 		return nil, 0, unexpErr
 	} else if expErr != nil {
-		// expect error uses the same error handling method as unexpect err
-		env.evm.setCCCSystemError(expErr)
 		return nil, 0, expErr
 	} else {
 		// calculate actual cost of gas
@@ -1464,6 +1464,7 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractCallEnv, input []byte, 
 		actualGasUsed += params.OnceCrossChainCallGas
 
 		packedLogData, err := logData.ABIPack()
+		// TODO: will the error happen?
 		if err != nil {
 			env.evm.setCCCSystemError(err)
 			return nil, 0, err
@@ -1477,6 +1478,7 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractCallEnv, input []byte, 
 	}
 
 	if crossChainCallOutput.GasUsed > prepaidGas {
+		log.Error("CrossChainCall actual gas > prepaid Gas", "actual", crossChainCallOutput.GasUsed, "prepaid", prepaidGas)
 		env.evm.setCCCSystemError(ErrActualGasExceedChargedGas)
 		return crossChainCallOutput.Output, crossChainCallOutput.GasUsed, ErrActualGasExceedChargedGas
 	} else {
@@ -1484,6 +1486,10 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractCallEnv, input []byte, 
 	}
 }
 
+// Call the RPC-JSON on target chain id and return the log information
+// It will return two types of error.
+// - Unexpected error is caused by uncertainties of external node.  The error may differ for each call.
+// - Expected error is caused by errors from user input such as wrong Tx or log indices.  The error is reproducible for all nodes with a synced external node.
 func GetExternalLog(ctx context.Context, env *PrecompiledContractCallEnv, chainId uint64, txHash common.Hash, logIdx uint64, maxDataLen uint64, confirms uint64) (cr *GetLogByTxHash, expErr *ExpectCallErr, unExpErr error) {
 	client := env.evm.MindReadingClient()
 
@@ -1501,19 +1507,16 @@ func GetExternalLog(ctx context.Context, env *PrecompiledContractCallEnv, chainI
 
 	receipt, err := client.TransactionReceipt(ctx, txHash)
 	if err != nil {
-		if err == ethereum.NotFound {
-			// expect Error
-			return nil, NewExpectCallErr(ethereum.NotFound.Error()), nil
-		}
 		// unexpect error
 		return nil, nil, err
 	}
 
 	happenedBlockNumber := receipt.BlockNumber
-
 	if latestBlockNumber-happenedBlockNumber.Uint64() < confirms {
-		// expect error
-		return nil, NewExpectCallErr("CrossChainCall: confirms no enough"), nil
+		// TODO: a proposer may include a Tx that is not confirmed by other validators (if their external nodes are still syncing)
+		// TODO: an optimization is that a proposer will only include a Tx with more confirmations.
+		// unexpected error
+		return nil, nil, errors.New(("CrossChainCall: confirms no enough"))
 	}
 
 	if logIdx >= uint64(len(receipt.Logs)) {
@@ -1531,13 +1534,13 @@ func GetExternalLog(ctx context.Context, env *PrecompiledContractCallEnv, chainI
 		copy(data, log.Data)
 	}
 
+	// TODO: the error should never happen?
 	logData, err := NewGetLogByTxHash(log.Address, log.Topics, data)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	return logData, nil, nil
-
 }
 
 type GetLogByTxHash struct {

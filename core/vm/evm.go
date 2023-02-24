@@ -183,7 +183,8 @@ func NewEVMWithMRC(blockCtx BlockContext, txCtx TxContext, mRCtx *MindReadingCon
 	return evm
 }
 
-// setCCCSystemError record error that occur during cross-chain-call
+// setCCCSystemError records error that occur during cross-chain-call and aborts the EVM execution.
+// Triggering the error means the Tx (and the block) is invalid.
 func (evm *EVM) setCCCSystemError(err error) {
 	if evm.MRContext.cCCSystemError == nil {
 		evm.MRContext.cCCSystemError = err
@@ -214,15 +215,11 @@ func (evm *EVM) IsMindReadingEnabled() bool {
 	}
 }
 
-// IsRelayMindReadingModule return
-func (evm *EVM) IsRelayMindReadingModule() bool {
-	return evm.MRContext.ReplayMindReading
-}
-
 // SetCCCOutputs pre-sets the result of the cross-chain-call and is used when verifying the correctness of the transaction
-func (evm *EVM) SetCCCOutputs(result []byte) {
-	if evm.IsMindReadingEnabled() && evm.IsRelayMindReadingModule() {
-		evm.setCCCOutputs(result)
+func (evm *EVM) SetCCCOutputs(versionedResult []byte) {
+	// TODO: consistent code with AppendCCCOutput()
+	if evm.IsMindReadingEnabled() && evm.MRContext.ReplayMindReading {
+		evm.setCCCOutputs(versionedResult)
 	}
 }
 
@@ -234,12 +231,13 @@ func (evm *EVM) GetCCCOutputs() []*CrossChainCallOutput {
 	}
 }
 
-func (evm *EVM) setCCCOutputs(b []byte) error {
+func (evm *EVM) setCCCOutputs(versionedResult []byte) error {
 	outputsWithVersion := &CrossChainCallOutputsWithVersion{}
-	err := rlp.DecodeBytes(b, outputsWithVersion)
+	err := rlp.DecodeBytes(versionedResult, outputsWithVersion)
 	if err != nil {
 		return err
 	}
+	// TODO: version check
 	evm.MRContext.cCCOutputs = outputsWithVersion.Outputs
 	return nil
 }
