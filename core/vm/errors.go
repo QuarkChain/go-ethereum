@@ -42,7 +42,7 @@ var (
 	ErrOutputIdxOutOfBounds             = errors.New("CrossChainCall: outputs traceIdx out-of-bound")
 	ErrInvalidCrossChainCallInputLength = errors.New("CrossChainCall: invalid CrossChainCallInputLength")
 	ErrDisableExternalCall              = errors.New("CrossChainCall: disable external_call module")
-	ErrExternalCallNoActive             = errors.New("CrossChainCall: external_call is not active")
+	ErrCrossChainCallNoEnabled          = errors.New("CrossChainCall: cross-chain-call no enabled")
 	ErrNoActiveClient                   = errors.New("CrossChainCall: no active external-call-client")
 	ErrUserConfirmsNoEnough             = errors.New("CrossChainCall: the number of confirms defined by the user is too small")
 	ErrActualGasExceedChargedGas        = errors.New("CrossChainCall: the gas charged in advance cannot cover the actual gas consumption")

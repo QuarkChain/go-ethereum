@@ -1398,7 +1398,7 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractCallEnv, input []byte, 
 	}
 
 	if !env.evm.IsMindReadingEnabled() {
-		return nil, 0, ErrExternalCallNoActive
+		return nil, 0, ErrCrossChainCallNoEnabled
 	}
 
 	ctx := context.Background()
@@ -1487,7 +1487,7 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractCallEnv, input []byte, 
 func GetExternalLog(ctx context.Context, env *PrecompiledContractCallEnv, chainId uint64, txHash common.Hash, logIdx uint64, maxDataLen uint64, confirms uint64) (cr *GetLogByTxHash, expErr *ExpectCallErr, unExpErr error) {
 	client := env.evm.MindReadingClient()
 
-	if chainId != env.evm.ChainConfig().MindReading.SupportChainId {
+	if chainId != env.evm.MRContext.ChainId {
 		// expect error
 		expErr = NewExpectCallErr(fmt.Sprintf("CrossChainCall: chainId %d no support", chainId))
 		return nil, expErr, nil
