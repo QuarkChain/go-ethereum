@@ -1363,7 +1363,7 @@ func (c *crossChainCall) RequiredGas(input []byte) uint64 {
 	// bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb (128..160 packed data)
 	// bbbbbbbbbbbbbbbb000000000000000000000000000000000000000000000000 (160..192 packed data)
 
-	maxDataLen := new(big.Int).SetBytes(getData(input, 3*32, 32)).Uint64()
+	maxDataLen := new(big.Int).SetBytes(getData(input, 96, 32)).Uint64()
 	if maxDataLen > MaxDataLenLimitation {
 		return 0
 	}
@@ -1382,7 +1382,7 @@ func (c *crossChainCall) RequiredGas(input []byte) uint64 {
 	// calculate gas cost of outputData
 	outputDataGasCost = packedTotalLen * params.CrossChainCallDataPerByteGas
 
-	totalGasCost = outputDataGasCost * params.OnceCrossChainCallGas
+	totalGasCost = outputDataGasCost + params.OnceCrossChainCallGas
 
 	return totalGasCost
 }
@@ -1405,16 +1405,16 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractCallEnv, input []byte, 
 
 	if env.evm.MRContext.ReplayMindReading {
 		// we are replaying the cross chain calls with the majority votes of the validators (and trust them).
-		crossChainCallOutput = env.evm.GetNextReplayableCCCOutput()
+		crossChainCallOutput = env.evm.getNextReplayableCCCOutput()
 		if crossChainCallOutput == nil {
 			// we are out of call outputs, are the validators broken (or the local node is broken)?
-			log.Error("Out of CrossChainCall")
+			log.Error("Index out of CrossChainCall Outputs")
 			env.evm.setCCCSystemError(ErrOutputIdxOutOfBounds)
 			return nil, 0, ErrOutputIdxOutOfBounds
 		}
 
 		if !crossChainCallOutput.Success {
-			return crossChainCallOutput.Output, crossChainCallOutput.GasUsed, errors.New("external call error")
+			return crossChainCallOutput.Output, crossChainCallOutput.GasUsed, ErrCrossChainCallFailed
 		} else {
 			// the gas metering differs from the local node, it may be broken validators or the node.
 			if crossChainCallOutput.GasUsed > prepaidGas {
@@ -1429,7 +1429,7 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractCallEnv, input []byte, 
 	// The flag of ReplayMindReading is false means that the node will produce the cross-chain-call output by itself
 	// Reaching here means the node is a validator in consensus mode or a node in JSON-RPC eth_call.
 	if env.evm.MRContext.MRClient == nil {
-		log.Error("No active external call client")
+		log.Error("No active MindReading client")
 		env.evm.setCCCSystemError(ErrNoActiveClient)
 		return nil, 0, ErrNoActiveClient
 	}
@@ -1446,13 +1446,13 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractCallEnv, input []byte, 
 
 	// Ensure that the number of confirmations meets the minimum requirement which is defined by chainConfig
 	if confirms < env.evm.MRContext.MinimumConfirms {
-		return nil, 0, ErrUserConfirmsNoEnough
+		return nil, 0, ErrUserDefinedConfirmsTooSmall
 	}
 
 	logData, expErr, unexpErr := GetExternalLog(ctx, env, chainId, txHash, logIdx, maxDataLen, confirms)
 
 	if unexpErr != nil {
-		log.Error("External call client unexpected error", "error", unexpErr)
+		log.Error("MindReading client unexpected error", "error", unexpErr)
 		env.evm.setCCCSystemError(unexpErr)
 		return nil, 0, unexpErr
 	} else if expErr != nil {
@@ -1473,7 +1473,7 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractCallEnv, input []byte, 
 			Success: true,
 			GasUsed: actualGasUsed,
 		}
-		env.evm.AppendCCCOutput(crossChainCallOutput)
+		env.evm.appendCCCOutput(crossChainCallOutput)
 	}
 
 	if crossChainCallOutput.GasUsed > prepaidGas {
@@ -1485,7 +1485,7 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractCallEnv, input []byte, 
 	}
 }
 
-// Call the RPC-JSON on target chain id and return the log information
+// GetExternalLog Call the RPC-JSON on target chain id and return the log information
 // It will return two types of error.
 // - Unexpected error is caused by uncertainties of external node.  The error may differ for each call.
 // - Expected error is caused by errors from user input such as wrong Tx or log indices.  The error is reproducible for all nodes with a synced external node.
@@ -1515,7 +1515,7 @@ func GetExternalLog(ctx context.Context, env *PrecompiledContractCallEnv, chainI
 		// TODO: a proposer may include a Tx that is not confirmed by other validators (if their external nodes are still syncing)
 		// TODO: an optimization is that a proposer will only include a Tx with more confirmations.
 		// unexpected error
-		return nil, nil, errors.New(("CrossChainCall: confirms no enough"))
+		return nil, nil, ErrConfirmsNoEnough
 	}
 
 	if logIdx >= uint64(len(receipt.Logs)) {
@@ -1534,7 +1534,7 @@ func GetExternalLog(ctx context.Context, env *PrecompiledContractCallEnv, chainI
 	}
 
 	// TODO: the error should never happen?
-	logData, err := NewGetLogByTxHash(log.Address, log.Topics, data)
+	logData := NewGetLogByTxHash(log.Address, log.Topics, data)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1553,19 +1553,10 @@ type GetLogByTxHash struct {
 	Args abi.Arguments
 }
 
-func NewGetLogByTxHash(address common.Address, topics []common.Hash, data []byte) (*GetLogByTxHash, error) {
-	arg1Type, err := abi.NewType("address", "", nil)
-	if err != nil {
-		return nil, err
-	}
-	arg2Type, err := abi.NewType("bytes32[]", "", nil)
-	if err != nil {
-		return nil, err
-	}
-	arg3Type, err := abi.NewType("bytes", "", nil)
-	if err != nil {
-		return nil, err
-	}
+func NewGetLogByTxHash(address common.Address, topics []common.Hash, data []byte) *GetLogByTxHash {
+	arg1Type, _ := abi.NewType("address", "", nil)
+	arg2Type, _ := abi.NewType("bytes32[]", "", nil)
+	arg3Type, _ := abi.NewType("bytes", "", nil)
 
 	arg1 := abi.Argument{Name: "address", Type: arg1Type, Indexed: false}
 	arg2 := abi.Argument{Name: "topics", Type: arg2Type, Indexed: false}
@@ -1573,7 +1564,7 @@ func NewGetLogByTxHash(address common.Address, topics []common.Hash, data []byte
 
 	var args = abi.Arguments{arg1, arg2, arg3}
 
-	return &GetLogByTxHash{Address: address, Topics: topics, Data: data, Args: args}, nil
+	return &GetLogByTxHash{Address: address, Topics: topics, Data: data, Args: args}
 }
 
 func (c *GetLogByTxHash) ABIPack() ([]byte, error) {
