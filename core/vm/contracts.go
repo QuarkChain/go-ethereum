@@ -1370,20 +1370,19 @@ func (c *crossChainCall) RequiredGas(input []byte) uint64 {
 
 	// ABI.packed data len will be round up to 32-aligned (see above example).
 	if maxDataLen%32 != 0 {
-		tmp := 32 + 32 - maxDataLen%32
-		packedDataLen, _ = math.SafeAdd(maxDataLen, tmp)
-	} else {
-		packedDataLen, _ = math.SafeAdd(maxDataLen, 32)
+		maxDataLen = maxDataLen + 32 - maxDataLen%32
 	}
+	// data length is added with 32 bytes after packing
+	packedDataLen = 32 + maxDataLen
 
 	// the sum of address len and topics len (address_len = 32 , max_topics_len = 7 * 32)
 	packedAddrTopicsLen = 8 * 32
-	packedTotalLen, _ = math.SafeAdd(packedAddrTopicsLen, packedDataLen)
+	packedTotalLen = packedAddrTopicsLen + packedDataLen
 
 	// calculate gas cost of outputData
-	outputDataGasCost, _ = math.SafeMul(packedTotalLen, params.CrossChainCallDataPerByteGas)
+	outputDataGasCost = packedTotalLen * params.CrossChainCallDataPerByteGas
 
-	totalGasCost, _ = math.SafeAdd(outputDataGasCost, params.OnceCrossChainCallGas)
+	totalGasCost = outputDataGasCost * params.OnceCrossChainCallGas
 
 	return totalGasCost
 }
@@ -1415,7 +1414,7 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractCallEnv, input []byte, 
 		}
 
 		if !crossChainCallOutput.Success {
-			return crossChainCallOutput.Output, crossChainCallOutput.GasUsed, ErrExecutionReverted
+			return crossChainCallOutput.Output, crossChainCallOutput.GasUsed, errors.New("external call error")
 		} else {
 			// the gas metering differs from the local node, it may be broken validators or the node.
 			if crossChainCallOutput.GasUsed > prepaidGas {

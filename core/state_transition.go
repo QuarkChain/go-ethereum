@@ -337,6 +337,7 @@ func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
 	}
 
 	// return the error directly if the error occurs when invoking crossChainCall
+	// The error may caused by external nodes, which may be recovered in the second call.
 	if st.evm.CCCSystemError() != nil {
 		return nil, st.evm.CCCSystemError()
 	}
