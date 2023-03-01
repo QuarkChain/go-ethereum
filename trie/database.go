@@ -121,7 +121,7 @@ func (s *Database) SstorageWrite(addr common.Address, kvIdx uint64, data []byte)
 	return nil
 }
 
-func (s *Database) SstorageRead(addr common.Address, kvIdx uint64, readLen int, hash common.Hash) ([]byte, bool, error) {
+func (s *Database) SstorageRead(addr common.Address, kvIdx uint64, readLen int, commit common.Hash) ([]byte, bool, error) {
 	s.lock.RLock()
 	defer s.lock.RUnlock()
 
@@ -139,7 +139,7 @@ func (s *Database) SstorageRead(addr common.Address, kvIdx uint64, readLen int, 
 	}
 
 	if s, ok0 := s.contractToShardManager[addr]; ok0 {
-		return s.TryRead(kvIdx, readLen, hash)
+		return s.TryRead(kvIdx, readLen, commit)
 	}
 	return nil, false, nil
 }
@@ -789,7 +789,7 @@ func (db *Database) Commit(node common.Hash, report bool, callback func(common.H
 	for addr, m := range db.shardedStorage {
 		sm := db.contractToShardManager[addr]
 		for kvIdx, b := range m {
-			_, err := sm.TryWrite(kvIdx, b)
+			_, err := sm.TryWrite(kvIdx, b, common.Hash{})
 			if err != nil {
 				log.Error("Failed to write sstorage", "kvIdx", kvIdx, "err", err)
 			}

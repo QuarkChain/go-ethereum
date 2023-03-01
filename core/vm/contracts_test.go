@@ -310,7 +310,7 @@ func benchJson(name, addr string, b *testing.B) {
 
 func TestUnmaskDaggerData(t *testing.T) {
 	sstorage.InitializeConfig()
-	p := &sstoragePisa{}
+	p := &sstoragePisaUnmaskDaggerData{}
 
 	hash := common.Hash{0x01, 0x2}
 	epoch := big.NewInt(1)
@@ -329,7 +329,7 @@ func TestUnmaskDaggerData(t *testing.T) {
 
 	test := precompiledTest{
 		Name:     "TestUnmaskDaggerData",
-		Input:    hex.EncodeToString(unmaskDaggerData) + hex.EncodeToString(packed),
+		Input:    hex.EncodeToString(packed),
 		Expected: hex.EncodeToString(expected),
 	}
 	in := common.Hex2Bytes(test.Input)
@@ -498,10 +498,7 @@ func TestCrossChainCallPackedData(t *testing.T) {
 	// 0~32byte  0x02
 	// 32~64byte 0x01
 	data := common.Hex2Bytes("00000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000001")
-	result, err := NewGetLogByTxHash(addr, topics, data)
-	if err != nil {
-		t.Fatal(err)
-	}
+	result := NewGetLogByTxHash(addr, topics, data)
 
 	packedData, err := result.ABIPack()
 	if err != nil {

@@ -102,6 +102,7 @@ type MindReadingContext struct {
 	MREnable          bool
 	ChainId           uint64
 	MinimumConfirms   uint64
+	Version           uint64
 	// cCCOutputs means 'crossChainCallOutputs` will store the return value of each cross-chain call
 	// cCCOutputsIdx increases by 1 after each invoking to CrossChainCall in order to point to the corresponding CCROutput
 	cCCOutputs    []*CrossChainCallOutput
@@ -111,7 +112,7 @@ type MindReadingContext struct {
 }
 
 func NewMindReadingContext(MRClient MindReadingClient, relayMindReading bool, mrEnable bool, config *params.ChainConfig) *MindReadingContext {
-	return &MindReadingContext{MRClient: MRClient, ReplayMindReading: relayMindReading, MREnable: mrEnable, ChainId: config.MindReading.SupportChainId, MinimumConfirms: config.MindReading.MinimumConfirms}
+	return &MindReadingContext{MRClient: MRClient, ReplayMindReading: relayMindReading, MREnable: mrEnable, ChainId: config.MindReading.SupportChainId, MinimumConfirms: config.MindReading.MinimumConfirms, Version: config.MindReading.Version}
 }
 
 // EVM is the Ethereum Virtual Machine base object and provides
@@ -183,11 +184,13 @@ func NewEVMWithMRC(blockCtx BlockContext, txCtx TxContext, mRCtx *MindReadingCon
 	return evm
 }
 
-// setCCCSystemError record error that occur during cross-chain-call
+// setCCCSystemError records error that occur during cross-chain-call and aborts the EVM execution.
+// Triggering the error means the Tx (and the block) is invalid.
 func (evm *EVM) setCCCSystemError(err error) {
 	if evm.MRContext.cCCSystemError == nil {
 		evm.MRContext.cCCSystemError = err
 	}
+	evm.Cancel()
 }
 
 // CCCSystemError return error that occur during cross-chain-call
@@ -213,16 +216,13 @@ func (evm *EVM) IsMindReadingEnabled() bool {
 	}
 }
 
-// IsRelayMindReadingModule return
-func (evm *EVM) IsRelayMindReadingModule() bool {
-	return evm.MRContext.ReplayMindReading
-}
-
-// SetCCCOutputs pre-sets the result of the cross-chain-call and is used when verifying the correctness of the transaction
-func (evm *EVM) SetCCCOutputs(result []byte) {
-	if evm.IsMindReadingEnabled() && evm.IsRelayMindReadingModule() {
-		evm.setCCCOutputs(result)
+// PresetCCCOutputs pre-sets the result of the cross-chain-call and is used when verifying the correctness of the transaction
+func (evm *EVM) PresetCCCOutputs(versionedResult []byte) bool {
+	if evm.IsMindReadingEnabled() && evm.MRContext.ReplayMindReading {
+		evm.setCCCOutputs(versionedResult)
+		return true
 	}
+	return false
 }
 
 func (evm *EVM) GetCCCOutputs() []*CrossChainCallOutput {
@@ -233,17 +233,20 @@ func (evm *EVM) GetCCCOutputs() []*CrossChainCallOutput {
 	}
 }
 
-func (evm *EVM) setCCCOutputs(b []byte) error {
+func (evm *EVM) setCCCOutputs(versionedResult []byte) error {
 	outputsWithVersion := &CrossChainCallOutputsWithVersion{}
-	err := rlp.DecodeBytes(b, outputsWithVersion)
+	err := rlp.DecodeBytes(versionedResult, outputsWithVersion)
 	if err != nil {
 		return err
+	}
+	if evm.MRContext.Version != outputsWithVersion.Version {
+		return ErrVersionNomatch
 	}
 	evm.MRContext.cCCOutputs = outputsWithVersion.Outputs
 	return nil
 }
 
-func (evm EVM) GetNextReplayableCCCOutput() *CrossChainCallOutput {
+func (evm EVM) getNextReplayableCCCOutput() *CrossChainCallOutput {
 	if evm.MRContext.cCCOutputsIdx >= uint64(len(evm.MRContext.cCCOutputs)) {
 		return nil
 	}
@@ -251,7 +254,7 @@ func (evm EVM) GetNextReplayableCCCOutput() *CrossChainCallOutput {
 	return evm.MRContext.cCCOutputs[evm.MRContext.cCCOutputsIdx-1]
 }
 
-func (evm *EVM) AppendCCCOutput(trace *CrossChainCallOutput) []*CrossChainCallOutput {
+func (evm *EVM) appendCCCOutput(trace *CrossChainCallOutput) []*CrossChainCallOutput {
 	evm.MRContext.cCCOutputs = append(evm.MRContext.cCCOutputs, trace)
 	return evm.MRContext.cCCOutputs
 }
