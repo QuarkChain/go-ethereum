@@ -279,7 +279,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *par
 	bc.validator = NewBlockValidator(chainConfig, bc, engine)
 	bc.prefetcher = newStatePrefetcher(chainConfig, bc, engine)
 	bc.processor = NewStateProcessor(chainConfig, bc, engine)
-	bc.configureMindReading(chainConfig)
+	bc.setMindReading(chainConfig)
 
 	var err error
 	bc.hc, err = NewHeaderChain(db, chainConfig, engine, bc.insertStopped)
@@ -2616,7 +2616,7 @@ func (bc *BlockChain) GetSstorageLastKvIdx(contract common.Address) (uint64, err
 	return new(big.Int).SetBytes(val.Bytes()).Uint64(), nil
 }
 
-func (bc *BlockChain) configureMindReading(chainConfig *params.ChainConfig) error {
+func (bc *BlockChain) setMindReading(chainConfig *params.ChainConfig) error {
 	if chainConfig.MindReading != nil {
 		bc.mindReading.EnableBlockNumber = chainConfig.MindReading.EnableBlockNumber
 		bc.mindReading.Version = chainConfig.MindReading.Version

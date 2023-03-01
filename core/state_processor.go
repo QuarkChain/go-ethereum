@@ -58,7 +58,7 @@ func NewStateProcessor(config *params.ChainConfig, bc *BlockChain, engine consen
 // Process returns the receipts and logs accumulated during the process and
 // returns the amount of gas that was used in the process. If any of the
 // transactions failed to execute due to insufficient gas it will return an error.
-func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg vm.Config, relayMindReadingOutput bool) (types.Receipts, []*types.Log, uint64, error) {
+func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg vm.Config, rpelayMindReadingOutput bool) (types.Receipts, []*types.Log, uint64, error) {
 	var (
 		receipts    types.Receipts
 		usedGas     = new(uint64)
@@ -78,7 +78,7 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 	mindReadingEnable := p.bc.IsMindReadingEnable(block.Number())
 	var mrctx *vm.MindReadingContext
 	if mindReadingEnable {
-		mrctx = p.bc.mindReading.GenerateVMMindReadingCtx(blockNumber, relayMindReadingOutput)
+		mrctx = p.bc.mindReading.GenerateVMMindReadingCtx(blockNumber, rpelayMindReadingOutput)
 		// determine the way of execution for MindReading.
 		// e.g. relayMindReadingOutput = false represents that the node will obtain external data by itself through MindReadingClient
 		// e.g. relayMindReadingOutput = true represents that the node will obtain external data, already produced by the proposer and verified by validators, from the block.uncles
@@ -109,14 +109,14 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 
 		// validator verify data
 		if mindReadingEnable {
-			if !relayMindReadingOutput {
+			if !rpelayMindReadingOutput {
 				if !bytes.Equal(MROutput, expectMROutput) {
-					log.Warn("【Validator】failed to verify MindReading Output", "txHash", tx.Hash().Hex(), "Expect MindReadingOutput", common.Bytes2Hex(expectMROutput), "MindReadingOutput", common.Bytes2Hex(MROutput))
+					log.Error("【Validator】failed to verify MindReading Output", "txHash", tx.Hash().Hex(), "Expect MindReadingOutput", common.Bytes2Hex(expectMROutput), "MindReadingOutput", common.Bytes2Hex(MROutput))
 					return nil, nil, 0, fmt.Errorf("【Validator】failed to verify MindReading Output, tx: %s", tx.Hash().Hex())
 				}
 			} else {
 				if !bytes.Equal(MROutput, expectMROutput) {
-					log.Warn("【Normal】produced MindReading Output is different with received MindReading Output ", "txHash", tx.Hash().Hex(), "Expect MindReadingOutput", common.Bytes2Hex(expectMROutput), "MindReadingOutput", common.Bytes2Hex(MROutput))
+					log.Error("【Normal】produced MindReading Output is different with received MindReading Output ", "txHash", tx.Hash().Hex(), "Expect MindReadingOutput", common.Bytes2Hex(expectMROutput), "MindReadingOutput", common.Bytes2Hex(MROutput))
 				}
 			}
 		}
