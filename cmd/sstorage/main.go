@@ -16,6 +16,7 @@ import (
 
 var (
 	chunkLen  *uint64
+	miner     *string
 	filenames *[]string
 
 	verbosity *int
@@ -24,10 +25,11 @@ var (
 	readLen    *uint64
 	readMasked *bool
 
-	shardIdx  *uint64
-	kvSize    *uint64
-	kvEntries *uint64
-	kvIdx     *uint64
+	shardIdx     *uint64
+	kvSize       *uint64
+	kvEntries    *uint64
+	kvIdx        *uint64
+	commitString *string
 )
 
 var CreateCmd = &cobra.Command{
@@ -64,6 +66,7 @@ func init() {
 	chunkLen = CreateCmd.Flags().Uint64("len", 0, "Chunk idx len to create")
 
 	filenames = rootCmd.PersistentFlags().StringArray("filename", []string{}, "Data filename")
+	miner = rootCmd.PersistentFlags().String("miner", "", "miner address")
 	verbosity = rootCmd.PersistentFlags().Int("verbosity", 3, "Logging verbosity: 0=silent, 1=error, 2=warn, 3=info, 4=debug, 5=detail")
 	chunkIdx = rootCmd.PersistentFlags().Uint64("chunk_idx", 0, "Chunk idx to start/read/write")
 
@@ -74,6 +77,7 @@ func init() {
 
 	readMasked = rootCmd.PersistentFlags().Bool("masked", false, "Read masked or not")
 	readLen = rootCmd.PersistentFlags().Uint64("readlen", 0, "Bytes to read (only for unmasked read)")
+	commitString = rootCmd.PersistentFlags().String("encode_key", "", "encode key")
 }
 
 func setupLogger() {
@@ -101,9 +105,14 @@ func runCreate(cmd *cobra.Command, args []string) {
 		log.Crit("must provide single filename")
 	}
 
-	log.Info("Creating data file", "chunkIdx", *chunkIdx, "chunkLen", *chunkLen)
+	if *miner == "" {
+		log.Crit("must provide miner")
+	}
+	minerAddr := common.HexToAddress(*miner)
 
-	_, err := sstorage.Create((*filenames)[0], *chunkIdx, *chunkLen, sstorage.MASK_KECCAK_256)
+	log.Info("Creating data file", "chunkIdx", *chunkIdx, "chunkLen", *chunkLen, "miner", minerAddr)
+
+	_, err := sstorage.Create((*filenames)[0], *chunkIdx, *chunkLen, 0, *kvSize, sstorage.ENCODE_KECCAK_256, minerAddr)
 	if err != nil {
 		log.Crit("create failed", "error", err)
 	}
@@ -124,7 +133,7 @@ func runChunkRead(cmd *cobra.Command, args []string) {
 	}
 
 	// do not have data hash, use empty hash for placeholder
-	b, err := df.Read(*chunkIdx, int(*readLen), common.Hash{}, *readMasked)
+	b, err := df.Read(*chunkIdx, int(*readLen))
 	if err != nil {
 		log.Crit("open failed", "error", err)
 	}
@@ -158,7 +167,7 @@ func runChunkWrite(cmd *cobra.Command, args []string) {
 		log.Crit("open failed", "error", err)
 	}
 
-	err = df.Write(*chunkIdx, readInputBytes(), false)
+	err = df.Write(*chunkIdx, readInputBytes())
 	if err != nil {
 		log.Crit("write failed", "error", err)
 	}
@@ -175,15 +184,20 @@ func runShardRead(cmd *cobra.Command, args []string) {
 		if err != nil {
 			log.Crit("open failed", "error", err)
 		}
-		ds.AddDataFile(df)
+		err = ds.AddDataFile(df)
+		if err != nil {
+			log.Crit("open failed", "error", err)
+		}
 	}
 
 	if !ds.IsComplete() {
 		log.Warn("shard is not completed")
 	}
 
-	// do not have data hash, use empty hash for placeholder 
-	b, err := ds.Read(*kvIdx, int(*readLen), common.Hash{}, *readMasked)
+	commit := common.HexToHash(*commitString)
+
+	// do not have data hash, use empty hash for placeholder
+	b, err := ds.Read(*kvIdx, int(*readLen), commit)
 	if err != nil {
 		log.Crit("read failed", "error", err)
 	}
@@ -208,7 +222,8 @@ func runShardWrite(cmd *cobra.Command, args []string) {
 		log.Warn("shard is not completed")
 	}
 
-	err := ds.Write(*kvIdx, readInputBytes(), false)
+	commit := common.HexToHash(*commitString)
+	err := ds.Write(*kvIdx, readInputBytes(), commit)
 	if err != nil {
 		log.Crit("write failed", "error", err)
 	}
