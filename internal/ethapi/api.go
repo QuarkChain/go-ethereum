@@ -17,9 +17,12 @@
 package ethapi
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"github.com/ethereum/go-ethereum/ethdb/memorydb"
+	"github.com/ethereum/go-ethereum/trie"
 	"math/big"
 	"strings"
 	"time"
@@ -1667,6 +1670,75 @@ func (s *PublicTransactionPoolAPI) GetTransactionReceipt(ctx context.Context, ha
 	if receipt.ContractAddress != (common.Address{}) {
 		fields["contractAddress"] = receipt.ContractAddress
 	}
+	return fields, nil
+}
+
+// GetReceiptProof returns a proof which is the receipt-tree(mpt) path for the receipt corresponding to the specified block to verify the validity of the receipt
+func (s *PublicTransactionPoolAPI) GetReceiptProof(ctx context.Context, txHash common.Hash) (map[string]interface{}, error) {
+	_, blockHash, blockNumber, index, err := s.b.GetTransaction(ctx, txHash)
+	if err != nil {
+		return nil, err
+	}
+	receipts, err := s.b.GetReceipts(ctx, blockHash)
+	if err != nil {
+		return nil, err
+	}
+	if len(receipts) <= int(index) {
+		return nil, fmt.Errorf("index invalid")
+	}
+	receipt := receipts[index]
+	//1. rlp encode receipt value
+	receiptBuf := new(bytes.Buffer)
+	receipts.EncodeIndex(int(index), receiptBuf)
+	//2. get receipt root
+	head, err := s.b.HeaderByHash(ctx, blockHash)
+	if err != nil {
+		return nil, err
+	}
+	receiptTrieRoot := head.ReceiptHash
+	//3. generate receipt key
+	var key []byte
+	key = rlp.AppendUint64(key[:0], uint64(receipt.TransactionIndex))
+	if err != nil {
+		return nil, err
+	}
+	//4. create the receipt tree
+	tree, err := trie.New(common.Hash{}, trie.NewDatabase(memorydb.New()))
+	if err != nil {
+		return nil, err
+	}
+	hash := types.DeriveSha(receipts, tree)
+
+	//5.verify the receiptTreeRoot
+	if hash != receiptTrieRoot {
+		return nil, fmt.Errorf("receipt tree root no match:\ngenerating receipt tree root: %s,\nreceipt tree root at block: %s,\n", hash, head.ReceiptHash.Hex())
+	}
+
+	//6.generate the path of proof
+	nodes, _, err := tree.GetProof(key, 0, memorydb.New())
+	if err != nil {
+		return nil, err
+	}
+
+	buf := bytes.Buffer{}
+	err = rlp.Encode(&buf, nodes)
+	if err != nil {
+		return nil, err
+	}
+
+	hpkey := trie.HexToCompact(trie.KeyBytesToHex(key))
+
+	fields := map[string]interface{}{
+		"blockHash":        blockHash,
+		"blockNumber":      blockNumber,
+		"transactionHash":  txHash,
+		"transactionIndex": index,
+		"receiptRoot":      hash,
+		"receiptValue":     hexutil.Bytes(receiptBuf.Bytes()),
+		"receiptKey":       hexutil.Bytes(hpkey),
+		"receiptPath":      hexutil.Bytes(buf.Bytes()),
+	}
+
 	return fields, nil
 }
 
