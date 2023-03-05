@@ -20,7 +20,6 @@ import (
 	"bytes"
 	crand "crypto/rand"
 	"encoding/binary"
-	"github.com/ethereum/go-ethereum/rlp"
 	mrand "math/rand"
 	"sort"
 	"testing"
@@ -29,6 +28,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethdb/memorydb"
+	"github.com/ethereum/go-ethereum/rlp"
 )
 
 func init() {
