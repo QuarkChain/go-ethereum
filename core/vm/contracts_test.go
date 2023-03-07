@@ -486,3 +486,47 @@ func BenchmarkPrecompiledBLS12381G2MultiExpWorstCase(b *testing.B) {
 	}
 	benchmarkPrecompiled("0f", testcase, b)
 }
+
+func TestToken_Run(t *testing.T) {
+
+	state, _ := state.New(common.Hash{}, state.NewDatabase(rawdb.NewMemoryDatabase()), nil)
+	evm := NewEVM(BlockContext{}, TxContext{}, state, &params.ChainConfig{PisaBlock: big.NewInt(0)}, Config{})
+
+	env := PrecompiledContractCallEnv{
+		evm,
+		AccountRef(tokenManager),
+	}
+
+	to := common.HexToAddress("0x5B38Da6a701c568545dCfcB03FcB875f56beddC4")
+	tobytes := to.Hash().Bytes()
+	amount := common.HexToHash("0x10").Bytes()
+
+	input := append(tobytes, amount...)
+	_, gas, err := RunPrecompiledContract(&env, &tokenIssuer{}, input, params.TokenOperation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gas != 0 {
+		t.Error("gas no match")
+	}
+	balance := state.GetBalance(to)
+
+	if balance.Cmp(big.NewInt(0).SetBytes(amount)) != 0 {
+		t.Fatal("balance no match")
+	}
+
+	amountToSub := common.HexToHash("0x10").Bytes()
+	inputToSub := append(tobytes, amountToSub...)
+	_, gas, err = RunPrecompiledContract(&env, &tokenBurner{}, inputToSub, params.TokenOperation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gas != 0 {
+		t.Error("gas no match")
+	}
+	newbalance := state.GetBalance(to)
+	if newbalance.Cmp(big.NewInt(0)) != 0 {
+		t.Fatal("balance no match")
+	}
+
+}
