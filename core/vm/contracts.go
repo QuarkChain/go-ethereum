@@ -1461,10 +1461,15 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractCallEnv, input []byte, 
 
 	crossChainCallOutput := &CrossChainCallOutput{
 		Output:  output,
-		Success: err != nil,
+		Success: err == nil,
 		GasUsed: gasUsed,
 	}
 	env.evm.appendCCCOutput(crossChainCallOutput)
+
+	// make sure return the same expect-err if occurred in the case of 'replay' and 'self-play'
+	if err != nil {
+		err = ErrCrossChainCallFailed
+	}
 	return output, gasUsed, err
 }
 
@@ -1508,11 +1513,7 @@ func (c *crossChainCall) mindReadFromExternalClient(env *PrecompiledContractCall
 	actualGasUsed := logData.GasCost(params.CrossChainCallDataPerByteGas)
 	actualGasUsed += params.OnceCrossChainCallGas
 
-	packedLogData, err := logData.ABIPack()
-	// TODO: will the error happen?
-	if err != nil {
-		return nil, 0, nil, err
-	}
+	packedLogData, _ := logData.ABIPack()
 
 	if actualGasUsed > prepaidGas {
 		log.Error("CrossChainCall actual gas > prepaid Gas", "actual", actualGasUsed, "prepaid", prepaidGas)
