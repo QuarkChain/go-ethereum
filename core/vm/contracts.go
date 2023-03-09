@@ -1430,7 +1430,7 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractCallEnv, input []byte, 
 		return nil, 0, ErrCrossChainCallNoEnabled
 	}
 
-	if env.evm.MRContext.ReplayMindReading {
+	if env.evm.MRContext.ReuseMindReading {
 		// we are replaying the cross chain calls with the majority votes of the validators (and trust them).
 		crossChainCallOutput := env.evm.getNextReplayableCCCOutput()
 		if crossChainCallOutput == nil {
@@ -1656,11 +1656,11 @@ func VerifyCrossChainCall(client MindReadingClient, externalCallInput string) ([
 	chainCfg := &params.ChainConfig{MindReading: &params.MindReadingConfig{EnableBlockNumber: big.NewInt(0), SupportChainId: supportChainID, Version: 1}}
 
 	mrctx := &MindReadingContext{
-		MRClient:          client,
-		MREnable:          true,
-		ReplayMindReading: false,
-		ChainId:           chainId.Uint64(),
-		MinimumConfirms:   10,
+		MRClient:         client,
+		MREnable:         true,
+		ReuseMindReading: false,
+		ChainId:          chainId.Uint64(),
+		MinimumConfirms:  10,
 	}
 	evm := NewEVMWithMRC(BlockContext{BlockNumber: big.NewInt(0)}, TxContext{}, mrctx, nil, chainCfg, evmConfig)
 	//evmInterpreter := NewEVMInterpreter(evm, evm.Config)

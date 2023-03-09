@@ -58,7 +58,7 @@ func NewStateProcessor(config *params.ChainConfig, bc *BlockChain, engine consen
 // Process returns the receipts and logs accumulated during the process and
 // returns the amount of gas that was used in the process. If any of the
 // transactions failed to execute due to insufficient gas it will return an error.
-func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg vm.Config, replayMindReadingOutput bool) (types.Receipts, []*types.Log, uint64, error) {
+func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg vm.Config, reuseMindReadingOutput bool) (types.Receipts, []*types.Log, uint64, error) {
 	var (
 		receipts    types.Receipts
 		usedGas     = new(uint64)
@@ -78,10 +78,10 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 	mindReadingEnable := p.bc.IsMindReadingEnable(block.Number())
 	var mrctx *vm.MindReadingContext
 	if mindReadingEnable {
-		// 'replayMindReadingOutput' determines the way of execution for MindReading.
-		// e.g. relayMindReadingOutput = false represents that the node will obtain external data by itself through MindReadingClient
-		// e.g. relayMindReadingOutput = true represents that the node will obtain external data, already produced by the proposer and verified by validators, from the block.uncles
-		mrctx = p.bc.mindReading.GenerateVMMindReadingCtx(blockNumber, replayMindReadingOutput)
+		// 'reuseMindReadingOutput' determines the way of execution for MindReading.
+		// e.g. reuseMindReadingOutput = false represents that the node will obtain external data by itself through MindReadingClient
+		// e.g. reuseMindReadingOutput = true represents that the node will obtain external data, already produced by the proposer and verified by validators, from the block.uncles
+		mrctx = p.bc.mindReading.GenerateVMMindReadingCtx(blockNumber, reuseMindReadingOutput)
 	}
 	vmenv := vm.NewEVMWithMRC(blockContext, vm.TxContext{}, mrctx, statedb, p.config, cfg)
 	// Iterate over and process the individual transactions
@@ -108,7 +108,7 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 		}
 
 		if mindReadingEnable {
-			if !replayMindReadingOutput {
+			if !reuseMindReadingOutput {
 				// non-proposer validator fails to verify the MR data
 				if !bytes.Equal(mrOutput, replayableMROutput) {
 					log.Error("failed to verify MindReadingOutput as validator", "txHash", tx.Hash().Hex(), "Expect MindReadingOutput", common.Bytes2Hex(replayableMROutput), "MindReadingOutput", common.Bytes2Hex(mrOutput))
@@ -130,7 +130,7 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 
 	// Make sure all mind reading outputs are consumed
 	if uncleIndex != len(block.Uncles()) {
-		return nil, nil, 0, fmt.Errorf("unconsumed MR outputs, isReplay: %t", replayMindReadingOutput)
+		return nil, nil, 0, fmt.Errorf("unconsumed MR outputs, isReplay: %t", reuseMindReadingOutput)
 	}
 
 	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
