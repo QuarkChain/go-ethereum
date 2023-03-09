@@ -38,6 +38,20 @@ var (
 	ErrNonceUintOverflow        = errors.New("nonce uint64 overflow")
 	ErrCodeInsufficientStake    = errors.New("insufficient staking for code")
 
+	// ErrOutOfBoundsTracePtr which happen when execute operation of cross chain call
+	ErrOutputIdxOutOfBounds             = errors.New("CrossChainCall: outputs traceIdx out-of-bound")
+	ErrInvalidCrossChainCallInputLength = errors.New("CrossChainCall: invalid CrossChainCallInputLength")
+	ErrDisableExternalCall              = errors.New("CrossChainCall: disable external_call module")
+	ErrCrossChainCallNoEnabled          = errors.New("CrossChainCall: cross-chain-call no enabled")
+	ErrNoActiveClient                   = errors.New("CrossChainCall: no active external-call-client")
+	ErrUserDefinedConfirmsTooSmall      = errors.New("CrossChainCall: the number of confirms defined by the user is too small")
+	ErrConfirmsNoEnough                 = errors.New("CrossChainCall: confirms no enough")
+	ErrActualGasExceedChargedGas        = errors.New("CrossChainCall: the gas charged in advance cannot cover the actual gas consumption")
+	ErrMaxDataLenOutOfLimit             = errors.New("CrossChainCall: maxDataLen is out of limit")
+	ErrUnsupportMethod                  = errors.New("CrossChainCall: unsupported method")
+	ErrCrossChainCallFailed             = errors.New("CrossChainCall: cross-chain-call failed")
+	ErrVersionNomatch                   = errors.New("CrossChainCall: version no match")
+
 	// errStopToken is an internal token indicating interpreter loop termination,
 	// never returned to outside callers.
 	errStopToken = errors.New("stop token")

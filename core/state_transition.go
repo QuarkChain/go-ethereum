@@ -27,6 +27,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/ethereum/go-ethereum/rlp"
 )
 
 var emptyCodeHash = crypto.Keccak256Hash(nil)
@@ -42,8 +43,10 @@ The state transitioning model does all the necessary work to work out a valid ne
 3) Create a new state object if the recipient is \0*32
 4) Value transfer
 == If contract creation ==
-  4a) Attempt to run transaction data
-  4b) If valid, use result as code for the new state object
+
+	4a) Attempt to run transaction data
+	4b) If valid, use result as code for the new state object
+
 == end ==
 5) Run Script section
 6) Derive new state root
@@ -85,6 +88,7 @@ type ExecutionResult struct {
 	UsedGas    uint64 // Total used gas but include the refunded gas
 	Err        error  // Any error encountered during the execution(listed in core/vm/errors.go)
 	ReturnData []byte // Returned data from evm(function result or data supplied with revert opcode)
+	CCCOutputs []byte // CCCOutputs (`CrossChainCall-Outputs`)  is encoded as data with the format of rlp(version, abi.pack(evm.Interpreter().CrossChainCallResults()))
 }
 
 // Unwrap returns the internal evm error which allows us for further
@@ -268,13 +272,13 @@ func (st *StateTransition) preCheck() error {
 // TransitionDb will transition the state by applying the current message and
 // returning the evm execution result with following fields.
 //
-// - used gas:
-//      total gas used (including gas being refunded)
-// - returndata:
-//      the returned data from evm
-// - concrete execution error:
-//      various **EVM** error which aborts the execution,
-//      e.g. ErrOutOfGas, ErrExecutionReverted
+//   - used gas:
+//     total gas used (including gas being refunded)
+//   - returndata:
+//     the returned data from evm
+//   - concrete execution error:
+//     various **EVM** error which aborts the execution,
+//     e.g. ErrOutOfGas, ErrExecutionReverted
 //
 // However if any consensus issue encountered, return the error directly with
 // nil evm execution result.
@@ -332,6 +336,12 @@ func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
 		ret, st.gas, vmerr = st.evm.Call(sender, st.to(), st.data, st.gas, st.value)
 	}
 
+	// return the error directly if the error occurs when invoking crossChainCall
+	// The error may caused by external nodes, which may be recovered in the second call.
+	if st.evm.CCCSystemError() != nil {
+		return nil, st.evm.CCCSystemError()
+	}
+
 	if !london {
 		// Before EIP-3529: refunds were capped to gasUsed / 2
 		st.refundGas(params.RefundQuotient)
@@ -345,6 +355,32 @@ func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
 	}
 	st.state.AddBalance(st.evm.Context.Coinbase, new(big.Int).Mul(new(big.Int).SetUint64(st.gasUsed()), effectiveTip))
 
+	if len(st.evm.GetCCCOutputs()) != 0 {
+		outputs := st.evm.GetCCCOutputs()
+
+		var version uint64
+		if st.evm.ChainConfig().MindReading.Version != 0 {
+			version = st.evm.ChainConfig().MindReading.Version
+		} else {
+			version = 0
+		}
+
+		outputsWithVersion := vm.CrossChainCallOutputsWithVersion{
+			Version: version,
+			Outputs: outputs,
+		}
+		bytes, err := rlp.EncodeToBytes(outputsWithVersion)
+		if err != nil {
+			return nil, err
+		}
+
+		return &ExecutionResult{
+			UsedGas:    st.gasUsed(),
+			Err:        vmerr,
+			ReturnData: ret,
+			CCCOutputs: bytes,
+		}, nil
+	}
 	return &ExecutionResult{
 		UsedGas:    st.gasUsed(),
 		Err:        vmerr,
