@@ -1430,12 +1430,9 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractCallEnv, input []byte, 
 		return nil, 0, ErrCrossChainCallNoEnabled
 	}
 
-	ctx := context.Background()
-	var crossChainCallOutput *CrossChainCallOutput
-
 	if env.evm.MRContext.ReplayMindReading {
 		// we are replaying the cross chain calls with the majority votes of the validators (and trust them).
-		crossChainCallOutput = env.evm.getNextReplayableCCCOutput()
+		crossChainCallOutput := env.evm.getNextReplayableCCCOutput()
 		if crossChainCallOutput == nil {
 			// we are out of call outputs, are the validators broken (or the local node is broken)?
 			log.Error("Index out of CrossChainCall Outputs")
@@ -1456,12 +1453,29 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractCallEnv, input []byte, 
 		}
 	}
 
+	output, gasUsed, err, fatal := c.mindReadFromExternalClient(env, input, prepaidGas)
+	if fatal != nil {
+		env.evm.setCCCSystemError(fatal)
+		return nil, 0, fatal
+	}
+
+	crossChainCallOutput := &CrossChainCallOutput{
+		Output:  output,
+		Success: err != nil,
+		GasUsed: gasUsed,
+	}
+	env.evm.appendCCCOutput(crossChainCallOutput)
+	return output, gasUsed, err
+}
+
+func (c *crossChainCall) mindReadFromExternalClient(env *PrecompiledContractCallEnv, input []byte, prepaidGas uint64) ([]byte, uint64, error, error) {
+	ctx := context.Background()
+
 	// The flag of ReplayMindReading is false means that the node will produce the cross-chain-call output by itself
 	// Reaching here means the node is a validator in consensus mode or a node in JSON-RPC eth_call.
 	if env.evm.MRContext.MRClient == nil {
 		log.Error("No active MindReading client")
-		env.evm.setCCCSystemError(ErrNoActiveClient)
-		return nil, 0, ErrNoActiveClient
+		return nil, 0, nil, ErrNoActiveClient
 	}
 
 	chainId := new(big.Int).SetBytes(getData(input, 0, 32)).Uint64()
@@ -1471,47 +1485,40 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractCallEnv, input []byte, 
 	confirms := new(big.Int).SetBytes(getData(input, 128, 32)).Uint64()
 
 	if maxDataLen > MaxDataLenLimitation {
-		return nil, 0, ErrMaxDataLenOutOfLimit
+		return nil, 0, ErrMaxDataLenOutOfLimit, nil
 	}
 
 	// Ensure that the number of confirmations meets the minimum requirement which is defined by chainConfig
 	if confirms < env.evm.MRContext.MinimumConfirms {
-		return nil, 0, ErrUserDefinedConfirmsTooSmall
+		return nil, 0, ErrUserDefinedConfirmsTooSmall, nil
 	}
 
 	logData, expErr, unexpErr := GetExternalLog(ctx, env, chainId, txHash, logIdx, maxDataLen, confirms)
 
 	if unexpErr != nil {
 		log.Error("MindReading client unexpected error", "error", unexpErr)
-		env.evm.setCCCSystemError(unexpErr)
-		return nil, 0, unexpErr
-	} else if expErr != nil {
-		return nil, 0, expErr
-	} else {
-		// calculate actual cost of gas
-		actualGasUsed := logData.GasCost(params.CrossChainCallDataPerByteGas)
-		actualGasUsed += params.OnceCrossChainCallGas
-
-		packedLogData, err := logData.ABIPack()
-		// TODO: will the error happen?
-		if err != nil {
-			env.evm.setCCCSystemError(err)
-			return nil, 0, err
-		}
-		crossChainCallOutput = &CrossChainCallOutput{
-			Output:  packedLogData,
-			Success: true,
-			GasUsed: actualGasUsed,
-		}
-		env.evm.appendCCCOutput(crossChainCallOutput)
+		return nil, 0, nil, unexpErr
 	}
 
-	if crossChainCallOutput.GasUsed > prepaidGas {
-		log.Error("CrossChainCall actual gas > prepaid Gas", "actual", crossChainCallOutput.GasUsed, "prepaid", prepaidGas)
-		env.evm.setCCCSystemError(ErrActualGasExceedChargedGas)
-		return crossChainCallOutput.Output, crossChainCallOutput.GasUsed, ErrActualGasExceedChargedGas
+	if expErr != nil {
+		return nil, 0, expErr, nil
+	}
+
+	// calculate actual cost of gas
+	actualGasUsed := logData.GasCost(params.CrossChainCallDataPerByteGas)
+	actualGasUsed += params.OnceCrossChainCallGas
+
+	packedLogData, err := logData.ABIPack()
+	// TODO: will the error happen?
+	if err != nil {
+		return nil, 0, nil, err
+	}
+
+	if actualGasUsed > prepaidGas {
+		log.Error("CrossChainCall actual gas > prepaid Gas", "actual", actualGasUsed, "prepaid", prepaidGas)
+		return packedLogData, actualGasUsed, nil, ErrActualGasExceedChargedGas
 	} else {
-		return crossChainCallOutput.Output, crossChainCallOutput.GasUsed, nil
+		return packedLogData, actualGasUsed, nil, nil
 	}
 }
 

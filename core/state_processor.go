@@ -91,32 +91,35 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 			return nil, nil, 0, fmt.Errorf("could not apply tx %d [%v]: %w", i, tx.Hash().Hex(), err)
 		}
 
-		var expectMROutput []byte
+		var replayableMROutput []byte
 		if mindReadingEnable {
 			if len(block.Uncles()) > uncleIndex {
-				expectMROutput = block.Uncles()[uncleIndex].GetMindReadingOutput(tx)
-				if expectMROutput != nil {
+				replayableMROutput = block.Uncles()[uncleIndex].GetMindReadingOutput(tx)
+				if replayableMROutput != nil {
 					uncleIndex++
 				}
 			}
 		}
 
 		statedb.Prepare(tx.Hash(), i)
-		receipt, MROutput, err := applyTransaction(msg, p.config, p.bc, nil, gp, statedb, blockNumber, blockHash, tx, usedGas, vmenv, expectMROutput)
+		receipt, mrOutput, err := applyTransaction(msg, p.config, p.bc, nil, gp, statedb, blockNumber, blockHash, tx, usedGas, vmenv, replayableMROutput)
 		if err != nil {
 			return nil, nil, 0, fmt.Errorf("could not apply tx %d [%v]: %w", i, tx.Hash().Hex(), err)
 		}
 
-		// validator verify data
 		if mindReadingEnable {
 			if !replayMindReadingOutput {
-				if !bytes.Equal(MROutput, expectMROutput) {
-					log.Error("failed to verify MindReadingOutput as validator", "txHash", tx.Hash().Hex(), "Expect MindReadingOutput", common.Bytes2Hex(expectMROutput), "MindReadingOutput", common.Bytes2Hex(MROutput))
-					return nil, nil, 0, fmt.Errorf("【Validator】failed to verify MindReading Output, tx: %s", tx.Hash().Hex())
+				// non-proposer validator fails to verify the MR data
+				if !bytes.Equal(mrOutput, replayableMROutput) {
+					log.Error("failed to verify MindReadingOutput as validator", "txHash", tx.Hash().Hex(), "Expect MindReadingOutput", common.Bytes2Hex(replayableMROutput), "MindReadingOutput", common.Bytes2Hex(mrOutput))
+					return nil, nil, 0, fmt.Errorf("Validator failed to verify MindReading Output, tx: %s", tx.Hash().Hex())
 				}
 			} else {
-				if !bytes.Equal(MROutput, expectMROutput) {
-					log.Error("produced MindReadingOutput is different with received MindReading Output as sync-node", "txHash", tx.Hash().Hex(), "Expect MindReadingOutput", common.Bytes2Hex(expectMROutput), "MindReadingOutput", common.Bytes2Hex(MROutput))
+				// a non-validator fails to replay the MR data
+				// TODO: make sure all mrOutput's are consumed?
+				if !bytes.Equal(mrOutput, replayableMROutput) {
+					log.Error("produced MindReadingOutput is different with received MindReading Output as sync-node", "txHash", tx.Hash().Hex(), "Expect MindReadingOutput", common.Bytes2Hex(replayableMROutput), "MindReadingOutput", common.Bytes2Hex(mrOutput))
+					return nil, nil, 0, fmt.Errorf("failed to replay MindReading Output, tx: %s", tx.Hash().Hex())
 				}
 			}
 		}
@@ -124,6 +127,12 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 		receipts = append(receipts, receipt)
 		allLogs = append(allLogs, receipt.Logs...)
 	}
+
+	// Make sure all mind reading outputs are consumed
+	if uncleIndex != len(block.Uncles()) {
+		return nil, nil, 0, fmt.Errorf("unconsumed MR outputs, isReplay: %t", replayMindReadingOutput)
+	}
+
 	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
 	p.engine.Finalize(p.bc, header, statedb, block.Transactions(), block.Uncles())
 
