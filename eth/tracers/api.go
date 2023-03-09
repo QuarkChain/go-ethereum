@@ -546,7 +546,7 @@ func (api *API) IntermediateRoots(ctx context.Context, hash common.Hash, config 
 			expectMROutput := block.Uncles()[uncleIndex].GetMindReadingOutput(tx)
 			if expectMROutput != nil {
 				uncleIndex++
-				vmenv.SetCCCOutputs(expectMROutput)
+				vmenv.PresetCCCOutputs(expectMROutput)
 			}
 		}
 		statedb.Prepare(tx.Hash(), i)
@@ -650,7 +650,7 @@ func (api *API) traceBlock(ctx context.Context, block *types.Block, config *Trac
 			expectMROutput := block.Uncles()[uncleIndex].GetMindReadingOutput(tx)
 			if expectMROutput != nil {
 				uncleIndex++
-				vmenv.SetCCCOutputs(expectMROutput)
+				vmenv.PresetCCCOutputs(expectMROutput)
 			}
 		}
 
@@ -926,7 +926,7 @@ func (api *API) traceTx(ctx context.Context, message core.Message, txctx *Contex
 	mrContext := api.backend.MindReading().GenerateVMMindReadingCtx(vmctx.BlockNumber, true)
 	// Run the transaction with tracing enabled.
 	vmenv := vm.NewEVMWithMRC(vmctx, txContext, mrContext, statedb, api.backend.ChainConfig(), vm.Config{Debug: true, Tracer: tracer, NoBaseFee: true})
-	vmenv.SetCCCOutputs(txctx.MrOutput)
+	vmenv.PresetCCCOutputs(txctx.MrOutput)
 	// Call Prepare to clear out the statedb access list
 	statedb.Prepare(txctx.TxHash, txctx.TxIndex)
 
