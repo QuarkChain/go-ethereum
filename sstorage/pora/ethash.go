@@ -85,3 +85,26 @@ func GetMaskDataWithInChunk(epoch uint64, chunkHash common.Hash, maxKvSize uint6
 
 	return maskBuffer
 }
+
+func GetMaskData(epoch uint64, encodeKey common.Hash, chunkSize int, maskBuffer []byte) []byte {
+	if len(maskBuffer) != chunkSize {
+		maskBuffer = make([]byte, chunkSize)
+	}
+
+	cache := Cache(epoch)
+	size := pora.DatasetSizeForEpoch(epoch)
+
+	realHash := make([]byte, len(encodeKey)+8)
+	copy(realHash, encodeKey[:])
+
+	for i := 0; i < (chunkSize+pora.GetMixBytes()-1)/pora.GetMixBytes(); i++ {
+		binary.BigEndian.PutUint64(realHash[len(encodeKey):], uint64(i))
+		mask := pora.HashimotoForMaskLight(size, cache.Cache, realHash)
+		if len(mask) != pora.GetMixBytes() {
+			panic("#mask != MixBytes")
+		}
+		copy(maskBuffer[i*pora.GetMixBytes():], mask)
+	}
+
+	return maskBuffer
+}
