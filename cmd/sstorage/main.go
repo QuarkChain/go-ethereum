@@ -21,15 +21,15 @@ var (
 
 	verbosity *int
 
-	chunkIdx   *uint64
-	readLen    *uint64
-	readMasked *bool
+	chunkIdx *uint64
+	readLen  *uint64
 
 	shardIdx     *uint64
 	kvSize       *uint64
 	kvEntries    *uint64
 	kvIdx        *uint64
 	commitString *string
+	encodeType   *uint64
 )
 
 var CreateCmd = &cobra.Command{
@@ -74,8 +74,8 @@ func init() {
 	kvSize = rootCmd.PersistentFlags().Uint64("kv_size", 4096, "Shard KV size to read/write")
 	kvIdx = rootCmd.PersistentFlags().Uint64("kv_idx", 0, "Shard KV index to read/write")
 	kvEntries = rootCmd.PersistentFlags().Uint64("kv_entries", 0, "Number of KV entries in the shard")
+	encodeType = rootCmd.PersistentFlags().Uint64("encode_type", 0, "Encode Type, 0=no, 1=simple")
 
-	readMasked = rootCmd.PersistentFlags().Bool("masked", false, "Read masked or not")
 	readLen = rootCmd.PersistentFlags().Uint64("readlen", 0, "Bytes to read (only for unmasked read)")
 	commitString = rootCmd.PersistentFlags().String("encode_key", "", "encode key")
 }
@@ -110,9 +110,9 @@ func runCreate(cmd *cobra.Command, args []string) {
 	}
 	minerAddr := common.HexToAddress(*miner)
 
-	log.Info("Creating data file", "chunkIdx", *chunkIdx, "chunkLen", *chunkLen, "miner", minerAddr)
+	log.Info("Creating data file", "chunkIdx", *chunkIdx, "chunkLen", *chunkLen, "miner", minerAddr, "encodeType", encodeType)
 
-	_, err := sstorage.Create((*filenames)[0], *chunkIdx, *chunkLen, 0, *kvSize, sstorage.ENCODE_KECCAK_256, minerAddr)
+	_, err := sstorage.Create((*filenames)[0], *chunkIdx, *chunkLen, 0, *kvSize, *encodeType, minerAddr)
 	if err != nil {
 		log.Crit("create failed", "error", err)
 	}
@@ -223,10 +223,12 @@ func runShardWrite(cmd *cobra.Command, args []string) {
 	}
 
 	commit := common.HexToHash(*commitString)
-	err := ds.Write(*kvIdx, readInputBytes(), commit)
+	bs := readInputBytes()
+	err := ds.Write(*kvIdx, bs, commit)
 	if err != nil {
 		log.Crit("write failed", "error", err)
 	}
+	log.Info("Write value", "kvIdx", *kvIdx, "bytes", len(bs))
 }
 
 // rootCmd represents the base command when called without any subcommands
