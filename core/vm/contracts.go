@@ -1349,7 +1349,12 @@ type tokenIssuer struct {
 }
 
 func (c *tokenIssuer) RequiredGas(input []byte) uint64 {
-	return params.TokenOperation
+	// Setting the gas cost equal to CallNewAccountGas is due to the state-tree needs to create a new account for the user
+	// who uses the chain for the first time and load the account leaf at cache until completing the `AddBalance` operation,
+	// then commit the account-leaf to disk.
+	// At the same time, if the user is not a new account, this previously charged gas can cover the gas cost for
+	//`AddBalance` operation and is similar to the gas cost of Transfer(21000) for users
+	return params.CallNewAccountGas
 }
 
 func (c *tokenIssuer) Run(input []byte) ([]byte, error) {
@@ -1379,7 +1384,7 @@ type tokenBurner struct {
 }
 
 func (c *tokenBurner) RequiredGas(input []byte) uint64 {
-	return params.TokenOperation
+	return params.BurnTokenGasCost
 }
 
 func (c *tokenBurner) Run(input []byte) ([]byte, error) {

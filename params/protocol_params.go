@@ -170,7 +170,7 @@ const (
 	BaseMaxCalldataPerBlockEIP4488 = 1048576 // BASE_MAX_CALLDATA_PER_BLOCK in EIP-4488
 	CalldataPerTxStipendEIP4488    = 300     // CALLDATA_PER_TX_STIPEND in EIP-4488
 
-	TokenOperation = 2000 // Gas for burn token or mint token
+	BurnTokenGasCost = 10500 // Charge half of `TxGas(21000)` is because the BurnTokenGasCost only updates one leaf of state tree relative to 'transfer' updates two leaf of state tree
 )
 
 // Gas discount table for BLS12-381 G1 and G2 multi exponentiation operations
