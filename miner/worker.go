@@ -91,11 +91,11 @@ type environment struct {
 	gasPool       *core.GasPool  // available gas used to pack transactions
 	coinbase      common.Address
 
-	header     *types.Header
-	txs        []*types.Transaction
-	receipts   []*types.Receipt
-	uncles     map[common.Hash]*types.Header
-	sortUncles []common.Hash
+	header   *types.Header
+	txs      []*types.Transaction
+	receipts []*types.Receipt
+	uncles   map[common.Hash]*types.Header
+	mrUncles []common.Hash // optional uncles storing MR outputs with the same order of txs
 }
 
 // copy creates a deep copy of environment.
@@ -123,8 +123,8 @@ func (env *environment) copy() *environment {
 	for hash, uncle := range env.uncles {
 		cpy.uncles[hash] = uncle
 	}
-	cpy.sortUncles = make([]common.Hash, len(env.sortUncles))
-	copy(cpy.sortUncles, env.sortUncles)
+	cpy.mrUncles = make([]common.Hash, len(env.mrUncles))
+	copy(cpy.mrUncles, env.mrUncles)
 	return cpy
 }
 
@@ -135,18 +135,19 @@ func (w *worker) commitUncleDirectly(env *environment, uncle *types.Header) erro
 		return errors.New("uncle not unique")
 	}
 	env.uncles[hash] = uncle
-	if env.sortUncles == nil {
-		env.sortUncles = make([]common.Hash, 0)
+	if env.mrUncles == nil {
+		env.mrUncles = make([]common.Hash, 0)
 	}
-	env.sortUncles = append(env.sortUncles, hash)
+	env.mrUncles = append(env.mrUncles, hash)
 	return nil
 }
 
 // unclelist returns the contained uncles as the list format.
 func (env *environment) unclelist() []*types.Header {
+	// we only returns MR uncles as in BFT mode, we should not have other uncles.
 	var uncles []*types.Header
-	for _, uncle := range env.uncles {
-		uncles = append(uncles, uncle)
+	for _, uncle := range env.mrUncles {
+		uncles = append(uncles, env.uncles[uncle])
 	}
 	return uncles
 }

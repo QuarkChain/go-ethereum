@@ -58,6 +58,10 @@ func NewStateProcessor(config *params.ChainConfig, bc *BlockChain, engine consen
 // Process returns the receipts and logs accumulated during the process and
 // returns the amount of gas that was used in the process. If any of the
 // transactions failed to execute due to insufficient gas it will return an error.
+//
+// The function is called by either
+// - a non-proposer validator to replay the block and verify the MR outputs from its external client (reuseMindReadingOutput == false); or
+// - a non-valiator node to replay the block and verify the MR outpus from MR outputs encoded the block (reuseMindReadingOutput == true).
 func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg vm.Config, reuseMindReadingOutput bool) (types.Receipts, []*types.Log, uint64, error) {
 	var (
 		receipts    types.Receipts
@@ -93,6 +97,7 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 
 		var replayableMROutput []byte
 		if mindReadingEnable {
+			// Obtain the MR outputs encoded in uncles for replaying.
 			if len(block.Uncles()) > uncleIndex {
 				replayableMROutput = block.Uncles()[uncleIndex].GetMindReadingOutput(tx)
 				if replayableMROutput != nil {
@@ -188,6 +193,8 @@ func applyTransaction(msg types.Message, config *params.ChainConfig, bc ChainCon
 // and uses the input parameters for its environment. It returns the receipt
 // for the transaction, gas used and an error if the transaction failed,
 // indicating the block was invalid.
+//
+// This function is expected to be called by miner.worker by a block proposer.
 func ApplyTransaction(config *params.ChainConfig, bc *BlockChain, author *common.Address, gp *GasPool, statedb *state.StateDB, header *types.Header, tx *types.Transaction, usedGas *uint64, cfg vm.Config) (*types.Receipt, []byte, error) {
 	msg, err := tx.AsMessage(types.MakeSigner(config, header.Number), header.BaseFee)
 	if err != nil {
