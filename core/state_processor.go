@@ -71,7 +71,6 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 		blockNumber = block.Number()
 		allLogs     []*types.Log
 		gp          = new(GasPool).AddGas(block.GasLimit())
-		uncleIndex  int
 	)
 	// Mutate the block and state according to any hard-fork specs
 	if p.config.DAOForkSupport && p.config.DAOForkBlock != nil && p.config.DAOForkBlock.Cmp(block.Number()) == 0 {
@@ -126,7 +125,7 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 	}
 
 	// Make sure all mind reading outputs are consumed
-	if uncleIndex != len(block.Uncles()) {
+	if iterator.Index != len(block.Uncles()) {
 		return nil, nil, 0, fmt.Errorf("unconsumed MR outputs, isReplay: %t", reuseMindReadingOutput)
 	}
 

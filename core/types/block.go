@@ -183,25 +183,29 @@ func (h *Header) GetMindReadingOutput(tx *Transaction) []byte {
 
 type MindReadingOutputIterator struct {
 	uncles []*Header
-	Index  int
+	index  int
 }
 
 func NewMindReadingOutputIterator(b *Block) *MindReadingOutputIterator {
 	return &MindReadingOutputIterator{
 		uncles: b.uncles,
-		Index:  0,
+		index:  0,
 	}
 }
 
 func (it *MindReadingOutputIterator) GetNextMindReadingOutput(tx *Transaction) []byte {
-	if it.Index >= len(it.uncles) {
+	if it.index >= len(it.uncles) {
 		return nil
 	}
-	output := it.uncles[it.Index].GetMindReadingOutput(tx)
+	output := it.uncles[it.index].GetMindReadingOutput(tx)
 	if output != nil {
-		it.Index++
+		it.index++
 	}
 	return output
+}
+
+func (it *MindReadingOutputIterator) GetIndex() int {
+	return it.index
 }
 
 // Body is a simple (mutable, non-safe) data container for storing and moving
