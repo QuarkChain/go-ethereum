@@ -74,7 +74,7 @@ func init() {
 	kvSize = rootCmd.PersistentFlags().Uint64("kv_size", 4096, "Shard KV size to read/write")
 	kvIdx = rootCmd.PersistentFlags().Uint64("kv_idx", 0, "Shard KV index to read/write")
 	kvEntries = rootCmd.PersistentFlags().Uint64("kv_entries", 0, "Number of KV entries in the shard")
-	encodeType = rootCmd.PersistentFlags().Uint64("encode_type", 0, "Encode Type, 0=no, 1=simple")
+	encodeType = rootCmd.PersistentFlags().Uint64("encode_type", 0, "Encode Type, 0=no, 1=simple, 2=ethash")
 
 	readLen = rootCmd.PersistentFlags().Uint64("readlen", 0, "Bytes to read (only for unmasked read)")
 	commitString = rootCmd.PersistentFlags().String("encode_key", "", "encode key")
@@ -110,7 +110,7 @@ func runCreate(cmd *cobra.Command, args []string) {
 	}
 	minerAddr := common.HexToAddress(*miner)
 
-	log.Info("Creating data file", "chunkIdx", *chunkIdx, "chunkLen", *chunkLen, "miner", minerAddr, "encodeType", encodeType)
+	log.Info("Creating data file", "chunkIdx", *chunkIdx, "chunkLen", *chunkLen, "miner", minerAddr, "encodeType", *encodeType)
 
 	_, err := sstorage.Create((*filenames)[0], *chunkIdx, *chunkLen, 0, *kvSize, *encodeType, minerAddr)
 	if err != nil {

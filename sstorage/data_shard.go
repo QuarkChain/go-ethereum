@@ -6,6 +6,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/sstorage/pora"
 )
 
 // A DataShard is a logical shard that manages multiple DataFiles.
@@ -176,6 +177,8 @@ func encodeChunk(bs []byte, encodeType uint64, encodeKey common.Hash) []byte {
 		return output
 	} else if encodeType == NO_ENCODE {
 		return bs
+	} else if encodeType == ENCODE_ETHASH {
+		return MaskDataInPlace(pora.GetMaskData(0, encodeKey, int(CHUNK_SIZE), nil), bs)
 	} else {
 		panic("unsupported encode type")
 	}
@@ -202,6 +205,8 @@ func decodeChunk(bs []byte, encodeType uint64, encodeKey common.Hash) []byte {
 		return output
 	} else if encodeType == NO_ENCODE {
 		return bs
+	} else if encodeType == ENCODE_ETHASH {
+		return MaskDataInPlace(pora.GetMaskData(0, encodeKey, len(bs), nil), bs)
 	} else {
 		panic("unsupported encode type")
 	}
