@@ -2348,7 +2348,7 @@ func (bc *BlockChain) InsertHeaderChain(chain []*types.Header, checkFreq int) (i
 }
 
 func (bc *BlockChain) PreExecuteBlock(block *types.Block) (err error) {
-
+	// Pre-execute a block for non-proposer validator to verify the block.
 	err = bc.validator.ValidateBody(block)
 	if err != nil {
 		return

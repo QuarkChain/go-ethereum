@@ -1358,7 +1358,7 @@ type crossChainCall struct {
 }
 
 const CrossChainCallInputLength = 160
-const MaxDataLenLimitation = 100000
+const MaxDataLenLimitation = 1024
 
 // RequiredGas is the maximum gas consumption that will calculate the cross_chain_call
 func (c *crossChainCall) RequiredGas(input []byte) uint64 {
@@ -1430,6 +1430,18 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractCallEnv, input []byte, 
 		return nil, 0, ErrCrossChainCallNoEnabled
 	}
 
+	maxDataLen := new(big.Int).SetBytes(getData(input, 96, 32)).Uint64()
+	confirms := new(big.Int).SetBytes(getData(input, 128, 32)).Uint64()
+
+	if maxDataLen > MaxDataLenLimitation {
+		return nil, 0, ErrMaxDataLenOutOfLimit
+	}
+
+	// Ensure that the number of confirmations meets the minimum requirement which is defined by chainConfig
+	if confirms < env.evm.MRContext.MinimumConfirms {
+		return nil, 0, ErrUserDefinedConfirmsTooSmall
+	}
+
 	if env.evm.MRContext.ReuseMindReading {
 		// we are replaying the cross chain calls with the majority votes of the validators (and trust them).
 		crossChainCallOutput := env.evm.getNextReplayableCCCOutput()
@@ -1488,15 +1500,6 @@ func (c *crossChainCall) mindReadFromExternalClient(env *PrecompiledContractCall
 	logIdx := new(big.Int).SetBytes(getData(input, 64, 32)).Uint64()
 	maxDataLen := new(big.Int).SetBytes(getData(input, 96, 32)).Uint64()
 	confirms := new(big.Int).SetBytes(getData(input, 128, 32)).Uint64()
-
-	if maxDataLen > MaxDataLenLimitation {
-		return nil, 0, ErrMaxDataLenOutOfLimit, nil
-	}
-
-	// Ensure that the number of confirmations meets the minimum requirement which is defined by chainConfig
-	if confirms < env.evm.MRContext.MinimumConfirms {
-		return nil, 0, ErrUserDefinedConfirmsTooSmall, nil
-	}
 
 	logData, expErr, unexpErr := GetExternalLog(ctx, env, chainId, txHash, logIdx, maxDataLen, confirms)
 
