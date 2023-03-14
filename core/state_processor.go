@@ -125,7 +125,7 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 	}
 
 	// Make sure all mind reading outputs are consumed
-	if iterator.Index != len(block.Uncles()) {
+	if iterator.GetIndex() != len(block.Uncles()) {
 		return nil, nil, 0, fmt.Errorf("unconsumed MR outputs, isReplay: %t", reuseMindReadingOutput)
 	}
 
