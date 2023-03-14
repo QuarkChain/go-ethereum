@@ -1574,7 +1574,6 @@ func GetExternalLog(ctx context.Context, env *PrecompiledContractCallEnv, chainI
 		copy(data, log.Data)
 	}
 
-	// TODO: the error should never happen?
 	logData := NewGetLogByTxHash(log.Address, log.Topics, data)
 	if err != nil {
 		return nil, nil, err

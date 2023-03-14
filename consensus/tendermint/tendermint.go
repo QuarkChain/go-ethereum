@@ -461,8 +461,7 @@ func (c *Tendermint) VerifyUncles(chain consensus.ChainReader, block *types.Bloc
 	}
 
 	for _, uncle := range block.Uncles() {
-		// TODO: use a constant
-		if len(uncle.Extra) > 2048 {
+		if len(uncle.Extra) > params.MaxMROutputSizeAtUncleExtra {
 			return fmt.Errorf("uncle extra size exceeds limit")
 		}
 	}

@@ -121,7 +121,6 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 				}
 			} else {
 				// a non-validator fails to replay the MR data
-				// TODO: make sure all mrOutput's are consumed?
 				if !bytes.Equal(mrOutput, replayableMROutput) {
 					log.Error("produced MindReadingOutput is different with received MindReading Output as sync-node", "txHash", tx.Hash().Hex(), "Expect MindReadingOutput", common.Bytes2Hex(replayableMROutput), "MindReadingOutput", common.Bytes2Hex(mrOutput))
 					return nil, nil, 0, fmt.Errorf("failed to replay MindReading Output, tx: %s", tx.Hash().Hex())
