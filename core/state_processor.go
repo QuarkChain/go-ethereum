@@ -88,6 +88,7 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 		mrctx = p.bc.mindReading.GenerateVMMindReadingCtx(blockNumber, reuseMindReadingOutput)
 	}
 	vmenv := vm.NewEVMWithMRC(blockContext, vm.TxContext{}, mrctx, statedb, p.config, cfg)
+	iterator := types.NewMindReadingOutputIterator(block)
 	// Iterate over and process the individual transactions
 	for i, tx := range block.Transactions() {
 		msg, err := tx.AsMessage(types.MakeSigner(p.config, header.Number), header.BaseFee)
@@ -95,19 +96,11 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 			return nil, nil, 0, fmt.Errorf("could not apply tx %d [%v]: %w", i, tx.Hash().Hex(), err)
 		}
 
-		var replayableMROutput []byte
-		if mindReadingEnable {
-			// Obtain the MR outputs encoded in uncles for replaying.
-			if len(block.Uncles()) > uncleIndex {
-				replayableMROutput = block.Uncles()[uncleIndex].GetMindReadingOutput(tx)
-				if replayableMROutput != nil {
-					uncleIndex++
-				}
-			}
-		}
+		// obtains mrOuput from the block.unlces[index].extra if the transaction previously produced mrOuput
+		reuseableMROutput := iterator.GetNextMindReadingOutput(tx)
 
 		statedb.Prepare(tx.Hash(), i)
-		receipt, mrOutput, err := applyTransaction(msg, p.config, p.bc, nil, gp, statedb, blockNumber, blockHash, tx, usedGas, vmenv, replayableMROutput)
+		receipt, mrOutput, err := applyTransaction(msg, p.config, p.bc, nil, gp, statedb, blockNumber, blockHash, tx, usedGas, vmenv, reuseableMROutput)
 		if err != nil {
 			return nil, nil, 0, fmt.Errorf("could not apply tx %d [%v]: %w", i, tx.Hash().Hex(), err)
 		}
@@ -115,14 +108,14 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 		if mindReadingEnable {
 			if !reuseMindReadingOutput {
 				// non-proposer validator fails to verify the MR data
-				if !bytes.Equal(mrOutput, replayableMROutput) {
-					log.Error("failed to verify MindReadingOutput as validator", "txHash", tx.Hash().Hex(), "Expect MindReadingOutput", common.Bytes2Hex(replayableMROutput), "MindReadingOutput", common.Bytes2Hex(mrOutput))
+				if !bytes.Equal(mrOutput, reuseableMROutput) {
+					log.Error("failed to verify MindReadingOutput as validator", "txHash", tx.Hash().Hex(), "Expect MindReadingOutput", common.Bytes2Hex(reuseableMROutput), "MindReadingOutput", common.Bytes2Hex(mrOutput))
 					return nil, nil, 0, fmt.Errorf("Validator failed to verify MindReading Output, tx: %s", tx.Hash().Hex())
 				}
 			} else {
 				// a non-validator fails to replay the MR data
-				if !bytes.Equal(mrOutput, replayableMROutput) {
-					log.Error("produced MindReadingOutput is different with received MindReading Output as sync-node", "txHash", tx.Hash().Hex(), "Expect MindReadingOutput", common.Bytes2Hex(replayableMROutput), "MindReadingOutput", common.Bytes2Hex(mrOutput))
+				if !bytes.Equal(mrOutput, reuseableMROutput) {
+					log.Error("produced MindReadingOutput is different with received MindReading Output as sync-node", "txHash", tx.Hash().Hex(), "Expect MindReadingOutput", common.Bytes2Hex(reuseableMROutput), "MindReadingOutput", common.Bytes2Hex(mrOutput))
 					return nil, nil, 0, fmt.Errorf("failed to replay MindReading Output, tx: %s", tx.Hash().Hex())
 				}
 			}
