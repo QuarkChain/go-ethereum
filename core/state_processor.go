@@ -112,6 +112,7 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 					return nil, nil, 0, fmt.Errorf("Validator failed to verify MindReading Output, tx: %s", tx.Hash().Hex())
 				}
 			} else {
+				// TODO: make sure all the mrOutput from a single transaction are consumed
 				// a non-validator fails to replay the MR data
 				if !bytes.Equal(mrOutput, reuseableMROutput) {
 					log.Error("produced MindReadingOutput is different with received MindReading Output as sync-node", "txHash", tx.Hash().Hex(), "Expect MindReadingOutput", common.Bytes2Hex(reuseableMROutput), "MindReadingOutput", common.Bytes2Hex(mrOutput))
