@@ -1413,7 +1413,7 @@ func (m *tokenBurner) RunWith(env *PrecompiledContractCallEnv, input []byte) ([]
 		return nil, errors.New("only tokenManager")
 	}
 
-	to := common.BytesToAddress(new(big.Int).SetBytes(getData(input, 0, 32)).Bytes())
+	to := common.BytesToAddress(input[0:32])
 	amount := new(big.Int).SetBytes(getData(input, 32, 32))
 
 	if !evm.StateDB.Exist(to) {
