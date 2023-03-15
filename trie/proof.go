@@ -89,7 +89,7 @@ func (t *Trie) Prove(key []byte, fromLevel uint, proofDb ethdb.KeyValueWriter) e
 	return nil
 }
 
-func (t *Trie) GetProof(key []byte, fromLevel uint, proofDb ethdb.KeyValueWriter) ([]node, [][]byte, error) {
+func (t *Trie) GetProof(key []byte, fromLevel uint) ([]node, [][]byte, error) {
 	// Collect all nodes on the path to key.
 	key = keybytesToHex(key)
 	var nodes []node
@@ -132,14 +132,10 @@ func (t *Trie) GetProof(key []byte, fromLevel uint, proofDb ethdb.KeyValueWriter
 		}
 		var hn node
 		n, hn = hasher.proofHash(n)
-		if hash, ok := hn.(hashNode); ok || i == 0 {
+		if _, ok := hn.(hashNode); ok || i == 0 {
 			// If the node's database encoding is a hash (or is the
 			// root node), it becomes a proof element.
 			enc, _ := rlp.EncodeToBytes(n)
-			if !ok {
-				hash = hasher.hashData(enc)
-			}
-			proofDb.Put(hash, enc)
 			nodesValue = append(nodesValue, n)
 			nodesValueBytes = append(nodesValueBytes, enc)
 		}

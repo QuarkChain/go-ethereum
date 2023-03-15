@@ -1715,7 +1715,7 @@ func (s *PublicTransactionPoolAPI) GetReceiptProof(ctx context.Context, txHash c
 	}
 
 	//6.generate the path of proof
-	nodes, _, err := tree.GetProof(key, 0, memorydb.New())
+	nodes, _, err := tree.GetProof(key, 0)
 	if err != nil {
 		return nil, err
 	}

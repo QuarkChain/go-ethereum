@@ -229,8 +229,7 @@ func TestGenerateProof(t *testing.T) {
 	t.Log("encoded    key3:", encodedKey3, " hex:", common.Bytes2Hex(encodedKey3))
 	t.Log("hp encoded key3:", hp_encodedKey3, "hex:", common.Bytes2Hex(hp_encodedKey3))
 
-	proofDb := memorydb.New()
-	proofNodes, _, err := trie.GetProof(testKey, 0, proofDb)
+	proofNodes, _, err := trie.GetProof(testKey, 0)
 	if err != nil {
 		t.Error(err)
 	}
