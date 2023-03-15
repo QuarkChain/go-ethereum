@@ -545,7 +545,10 @@ func (api *API) IntermediateRoots(ctx context.Context, hash common.Hash, config 
 
 		// set the mrOutput at evm from block.uncles[i].extra when reusing mindReadingOutput
 		expectMROutput := mrIterator.GetNextMindReadingOutput(tx)
-		vmenv.PresetCCCOutputs(expectMROutput)
+		err := vmenv.PresetCCCOutputs(expectMROutput)
+		if err != nil {
+			return nil, err
+		}
 
 		statedb.Prepare(tx.Hash(), i)
 		if _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(msg.Gas())); err != nil {
@@ -647,7 +650,10 @@ func (api *API) traceBlock(ctx context.Context, block *types.Block, config *Trac
 
 		// obtains mrOutput from block.unlces[i].extra when reusing MindReadingOutput
 		expectMROutput := mrIterator.GetNextMindReadingOutput(tx)
-		vmenv.PresetCCCOutputs(expectMROutput)
+		err := vmenv.PresetCCCOutputs(expectMROutput)
+		if err != nil {
+			return nil, err
+		}
 
 		if _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(msg.Gas())); err != nil {
 			failed = err
@@ -921,7 +927,10 @@ func (api *API) traceTx(ctx context.Context, message core.Message, txctx *Contex
 	mrContext := api.backend.MindReading().GenerateVMMindReadingCtx(vmctx.BlockNumber, true)
 	// Run the transaction with tracing enabled.
 	vmenv := vm.NewEVMWithMRC(vmctx, txContext, mrContext, statedb, api.backend.ChainConfig(), vm.Config{Debug: true, Tracer: tracer, NoBaseFee: true})
-	vmenv.PresetCCCOutputs(txctx.MrOutput)
+	err = vmenv.PresetCCCOutputs(txctx.MrOutput)
+	if err != nil {
+		return nil, err
+	}
 	// Call Prepare to clear out the statedb access list
 	statedb.Prepare(txctx.TxHash, txctx.TxIndex)
 
