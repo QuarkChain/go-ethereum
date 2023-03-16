@@ -143,7 +143,10 @@ func applyTransaction(msg types.Message, config *params.ChainConfig, bc ChainCon
 	// Create a new context to be used in the EVM environment.
 	txContext := NewEVMTxContext(msg)
 	evm.Reset(txContext, statedb)
-	evm.PresetCCCOutputs(presetMindReadingOutput)
+	err := evm.PresetCCCOutputs(presetMindReadingOutput)
+	if err != nil {
+		return nil, nil, err
+	}
 	// Apply the transaction to the current state (included in the env).
 	result, err := ApplyMessage(evm, msg, gp)
 	if err != nil {
