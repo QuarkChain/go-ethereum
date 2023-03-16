@@ -114,6 +114,9 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 			} else {
 				// TODO: make sure all the mrOutput from a single transaction are consumed
 				// a non-validator fails to replay the MR data
+				if vmenv.GetNextReplayableCCCOutput() != nil {
+					return nil, nil, 0, fmt.Errorf("CCCOutpus is only partially consumed after completing a replay-mind-reading using the produced CCCOutpus", tx.Hash().Hex())
+				}
 				if !bytes.Equal(mrOutput, reuseableMROutput) {
 					log.Error("produced MindReadingOutput is different with received MindReading Output as sync-node", "txHash", tx.Hash().Hex(), "Expect MindReadingOutput", common.Bytes2Hex(reuseableMROutput), "MindReadingOutput", common.Bytes2Hex(mrOutput))
 					return nil, nil, 0, fmt.Errorf("failed to replay MindReading Output, tx: %s", tx.Hash().Hex())
