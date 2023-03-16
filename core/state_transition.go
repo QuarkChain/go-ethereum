@@ -355,13 +355,15 @@ func (st *StateTransition) TransitionDb() (*ExecutionResult, error) {
 	}
 	st.state.AddBalance(st.evm.Context.Coinbase, new(big.Int).Mul(new(big.Int).SetUint64(st.gasUsed()), effectiveTip))
 
-	outputs, err := st.evm.GetCCCOutputs()
-	if err != nil {
-		return nil, err
-	}
-	if len(outputs) != 0 {
+	if len(st.evm.GetCCCOutputs()) != 0 {
+		outputs := st.evm.GetCCCOutputs()
 
-		version := st.evm.GetMRVersion()
+		var version uint64
+		if st.evm.ChainConfig().MindReading.Version != 0 {
+			version = st.evm.ChainConfig().MindReading.Version
+		} else {
+			version = 0
+		}
 
 		outputsWithVersion := vm.CrossChainCallOutputsWithVersion{
 			Version: version,

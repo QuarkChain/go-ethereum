@@ -112,6 +112,7 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 					return nil, nil, 0, fmt.Errorf("Validator failed to verify MindReading Output, tx: %s", tx.Hash().Hex())
 				}
 			} else {
+				// TODO: make sure all the mrOutput from a single transaction are consumed
 				// a non-validator fails to replay the MR data
 				if !bytes.Equal(mrOutput, reuseableMROutput) {
 					log.Error("produced MindReadingOutput is different with received MindReading Output as sync-node", "txHash", tx.Hash().Hex(), "Expect MindReadingOutput", common.Bytes2Hex(reuseableMROutput), "MindReadingOutput", common.Bytes2Hex(mrOutput))
@@ -139,10 +140,7 @@ func applyTransaction(msg types.Message, config *params.ChainConfig, bc ChainCon
 	// Create a new context to be used in the EVM environment.
 	txContext := NewEVMTxContext(msg)
 	evm.Reset(txContext, statedb)
-	err := evm.PresetCCCOutputs(presetMindReadingOutput)
-	if err != nil {
-		return nil, nil, err
-	}
+	evm.PresetCCCOutputs(presetMindReadingOutput)
 	// Apply the transaction to the current state (included in the env).
 	result, err := ApplyMessage(evm, msg, gp)
 	if err != nil {

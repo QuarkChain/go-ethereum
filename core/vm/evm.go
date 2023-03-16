@@ -17,7 +17,6 @@
 package vm
 
 import (
-	"errors"
 	"math/big"
 	"sync/atomic"
 	"time"
@@ -217,31 +216,20 @@ func (evm *EVM) IsMindReadingEnabled() bool {
 	}
 }
 
-func (evm *EVM) GetMRVersion() uint64 {
-	if evm.MRContext != nil {
-		return evm.MRContext.Version
-	} else {
-		return 0
-	}
-}
-
 // PresetCCCOutputs pre-sets the result of the cross-chain-call and is used when verifying the correctness of the transaction
-func (evm *EVM) PresetCCCOutputs(versionedResult []byte) error {
+func (evm *EVM) PresetCCCOutputs(versionedResult []byte) bool {
 	if evm.IsMindReadingEnabled() && evm.MRContext.ReuseMindReading {
-		return evm.setCCCOutputs(versionedResult)
+		evm.setCCCOutputs(versionedResult)
+		return true
 	}
-	return nil
+	return false
 }
 
-func (evm *EVM) GetCCCOutputs() ([]*CrossChainCallOutput, error) {
+func (evm *EVM) GetCCCOutputs() []*CrossChainCallOutput {
 	if evm.IsMindReadingEnabled() {
-		if evm.MRContext.cCCOutputsIdx == uint64(len(evm.MRContext.cCCOutputs)) {
-			return evm.MRContext.cCCOutputs, nil
-		} else {
-			return nil, errors.New("cCCOutputsIdx is different with cCCOutputs.length")
-		}
+		return evm.MRContext.cCCOutputs
 	} else {
-		return nil, nil
+		return nil
 	}
 }
 
@@ -268,7 +256,6 @@ func (evm EVM) getNextReplayableCCCOutput() *CrossChainCallOutput {
 
 func (evm *EVM) appendCCCOutput(trace *CrossChainCallOutput) []*CrossChainCallOutput {
 	evm.MRContext.cCCOutputs = append(evm.MRContext.cCCOutputs, trace)
-	evm.MRContext.cCCOutputsIdx++
 	return evm.MRContext.cCCOutputs
 }
 
