@@ -208,7 +208,8 @@ func (b *EthAPIBackend) GetEVM(ctx context.Context, msg core.Message, state *sta
 	}
 	txContext := core.NewEVMTxContext(msg)
 	context := core.NewEVMBlockContext(header, b.eth.BlockChain(), nil)
-	return vm.NewEVM(context, txContext, state, b.eth.blockchain.Config(), *vmConfig), vmError, nil
+	mrContext := b.eth.blockchain.MindReading().GenerateVMMindReadingCtx(header.Number, false)
+	return vm.NewEVMWithMRC(context, txContext, mrContext, state, b.eth.blockchain.Config(), *vmConfig), vmError, nil
 }
 
 func (b *EthAPIBackend) SubscribeRemovedLogsEvent(ch chan<- core.RemovedLogsEvent) event.Subscription {
@@ -358,4 +359,8 @@ func (b *EthAPIBackend) StateAtBlock(ctx context.Context, block *types.Block, re
 
 func (b *EthAPIBackend) StateAtTransaction(ctx context.Context, block *types.Block, txIndex int, reexec uint64) (core.Message, vm.BlockContext, *state.StateDB, error) {
 	return b.eth.stateAtTransaction(block, txIndex, reexec)
+}
+
+func (b *EthAPIBackend) MindReading() core.MindReadingEnv {
+	return b.eth.blockchain.MindReading()
 }

@@ -97,12 +97,12 @@ type TxContext struct {
 
 // MindReadingContext provides the execution environment of MindReading
 type MindReadingContext struct {
-	MRClient          MindReadingClient
-	ReplayMindReading bool
-	MREnable          bool
-	ChainId           uint64
-	MinimumConfirms   uint64
-	Version           uint64
+	MRClient         MindReadingClient
+	ReuseMindReading bool
+	MREnable         bool
+	ChainId          uint64
+	MinimumConfirms  uint64
+	Version          uint64
 	// cCCOutputs means 'crossChainCallOutputs` will store the return value of each cross-chain call
 	// cCCOutputsIdx increases by 1 after each invoking to CrossChainCall in order to point to the corresponding CCROutput
 	cCCOutputs    []*CrossChainCallOutput
@@ -112,7 +112,7 @@ type MindReadingContext struct {
 }
 
 func NewMindReadingContext(MRClient MindReadingClient, relayMindReading bool, mrEnable bool, config *params.ChainConfig) *MindReadingContext {
-	return &MindReadingContext{MRClient: MRClient, ReplayMindReading: relayMindReading, MREnable: mrEnable, ChainId: config.MindReading.SupportChainId, MinimumConfirms: config.MindReading.MinimumConfirms, Version: config.MindReading.Version}
+	return &MindReadingContext{MRClient: MRClient, ReuseMindReading: relayMindReading, MREnable: mrEnable, ChainId: config.MindReading.SupportChainId, MinimumConfirms: config.MindReading.MinimumConfirms, Version: config.MindReading.Version}
 }
 
 // EVM is the Ethereum Virtual Machine base object and provides
@@ -217,12 +217,11 @@ func (evm *EVM) IsMindReadingEnabled() bool {
 }
 
 // PresetCCCOutputs pre-sets the result of the cross-chain-call and is used when verifying the correctness of the transaction
-func (evm *EVM) PresetCCCOutputs(versionedResult []byte) bool {
-	if evm.IsMindReadingEnabled() && evm.MRContext.ReplayMindReading {
-		evm.setCCCOutputs(versionedResult)
-		return true
+func (evm *EVM) PresetCCCOutputs(versionedResult []byte) error {
+	if evm.IsMindReadingEnabled() && evm.MRContext.ReuseMindReading {
+		return evm.setCCCOutputs(versionedResult)
 	}
-	return false
+	return nil
 }
 
 func (evm *EVM) GetCCCOutputs() []*CrossChainCallOutput {
@@ -246,7 +245,11 @@ func (evm *EVM) setCCCOutputs(versionedResult []byte) error {
 	return nil
 }
 
-func (evm EVM) getNextReplayableCCCOutput() *CrossChainCallOutput {
+func (evm *EVM) GetNextReplayableCCCOutput() *CrossChainCallOutput {
+	return evm.getNextReplayableCCCOutput()
+}
+
+func (evm *EVM) getNextReplayableCCCOutput() *CrossChainCallOutput {
 	if evm.MRContext.cCCOutputsIdx >= uint64(len(evm.MRContext.cCCOutputs)) {
 		return nil
 	}

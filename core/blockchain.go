@@ -38,6 +38,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/internal/syncx"
@@ -208,12 +209,35 @@ type BlockChain struct {
 	running       int32          // 0 if chain is running, 1 when stopped
 	procInterrupt int32          // interrupt signaler for block processing
 
-	engine     consensus.Engine
-	validator  Validator // Block and state validator interface
-	prefetcher Prefetcher
-	processor  Processor // Block transaction processor interface
-	forker     *ForkChoice
-	vmConfig   vm.Config
+	engine      consensus.Engine
+	validator   Validator // Block and state validator interface
+	prefetcher  Prefetcher
+	processor   Processor // Block transaction processor interface
+	forker      *ForkChoice
+	vmConfig    vm.Config
+	mindReading MindReadingEnv
+}
+
+type MindReadingEnv struct {
+	MRClient          vm.MindReadingClient
+	EnableBlockNumber *big.Int
+	Version           uint64
+	SupportChainId    uint64
+	MinimumConfirms   uint64
+}
+
+func (mr MindReadingEnv) GenerateVMMindReadingCtx(blockNumber *big.Int, RelayMindReadingOutput bool) *vm.MindReadingContext {
+	var enable bool
+	if mr.EnableBlockNumber != nil && mr.EnableBlockNumber.Cmp(blockNumber) >= 0 {
+		enable = true
+	}
+	return &vm.MindReadingContext{
+		MRClient:         mr.MRClient,
+		ReuseMindReading: RelayMindReadingOutput,
+		MREnable:         enable,
+		ChainId:          mr.SupportChainId,
+		MinimumConfirms:  mr.MinimumConfirms,
+	}
 }
 
 // NewBlockChain returns a fully initialised block chain using information
@@ -255,6 +279,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *par
 	bc.validator = NewBlockValidator(chainConfig, bc, engine)
 	bc.prefetcher = newStatePrefetcher(chainConfig, bc, engine)
 	bc.processor = NewStateProcessor(chainConfig, bc, engine)
+	bc.setMindReading(chainConfig)
 
 	var err error
 	bc.hc, err = NewHeaderChain(db, chainConfig, engine, bc.insertStopped)
@@ -1614,7 +1639,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals, setHead bool)
 
 		// Process block using the parent state as reference point
 		substart := time.Now()
-		receipts, logs, usedGas, err := bc.processor.Process(block, statedb, bc.vmConfig)
+		receipts, logs, usedGas, err := bc.processor.Process(block, statedb, bc.vmConfig, true)
 		if err != nil {
 			bc.reportBlock(block, receipts, err)
 			atomic.StoreUint32(&followupInterrupt, 1)
@@ -2323,7 +2348,7 @@ func (bc *BlockChain) InsertHeaderChain(chain []*types.Header, checkFreq int) (i
 }
 
 func (bc *BlockChain) PreExecuteBlock(block *types.Block) (err error) {
-
+	// Pre-execute a block for non-proposer validator to verify the block.
 	err = bc.validator.ValidateBody(block)
 	if err != nil {
 		return
@@ -2342,7 +2367,7 @@ func (bc *BlockChain) PreExecuteBlock(block *types.Block) (err error) {
 		err = fmt.Errorf("txHash mismatch, got %s, expect %s", block.TxHash(), txHash)
 		return
 	}
-	receipts, _, usedGas, err := bc.processor.Process(block, statedb, bc.vmConfig)
+	receipts, _, usedGas, err := bc.processor.Process(block, statedb, bc.vmConfig, false)
 	if err != nil {
 		return
 	}
@@ -2589,4 +2614,37 @@ func (bc *BlockChain) GetSstorageLastKvIdx(contract common.Address) (uint64, err
 	val := stateDB.GetState(contract, uint256.NewInt(0).Bytes32())
 	log.Warn("GetSstorageLastKvIdx", "val", common.Bytes2Hex(val.Bytes()))
 	return new(big.Int).SetBytes(val.Bytes()).Uint64(), nil
+}
+
+func (bc *BlockChain) setMindReading(chainConfig *params.ChainConfig) error {
+	if chainConfig.MindReading != nil {
+		bc.mindReading.EnableBlockNumber = chainConfig.MindReading.EnableBlockNumber
+		bc.mindReading.Version = chainConfig.MindReading.Version
+		bc.mindReading.SupportChainId = chainConfig.MindReading.SupportChainId
+		bc.mindReading.MinimumConfirms = chainConfig.MindReading.MinimumConfirms
+		if chainConfig.MindReading.CallRpc != "" {
+			newClient, err := ethclient.Dial(bc.chainConfig.MindReading.CallRpc)
+			if err != nil {
+				return err
+			}
+			bc.mindReading.MRClient = newClient
+		}
+	}
+	return nil
+}
+
+func (bc *BlockChain) IsMindReadingEnable(headerNum *big.Int) bool {
+	enableNumber := bc.mindReading.EnableBlockNumber
+	if enableNumber == nil {
+		return false
+	}
+	if headerNum.Cmp(enableNumber) >= 0 {
+		return true
+	} else {
+		return false
+	}
+}
+
+func (bc *BlockChain) MindReading() MindReadingEnv {
+	return bc.mindReading
 }

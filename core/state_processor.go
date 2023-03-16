@@ -17,6 +17,7 @@
 package core
 
 import (
+	"bytes"
 	"fmt"
 	"math/big"
 
@@ -27,6 +28,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 )
 
@@ -56,7 +58,11 @@ func NewStateProcessor(config *params.ChainConfig, bc *BlockChain, engine consen
 // Process returns the receipts and logs accumulated during the process and
 // returns the amount of gas that was used in the process. If any of the
 // transactions failed to execute due to insufficient gas it will return an error.
-func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg vm.Config) (types.Receipts, []*types.Log, uint64, error) {
+//
+// The function is called by either
+// - a non-proposer validator to replay the block and verify the MR outputs from its external client (reuseMindReadingOutput == false); or
+// - a non-valiator node to replay the block and verify the MR outpus from MR outputs encoded the block (reuseMindReadingOutput == true).
+func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg vm.Config, reuseMindReadingOutput bool) (types.Receipts, []*types.Log, uint64, error) {
 	var (
 		receipts    types.Receipts
 		usedGas     = new(uint64)
@@ -71,36 +77,80 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 		misc.ApplyDAOHardFork(statedb)
 	}
 	blockContext := NewEVMBlockContext(header, p.bc, nil)
-	vmenv := vm.NewEVM(blockContext, vm.TxContext{}, statedb, p.config, cfg)
+
+	mindReadingEnable := p.bc.IsMindReadingEnable(block.Number())
+	var mrctx *vm.MindReadingContext
+	if mindReadingEnable {
+		// 'reuseMindReadingOutput' determines the way of execution for MindReading.
+		// e.g. reuseMindReadingOutput = false represents that the node will obtain external data by itself through MindReadingClient
+		// e.g. reuseMindReadingOutput = true represents that the node will obtain external data, already produced by the proposer and verified by validators, from the block.uncles
+		mrctx = p.bc.mindReading.GenerateVMMindReadingCtx(blockNumber, reuseMindReadingOutput)
+	}
+	vmenv := vm.NewEVMWithMRC(blockContext, vm.TxContext{}, mrctx, statedb, p.config, cfg)
+	iterator := types.NewMindReadingOutputIterator(block)
 	// Iterate over and process the individual transactions
 	for i, tx := range block.Transactions() {
 		msg, err := tx.AsMessage(types.MakeSigner(p.config, header.Number), header.BaseFee)
 		if err != nil {
 			return nil, nil, 0, fmt.Errorf("could not apply tx %d [%v]: %w", i, tx.Hash().Hex(), err)
 		}
+
+		// obtains mrOuput from the block.unlces[index].extra if the transaction previously produced mrOuput
+		reuseableMROutput := iterator.GetNextMindReadingOutput(tx)
+
 		statedb.Prepare(tx.Hash(), i)
-		receipt, err := applyTransaction(msg, p.config, p.bc, nil, gp, statedb, blockNumber, blockHash, tx, usedGas, vmenv)
+		receipt, mrOutput, err := applyTransaction(msg, p.config, p.bc, nil, gp, statedb, blockNumber, blockHash, tx, usedGas, vmenv, reuseableMROutput)
 		if err != nil {
 			return nil, nil, 0, fmt.Errorf("could not apply tx %d [%v]: %w", i, tx.Hash().Hex(), err)
 		}
+
+		if mindReadingEnable {
+			if !reuseMindReadingOutput {
+				// non-proposer validator fails to verify the MR data
+				if !bytes.Equal(mrOutput, reuseableMROutput) {
+					log.Error("failed to verify MindReadingOutput as validator", "txHash", tx.Hash().Hex(), "Expect MindReadingOutput", common.Bytes2Hex(reuseableMROutput), "MindReadingOutput", common.Bytes2Hex(mrOutput))
+					return nil, nil, 0, fmt.Errorf("validator failed to verify MindReading Output, tx: %s", tx.Hash().Hex())
+				}
+			} else {
+				// a non-validator fails to replay the MR data
+				if vmenv.GetNextReplayableCCCOutput() != nil {
+					log.Error("CCCOutpus is only partially consumed after completing a replay-mind-reading using the produced CCCOutpus", "txHash", tx.Hash().Hex(), "reuseableMROutput", common.Bytes2Hex(reuseableMROutput))
+					return nil, nil, 0, fmt.Errorf("CCCOutpus is only partially consumed after completing a replay-mind-reading using the produced CCCOutpus, tx: %s", tx.Hash().Hex())
+				}
+				if !bytes.Equal(mrOutput, reuseableMROutput) {
+					log.Error("produced MindReadingOutput is different with received MindReading Output as sync-node", "txHash", tx.Hash().Hex(), "Expect MindReadingOutput", common.Bytes2Hex(reuseableMROutput), "MindReadingOutput", common.Bytes2Hex(mrOutput))
+					return nil, nil, 0, fmt.Errorf("failed to replay MindReading Output, tx: %s", tx.Hash().Hex())
+				}
+			}
+		}
+
 		receipts = append(receipts, receipt)
 		allLogs = append(allLogs, receipt.Logs...)
 	}
+
+	// Make sure all mind reading outputs are consumed
+	if iterator.GetIndex() != len(block.Uncles()) {
+		return nil, nil, 0, fmt.Errorf("unconsumed MR outputs, isReplay: %t", reuseMindReadingOutput)
+	}
+
 	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
 	p.engine.Finalize(p.bc, header, statedb, block.Transactions(), block.Uncles())
 
 	return receipts, allLogs, *usedGas, nil
 }
 
-func applyTransaction(msg types.Message, config *params.ChainConfig, bc ChainContext, author *common.Address, gp *GasPool, statedb *state.StateDB, blockNumber *big.Int, blockHash common.Hash, tx *types.Transaction, usedGas *uint64, evm *vm.EVM) (*types.Receipt, error) {
+func applyTransaction(msg types.Message, config *params.ChainConfig, bc ChainContext, author *common.Address, gp *GasPool, statedb *state.StateDB, blockNumber *big.Int, blockHash common.Hash, tx *types.Transaction, usedGas *uint64, evm *vm.EVM, presetMindReadingOutput []byte) (*types.Receipt, []byte, error) {
 	// Create a new context to be used in the EVM environment.
 	txContext := NewEVMTxContext(msg)
 	evm.Reset(txContext, statedb)
-
+	err := evm.PresetCCCOutputs(presetMindReadingOutput)
+	if err != nil {
+		return nil, nil, err
+	}
 	// Apply the transaction to the current state (included in the env).
 	result, err := ApplyMessage(evm, msg, gp)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// Update the state with pending changes.
@@ -134,20 +184,23 @@ func applyTransaction(msg types.Message, config *params.ChainConfig, bc ChainCon
 	receipt.BlockHash = blockHash
 	receipt.BlockNumber = blockNumber
 	receipt.TransactionIndex = uint(statedb.TxIndex())
-	return receipt, err
+	return receipt, result.CCCOutputs, err
 }
 
 // ApplyTransaction attempts to apply a transaction to the given state database
 // and uses the input parameters for its environment. It returns the receipt
 // for the transaction, gas used and an error if the transaction failed,
 // indicating the block was invalid.
-func ApplyTransaction(config *params.ChainConfig, bc ChainContext, author *common.Address, gp *GasPool, statedb *state.StateDB, header *types.Header, tx *types.Transaction, usedGas *uint64, cfg vm.Config) (*types.Receipt, error) {
+//
+// This function is expected to be called by miner.worker by a block proposer.
+func ApplyTransaction(config *params.ChainConfig, bc *BlockChain, author *common.Address, gp *GasPool, statedb *state.StateDB, header *types.Header, tx *types.Transaction, usedGas *uint64, cfg vm.Config) (*types.Receipt, []byte, error) {
 	msg, err := tx.AsMessage(types.MakeSigner(config, header.Number), header.BaseFee)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	// Create a new context to be used in the EVM environment
 	blockContext := NewEVMBlockContext(header, bc, author)
-	vmenv := vm.NewEVM(blockContext, vm.TxContext{}, statedb, config, cfg)
-	return applyTransaction(msg, config, bc, author, gp, statedb, header.Number, header.Hash(), tx, usedGas, vmenv)
+	mrctx := bc.mindReading.GenerateVMMindReadingCtx(header.Number, false)
+	vmenv := vm.NewEVMWithMRC(blockContext, vm.TxContext{}, mrctx, statedb, config, cfg)
+	return applyTransaction(msg, config, bc, author, gp, statedb, header.Number, header.Hash(), tx, usedGas, vmenv, nil)
 }
