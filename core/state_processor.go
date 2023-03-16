@@ -109,13 +109,13 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 				// non-proposer validator fails to verify the MR data
 				if !bytes.Equal(mrOutput, reuseableMROutput) {
 					log.Error("failed to verify MindReadingOutput as validator", "txHash", tx.Hash().Hex(), "Expect MindReadingOutput", common.Bytes2Hex(reuseableMROutput), "MindReadingOutput", common.Bytes2Hex(mrOutput))
-					return nil, nil, 0, fmt.Errorf("Validator failed to verify MindReading Output, tx: %s", tx.Hash().Hex())
+					return nil, nil, 0, fmt.Errorf("validator failed to verify MindReading Output, tx: %s", tx.Hash().Hex())
 				}
 			} else {
-				// TODO: make sure all the mrOutput from a single transaction are consumed
 				// a non-validator fails to replay the MR data
 				if vmenv.GetNextReplayableCCCOutput() != nil {
-					return nil, nil, 0, fmt.Errorf("CCCOutpus is only partially consumed after completing a replay-mind-reading using the produced CCCOutpus", tx.Hash().Hex())
+					log.Error("CCCOutpus is only partially consumed after completing a replay-mind-reading using the produced CCCOutpus", "txHash", tx.Hash().Hex(), "reuseableMROutput", common.Bytes2Hex(reuseableMROutput))
+					return nil, nil, 0, fmt.Errorf("CCCOutpus is only partially consumed after completing a replay-mind-reading using the produced CCCOutpus, tx: %s", tx.Hash().Hex())
 				}
 				if !bytes.Equal(mrOutput, reuseableMROutput) {
 					log.Error("produced MindReadingOutput is different with received MindReading Output as sync-node", "txHash", tx.Hash().Hex(), "Expect MindReadingOutput", common.Bytes2Hex(reuseableMROutput), "MindReadingOutput", common.Bytes2Hex(mrOutput))
