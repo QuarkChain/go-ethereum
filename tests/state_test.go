@@ -582,7 +582,7 @@ func TestCrossChainCallPrecompile(t *testing.T) {
 
 		_, err = vm.VerifyCrossChainCall(client, input)
 		if err != nil {
-			if err.Error() != "Expect Error:CrossChainCall: confirms no enough" {
+			if err.Error() != "CrossChainCall: confirms no enough" {
 				t.Error("The resulting error does not match the expected error")
 			}
 		} else {
@@ -608,7 +608,7 @@ func TestCrossChainCallPrecompile(t *testing.T) {
 
 		_, err = vm.VerifyCrossChainCall(client, input)
 		if err != nil {
-			if err.Error() != "Expect Error:CrossChainCall: logIdx out-of-bound" {
+			if err != vm.ErrCrossChainCallFailed {
 				t.Errorf("The resulting error does not match the expected error; actual err:%s", err.Error())
 			}
 		} else {
@@ -632,7 +632,7 @@ func TestCrossChainCallPrecompile(t *testing.T) {
 
 		_, err = vm.VerifyCrossChainCall(client, input)
 		if err != nil {
-			if err.Error() != "Expect Error:CrossChainCall: chainId 2 no support" {
+			if err != vm.ErrCrossChainCallFailed {
 				t.Errorf("The resulting error does not match the expected error; actual err:%s", err.Error())
 			}
 		} else {
@@ -657,7 +657,7 @@ func TestCrossChainCallPrecompile(t *testing.T) {
 
 		_, err = vm.VerifyCrossChainCall(client, input)
 		if err != nil {
-			if err.Error() != "Expect Error:not found" {
+			if err.Error() != "not found" {
 				t.Errorf("The resulting error does not match the expected error; actual err:%s", err.Error())
 			}
 		} else {
@@ -699,7 +699,7 @@ type WrapTx struct {
 	ExpectTxData   func() ([]byte, error)
 	ExpectTraces   []*ExpectTrace
 	ExpectCCRBytes []byte
-	happenError    error
+	expectSysErr   error
 	Index          int
 }
 
@@ -707,8 +707,8 @@ func (wt *WrapTx) SetExternalCallRes(crossChainCallRes []byte) {
 	wt.ExpectCCRBytes = crossChainCallRes
 }
 
-func (wt *WrapTx) SetUnexpectErr(err error) {
-	wt.happenError = err
+func (wt *WrapTx) SetSysErr(err error) {
+	wt.expectSysErr = err
 }
 
 func (wt *WrapTx) MarkTransitionIndex() string {
@@ -720,21 +720,21 @@ func NewWrapTx(tx *types.Transaction, args *CrossChainCallArgument) *WrapTx {
 }
 
 func (wt *WrapTx) VerifyCallResult(crossCallResult []byte, happenedError error, txIndex int, t *testing.T) {
-	if happenedError != nil {
-		if wt.happenError == nil {
-			t.Fatalf("[txIndex %d] happened err: %s", txIndex, happenedError.Error())
-			return
-		}
 
-		if happenedError.Error() != wt.happenError.Error() {
-			t.Fatalf("[txIndex %d] \nexpect happen err:%s\nactual happen err:%s", txIndex, wt.happenError, happenedError)
-		} else {
-			t.Logf("[txIndex %d] expect happen err match: %s", txIndex, happenedError.Error())
+	// verify system err whether match with the preseted expect-syserr
+	if wt.expectSysErr != nil {
+		if happenedError == nil {
+			t.Fatalf("[txIndex %d] expect sys err: %s , but no err happened", txIndex, wt.expectSysErr.Error())
 		}
-		happenedError = nil
+		if happenedError.Error() != wt.expectSysErr.Error() {
+			t.Fatalf("[txIndex %d] \nexpect happen sys err:%s\nactual happen err:%s", txIndex, wt.expectSysErr, happenedError)
+		} else {
+			t.Logf("[txIndex %d] expect system err match: %s", txIndex, happenedError.Error())
+		}
 		return
 	}
 
+	// verify expect err or cccOutput
 	tracesWithVersion := &vm.CrossChainCallOutputsWithVersion{}
 	err := rlp.DecodeBytes(crossCallResult, tracesWithVersion)
 	if err != nil {
@@ -749,31 +749,37 @@ func (wt *WrapTx) VerifyCallResult(crossCallResult []byte, happenedError error, 
 
 	for i, v := range actualTraces {
 		cs := v.Output
-		wt.ExpectTraces[i].verifyRes(cs, t, txIndex, i, v.Success)
+		wt.ExpectTraces[i].verifyRes(cs, t, txIndex, i, v.Success, happenedError)
 	}
 
 }
 
 type ExpectTrace struct {
 	CallResultBytes []byte // call result
-	ExpectErrBytes  error
+	ExpectErr       error
 	success         bool
 	UnExpectErr     error
 }
 
 func NewExpectTrace(callResultBytes []byte, expectErrBytes error, unExpectErr error) *ExpectTrace {
-	return &ExpectTrace{CallResultBytes: callResultBytes, ExpectErrBytes: expectErrBytes, UnExpectErr: unExpectErr}
+	return &ExpectTrace{CallResultBytes: callResultBytes, ExpectErr: expectErrBytes, UnExpectErr: unExpectErr}
 }
 
 func (et *ExpectTrace) compareRes(cs []byte) bool {
 	return bytes.Equal(et.CallResultBytes, cs)
 }
 
-func (et *ExpectTrace) verifyRes(cs []byte, t *testing.T, txIndex, outputIndex int, success bool) {
+func (et *ExpectTrace) verifyRes(cs []byte, t *testing.T, txIndex, outputIndex int, success bool, experr error) {
 
 	if success != true {
-		t.Error("the trace.Success should be true when execute succeed")
+		if experr != vm.ErrExecutionReverted {
+			t.Errorf("the expect error is %s (actual %s)when trace.Success is false", et.ExpectErr.Error(), experr.Error())
+		} else {
+			t.Logf("[txIndex %d][outputIndex %d] expect experr ErrExecutionReverted happened", txIndex, outputIndex)
+		}
+		return
 	}
+
 	if bytes.Equal(et.CallResultBytes, cs) {
 		t.Logf("[txIndex %d][outputIndex %d] crossChainCall output match", txIndex, outputIndex)
 	} else {
@@ -1118,7 +1124,8 @@ func (c *CrossChainCallArgument) CrossChainCallResultToExpectCallResult() *Expec
 	if unExpErr != nil {
 		return NewExpectTrace(nil, nil, unExpErr)
 	} else if expErr != nil {
-		return NewExpectTrace(nil, expErr, nil)
+		log.Println("CrossChainCallResultToExpectCallResult produced experr", expErr.Error())
+		return NewExpectTrace(nil, vm.ErrExecutionReverted, nil)
 	} else {
 		pack, err := cs.ABIPack()
 		if err != nil {
@@ -1151,6 +1158,7 @@ func TestApplyTransaction(t *testing.T) {
 				EnableBlockNumber: big.NewInt(0),
 				Version:           1,
 				SupportChainId:    1337,
+				MinimumConfirms:   0,
 			},
 		}
 		key1, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -1197,7 +1205,7 @@ func TestApplyTransaction(t *testing.T) {
 		t.Fatal(err)
 	}
 	CallOnceArgs := NewCrossChainCallArgument(config, externalClient, chainID.Uint64(), targetTxHash, 0, 300, 10)
-	CallOnceArgsWithExpectErrAsLogIdxExceed := NewCrossChainCallArgument(config, externalClient, chainID.Uint64(), targetTxHash, 2, 300, 10)
+	CallOnceArgsWithExpectErrAsLogIdxExceed := NewCrossChainCallArgument(config, externalClient, chainID.Uint64(), targetTxHash, 3, 300, 10)
 	CallOnceArgsWithExpectErrAsNotFound := NewCrossChainCallArgument(config, externalClient, chainID.Uint64(), common.HexToHash(txHashNotFound), 2, 300, 10)
 
 	BatchCallTrace0 := NewCrossChainCallArgument(config, externalClient, chainID.Uint64(), targetTxHash, 0, 300, 10)
@@ -1225,7 +1233,7 @@ func TestApplyTransaction(t *testing.T) {
 				CallOnceArgs.CrossChainCallResultToExpectCallResult(),
 			},
 		},
-		// expect err match:CrossChainCall:logIdx out-of-bound
+		//unexpect err match:CrossChainCall:logIdx out-of-bound
 		&WrapTx{
 			Tx: types.NewTx(&types.DynamicFeeTx{
 				ChainID:   globalchainId,
@@ -1242,9 +1250,8 @@ func TestApplyTransaction(t *testing.T) {
 			ExpectTraces: []*ExpectTrace{
 				CallOnceArgsWithExpectErrAsLogIdxExceed.CrossChainCallResultToExpectCallResult(),
 			},
-			happenError: vm.NewExpectCallErr("CrossChainCall: logIdx out-of-bound"),
 		},
-		// expect err txHash not found
+		// unexpect err txHash not found
 		&WrapTx{
 			Tx: types.NewTx(&types.DynamicFeeTx{
 				ChainID:   globalchainId,
@@ -1256,9 +1263,9 @@ func TestApplyTransaction(t *testing.T) {
 				GasFeeCap: big.NewInt(6000000000),
 				Data:      CallOnceArgsWithExpectErrAsNotFound.CallOncePackWithoutErr(),
 			}),
+			expectSysErr: ethereum.NotFound,
 			Args:         CallOnceArgsWithExpectErrAsNotFound,
 			ExpectTxData: CallOnceArgsWithExpectErrAsNotFound.CallOncePack,
-			happenError:  vm.NewExpectCallErr(ethereum.NotFound.Error()),
 		},
 		// expect err chainId no support
 		&WrapTx{
@@ -1274,9 +1281,11 @@ func TestApplyTransaction(t *testing.T) {
 			}),
 			Args:         ExpectErrChainIdNoSupportArgs,
 			ExpectTxData: ExpectErrChainIdNoSupportArgs.CallOncePack,
-			happenError:  vm.NewExpectCallErr(fmt.Sprintf("CrossChainCall: chainId %d no support", ExpectErrChainIdNoSupportArgs.ChainId)),
+			ExpectTraces: []*ExpectTrace{
+				ExpectErrChainIdNoSupportArgs.CrossChainCallResultToExpectCallResult(),
+			},
 		},
-		// external call twice
+		// batch cross-chain-call
 		&WrapTx{
 			Tx: types.NewTx(&types.DynamicFeeTx{
 				ChainID:   globalchainId,
@@ -1350,7 +1359,7 @@ func TestApplyTransaction(t *testing.T) {
 		if err != nil {
 			stx.VerifyCallResult(nil, err, txIndex, t)
 		} else {
-			stx.VerifyCallResult(execResult.CCCOutputs, err, txIndex, t)
+			stx.VerifyCallResult(execResult.CCCOutputs, execResult.Err, txIndex, t)
 			stx.SetExternalCallRes(execResult.CCCOutputs)
 		}
 	}
@@ -1358,7 +1367,7 @@ func TestApplyTransaction(t *testing.T) {
 	t.Log("================preset crossChainCall output=====================")
 	//evm executes a transaction while the external calling client is inactive
 	for txIndex, stx := range singedWrapTxs {
-		if stx.happenError != nil {
+		if stx.expectSysErr != nil {
 			continue
 		}
 		// prepare chainContext
@@ -1392,14 +1401,17 @@ func TestApplyTransaction(t *testing.T) {
 		vmenv := vm.NewEVMWithMRC(blockContext, vm.TxContext{}, mrCtx, statedb, config, vmconfig)
 
 		// preset CrossChainCall outputs in evm
-		vmenv.SetCCCOutputs(stx.ExpectCCRBytes)
+		err = vmenv.PresetCCCOutputs(stx.ExpectCCRBytes)
+		if err != nil {
+			t.Fatal(err)
+		}
 		execResult, err := core.ApplyMessage(vmenv, msg, gaspool)
 
 		if err != nil {
-			stx.VerifyCallResult(nil, err, txIndex, t)
-		} else {
-			stx.VerifyCallResult(execResult.CCCOutputs, err, txIndex, t)
+			t.Fatal(err)
 		}
+
+		stx.VerifyCallResult(execResult.CCCOutputs, execResult.Err, txIndex, t)
 
 		// compare gas use
 		if actualUsedGas != stx.GasUsed {

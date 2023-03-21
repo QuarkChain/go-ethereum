@@ -50,42 +50,50 @@ func (sm *ShardManager) AddDataFile(df *DataFile) error {
 		return fmt.Errorf("data shard not found")
 	}
 
-	ds.AddDataFile(df)
-	return nil
+	return ds.AddDataFile(df)
 }
 
-func (sm *ShardManager) TryWrite(kvIdx uint64, b []byte) (bool, error) {
+// Encode a raw KV data, and write it to the underly storage file.
+// Return error if the write IO fails.
+// Return false if the data is not managed by the ShardManager.
+func (sm *ShardManager) TryWrite(kvIdx uint64, b []byte, commit common.Hash) (bool, error) {
 	shardIdx := kvIdx / sm.kvEntries
 	if ds, ok := sm.shardMap[shardIdx]; ok {
-		return true, ds.Write(kvIdx, b, false)
+		return true, ds.Write(kvIdx, b, commit)
 	} else {
 		return false, nil
 	}
 }
 
-func (sm *ShardManager) TryRead(kvIdx uint64, readLen int, hash common.Hash) ([]byte, bool, error) {
+// Read the encoded KV data from storage file and decode it.
+// Return error if the read IO fails.
+// Return false if the data is not managed by the ShardManager.
+func (sm *ShardManager) TryRead(kvIdx uint64, readLen int, commit common.Hash) ([]byte, bool, error) {
 	shardIdx := kvIdx / sm.kvEntries
 	if ds, ok := sm.shardMap[shardIdx]; ok {
-		b, err := ds.Read(kvIdx, readLen, hash, false)
+		b, err := ds.Read(kvIdx, readLen, commit)
 		return b, true, err
 	} else {
 		return nil, false, nil
 	}
 }
 
-func (sm *ShardManager) UnmaskKV(kvIdx uint64, b []byte, hash common.Hash) ([]byte, bool, error) {
-	return sm.MaskOrUnmaskKV(kvIdx, b, hash, false)
+// Decode the encoded KV data.
+func (sm *ShardManager) DecodeKV(kvIdx uint64, b []byte, hash common.Hash) ([]byte, bool, error) {
+	return sm.DecodeOrEncodeKV(kvIdx, b, hash, false)
 }
 
-func (sm *ShardManager) MaskKV(kvIdx uint64, b []byte, hash common.Hash) ([]byte, bool, error) {
-	return sm.MaskOrUnmaskKV(kvIdx, b, hash, true)
+// Encode the raw KV data.
+func (sm *ShardManager) EncodeKV(kvIdx uint64, b []byte, hash common.Hash) ([]byte, bool, error) {
+	return sm.DecodeOrEncodeKV(kvIdx, b, hash, true)
 }
 
-func (sm *ShardManager) MaskOrUnmaskKV(kvIdx uint64, b []byte, hash common.Hash, mask bool) ([]byte, bool, error) {
+func (sm *ShardManager) DecodeOrEncodeKV(kvIdx uint64, b []byte, hash common.Hash, encode bool) ([]byte, bool, error) {
 	shardIdx := kvIdx / sm.kvEntries
 	var data []byte
 	if ds, ok := sm.shardMap[shardIdx]; ok {
 		datalen := len(b)
+		miner := ds.Miner()
 		for i := uint64(0); i < ds.chunksPerKv; i++ {
 			if datalen == 0 {
 				break
@@ -98,38 +106,28 @@ func (sm *ShardManager) MaskOrUnmaskKV(kvIdx uint64, b []byte, hash common.Hash,
 			datalen = datalen - chunkReadLen
 
 			chunkIdx := kvIdx*ds.chunksPerKv + i
-			df := ds.GetStorageFile(chunkIdx)
-			if df == nil {
-				return nil, false, fmt.Errorf("cannot find storage file for chunkIdx %d", chunkIdx)
-			}
-			if mask {
-				cdata := MaskDataInPlace(getMaskData(chunkIdx, df.maskType), b[i*CHUNK_SIZE:i*CHUNK_SIZE+uint64(chunkReadLen)])
-				data = append(data, cdata...)
+			encodeKey := calcEncodeKey(hash, chunkIdx, miner)
+			var cdata []byte
+			if encode {
+				cdata = encodeChunk(b[i*CHUNK_SIZE:i*CHUNK_SIZE+uint64(chunkReadLen)], ds.EncodeType(), encodeKey)
 			} else {
-				cdata := UnmaskDataInPlace(b[i*CHUNK_SIZE:i*CHUNK_SIZE+uint64(chunkReadLen)], getMaskData(chunkIdx, df.maskType))
-				data = append(data, cdata...)
+				cdata = decodeChunk(b[i*CHUNK_SIZE:i*CHUNK_SIZE+uint64(chunkReadLen)], ds.EncodeType(), encodeKey)
 			}
+			data = append(data, cdata...)
 		}
 		return data, true, nil
-	} else {
-		return nil, false, fmt.Errorf("cannot find storage shard for kvIdx %d", kvIdx)
 	}
+	return nil, false, nil
 }
 
-func (sm *ShardManager) TryWriteMaskedKV(kvIdx uint64, b []byte) (bool, error) {
+// Read the encoded KV data from storage file and return it.
+// Return error if the read IO fails.
+// Return false if the data is not managed by the ShardManager.
+func (sm *ShardManager) TryReadEncoded(kvIdx uint64, readLen int) ([]byte, bool, error) {
 	shardIdx := kvIdx / sm.kvEntries
 	if ds, ok := sm.shardMap[shardIdx]; ok {
-		return true, ds.Write(kvIdx, b, true)
-	} else {
-		return false, nil
-	}
-}
-
-func (sm *ShardManager) TryReadMaskedKV(kvIdx uint64, readLen int, hash common.Hash) ([]byte, bool, error) {
-	shardIdx := kvIdx / sm.kvEntries
-	if ds, ok := sm.shardMap[shardIdx]; ok {
-		b, err := ds.Read(kvIdx, readLen, hash, true) // read all the data
-		return b, true, err
+		b, err := ds.ReadEncoded(kvIdx, readLen) // read all the data
+		return b[:readLen], true, err
 	} else {
 		return nil, false, nil
 	}

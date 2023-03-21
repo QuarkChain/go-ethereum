@@ -171,7 +171,9 @@ const (
 	CalldataPerTxStipendEIP4488    = 300     // CALLDATA_PER_TX_STIPEND in EIP-4488
 
 	CrossChainCallDataPerByteGas = 3      // Gas needed for per byte data produced by CrossChainCall
-	OnceCrossChainCallGas        = 100000 // Gas needed for every invoke to CrossChainCall
+	OnceCrossChainCallGas        = 100000 // Gas needed for every invoke to CrossChainCall, i.e., 50M allows 500 calls.
+
+	MaxMROutputSizeAtUncleExtra = 2048 // Size limitation for packing mindreading-output into block.uncles[i].extra
 )
 
 // Gas discount table for BLS12-381 G1 and G2 multi exponentiation operations

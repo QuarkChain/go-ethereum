@@ -362,5 +362,5 @@ func (b *EthAPIBackend) StateAtTransaction(ctx context.Context, block *types.Blo
 }
 
 func (b *EthAPIBackend) MindReading() core.MindReadingEnv {
-	return b.eth.MindReading()
+	return b.eth.blockchain.MindReading()
 }

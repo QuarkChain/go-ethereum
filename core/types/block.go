@@ -181,6 +181,33 @@ func (h *Header) GetMindReadingOutput(tx *Transaction) []byte {
 	return nil
 }
 
+type MindReadingOutputIterator struct {
+	uncles []*Header
+	index  int
+}
+
+func NewMindReadingOutputIterator(b *Block) *MindReadingOutputIterator {
+	return &MindReadingOutputIterator{
+		uncles: b.uncles,
+		index:  0,
+	}
+}
+
+func (it *MindReadingOutputIterator) GetNextMindReadingOutput(tx *Transaction) []byte {
+	if it.index >= len(it.uncles) {
+		return nil
+	}
+	output := it.uncles[it.index].GetMindReadingOutput(tx)
+	if output != nil {
+		it.index++
+	}
+	return output
+}
+
+func (it *MindReadingOutputIterator) GetIndex() int {
+	return it.index
+}
+
 // Body is a simple (mutable, non-safe) data container for storing and moving
 // a block's data contents (transactions and uncles) together.
 type Body struct {

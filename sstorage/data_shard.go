@@ -1,11 +1,16 @@
 package sstorage
 
 import (
+	"encoding/binary"
 	"fmt"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/crypto"
 )
 
+// A DataShard is a logical shard that manages multiple DataFiles.
+// It also manages the encoding/decoding, tranlation from KV read/write to chunk read/write,
+// and sanity check of the data files.
 type DataShard struct {
 	shardIdx    uint64
 	kvSize      uint64
@@ -22,9 +27,22 @@ func NewDataShard(shardIdx uint64, kvSize uint64, kvEntries uint64) *DataShard {
 	return &DataShard{shardIdx: shardIdx, kvSize: kvSize, chunksPerKv: kvSize / CHUNK_SIZE, kvEntries: kvEntries}
 }
 
-func (ds *DataShard) AddDataFile(df *DataFile) {
-	// TODO: May check if not overlapped?
+func (ds *DataShard) AddDataFile(df *DataFile) error {
+	if len(ds.dataFiles) != 0 {
+		// Perform sanity check
+		if ds.dataFiles[0].miner != df.miner {
+			return fmt.Errorf("mismatched data file SP")
+		}
+		if ds.dataFiles[0].encodeType != df.encodeType {
+			return fmt.Errorf("mismatched data file encode type")
+		}
+		if ds.dataFiles[0].maxKvSize != df.maxKvSize {
+			return fmt.Errorf("mismatched data file max kv size")
+		}
+		// TODO: May check if not overlapped?
+	}
 	ds.dataFiles = append(ds.dataFiles, df)
+	return nil
 }
 
 // Returns whether the shard has all data files to cover all entries
@@ -46,6 +64,23 @@ func (ds *DataShard) IsComplete() bool {
 	return true
 }
 
+// Return the storage provider address (i.e., miner) of the shard.
+func (ds *DataShard) Miner() common.Address {
+	if len(ds.dataFiles) == 0 {
+		return common.Address{}
+	} else {
+		return ds.dataFiles[0].miner
+	}
+}
+
+func (ds *DataShard) EncodeType() uint64 {
+	if len(ds.dataFiles) == 0 {
+		return NO_ENCODE
+	} else {
+		return ds.dataFiles[0].encodeType
+	}
+}
+
 func (ds *DataShard) Contains(kvIdx uint64) bool {
 	return kvIdx >= ds.shardIdx*ds.kvEntries && kvIdx < (ds.shardIdx+1)*ds.kvEntries
 }
@@ -63,7 +98,23 @@ func (ds *DataShard) GetStorageFile(chunkIdx uint64) *DataFile {
 	return nil
 }
 
-func (ds *DataShard) Read(kvIdx uint64, readLen int, hash common.Hash, isMasked bool) ([]byte, error) {
+// Read the encoded data from storage and return it.
+func (ds *DataShard) ReadEncoded(kvIdx uint64, readLen int) ([]byte, error) {
+	return ds.readWith(kvIdx, readLen, func(cdata []byte, chunkIdx uint64) []byte {
+		return cdata
+	})
+}
+
+// Read the encoded data from storage and decode it.
+func (ds *DataShard) Read(kvIdx uint64, readLen int, commit common.Hash) ([]byte, error) {
+	return ds.readWith(kvIdx, readLen, func(cdata []byte, chunkIdx uint64) []byte {
+		encodeKey := calcEncodeKey(commit, chunkIdx, ds.dataFiles[0].miner)
+		return decodeChunk(cdata, ds.dataFiles[0].encodeType, encodeKey)
+	})
+}
+
+// Read the encoded data from storage with a decoder.
+func (ds *DataShard) readWith(kvIdx uint64, readLen int, decoder func([]byte, uint64) []byte) ([]byte, error) {
 	if !ds.Contains(kvIdx) {
 		return nil, fmt.Errorf("kv not found")
 	}
@@ -83,16 +134,39 @@ func (ds *DataShard) Read(kvIdx uint64, readLen int, hash common.Hash, isMasked 
 		readLen = readLen - chunkReadLen
 
 		chunkIdx := kvIdx*ds.chunksPerKv + i
-		cdata, err := ds.ReadChunk(chunkIdx, chunkReadLen, hash, isMasked)
+		cdata, err := ds.readChunk(chunkIdx, chunkReadLen)
 		if err != nil {
 			return nil, err
 		}
+
+		cdata = decoder(cdata, chunkIdx)
 		data = append(data, cdata...)
 	}
 	return data, nil
 }
 
-func (ds *DataShard) Write(kvIdx uint64, b []byte, isMasked bool) error {
+// Obtain a unique encoding key with keccak256(chunkIdx || commit || miner).
+// This will make sure the encoded data will be unique in terms of idx, storage provider, and data
+func calcEncodeKey(commit common.Hash, chunkIdx uint64, miner common.Address) common.Hash {
+	bb := make([]byte, 8)
+	binary.BigEndian.PutUint64(bb, chunkIdx)
+	bb = append(bb, commit.Bytes()...)
+	bb = append(bb, miner.Bytes()...)
+	return crypto.Keccak256Hash(bb)
+}
+
+func encodeChunk(b []byte, maskType uint64, encodeKey common.Hash) []byte {
+	// TODO:
+	return b
+}
+
+func decodeChunk(b []byte, maskType uint64, encodeKey common.Hash) []byte {
+	// TODO:
+	return b
+}
+
+// Write a value of the KV to the store.  The value will be encoded with kvIdx and SP address.
+func (ds *DataShard) Write(kvIdx uint64, b []byte, commit common.Hash) error {
 	if !ds.Contains(kvIdx) {
 		return fmt.Errorf("kv not found")
 	}
@@ -112,7 +186,10 @@ func (ds *DataShard) Write(kvIdx uint64, b []byte, isMasked bool) error {
 		}
 
 		chunkIdx := kvIdx*ds.chunksPerKv + i
-		err := ds.WriteChunk(chunkIdx, b[off:off+writeLen], isMasked)
+		encodeKey := calcEncodeKey(commit, chunkIdx, ds.Miner())
+		encodedChunk := encodeChunk(b[off:off+writeLen], ds.EncodeType(), encodeKey)
+		err := ds.writeChunk(chunkIdx, encodedChunk)
+
 		if err != nil {
 			return nil
 		}
@@ -120,19 +197,19 @@ func (ds *DataShard) Write(kvIdx uint64, b []byte, isMasked bool) error {
 	return nil
 }
 
-func (ds *DataShard) ReadChunk(chunkIdx uint64, readLen int, hash common.Hash, isMasked bool) ([]byte, error) {
+func (ds *DataShard) readChunk(chunkIdx uint64, readLen int) ([]byte, error) {
 	for _, df := range ds.dataFiles {
 		if df.Contains(chunkIdx) {
-			return df.Read(chunkIdx, readLen, hash, isMasked)
+			return df.Read(chunkIdx, readLen)
 		}
 	}
 	return nil, fmt.Errorf("chunk not found: the shard is not completed?")
 }
 
-func (ds *DataShard) WriteChunk(chunkIdx uint64, b []byte, isMasked bool) error {
+func (ds *DataShard) writeChunk(chunkIdx uint64, b []byte) error {
 	for _, df := range ds.dataFiles {
 		if df.Contains(chunkIdx) {
-			return df.Write(chunkIdx, b, isMasked)
+			return df.Write(chunkIdx, b)
 		}
 	}
 	return fmt.Errorf("chunk not found: the shard is not completed?")
