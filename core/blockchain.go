@@ -2623,7 +2623,7 @@ func (bc *BlockChain) setMindReading(chainConfig *params.ChainConfig) error {
 		bc.mindReading.Version = chainConfig.MindReading.Version
 		bc.mindReading.SupportChainId = chainConfig.MindReading.SupportChainId
 		bc.mindReading.MinimumConfirms = chainConfig.MindReading.MinimumConfirms
-		log.Warn("configure blockchain.MindReading", "config", bc.mindReading)
+		log.Warn("already configured blockchain.MindReading", " bc.mindReading", bc.mindReading)
 		if chainConfig.MindReading.CallRpc != "" {
 			newClient, err := ethclient.Dial(bc.chainConfig.MindReading.CallRpc)
 			if err != nil {
