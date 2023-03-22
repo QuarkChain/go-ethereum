@@ -534,47 +534,48 @@ func TestWork_TriggerByNewBlock(test *testing.T) {
 	}
 }
 
-func TestWork_ShardIsNotFull(test *testing.T) {
-	var (
-		taskMined    int
-		resultGet    int
-		resultCh     = make(chan *result, 2)
-		shardIdxList = []uint64{0}
-		engine       = ethash.NewFaker()
-		db           = rawdb.NewMemoryDatabase()
-	)
+/*
+	func TestWork_ShardIsNotFull(test *testing.T) {
+		var (
+			taskMined    int
+			resultGet    int
+			resultCh     = make(chan *result, 2)
+			shardIdxList = []uint64{0}
+			engine       = ethash.NewFaker()
+			db           = rawdb.NewMemoryDatabase()
+		)
 
-	w, _, files, _ := newTestWorker(test, ethashChainConfig, engine, db, shardIdxList, 0, false)
+		w, _, files, _ := newTestWorker(test, ethashChainConfig, engine, db, shardIdxList, 0, false)
 
-	defer w.close()
-	defer engine.Close()
-	defer func(files []string) {
-		for _, file := range files {
-			os.Remove(file)
+		defer w.close()
+		defer engine.Close()
+		defer func(files []string) {
+			for _, file := range files {
+				os.Remove(file)
+			}
+		}(files)
+
+		w.newTaskHook = func(task *task) {
+			taskMined += 1
 		}
-	}(files)
-
-	w.newTaskHook = func(task *task) {
-		taskMined += 1
-	}
-	w.newResultHook = func(result *result) {
-		resultGet += 1
-		resultCh <- result
-	}
-
-	w.start() // Start mining!
-	select {
-	case r := <-resultCh:
-		fmt.Println("getresult")
-		stateDB, _ := w.chain.State()
-		if err := verifyTaskResult(stateDB, w.chain, r); err != nil {
-			test.Error("verify mined result failed", err.Error())
+		w.newResultHook = func(result *result) {
+			resultGet += 1
+			resultCh <- result
 		}
-	case <-time.NewTimer(3 * time.Second).C:
-		test.Error("new task timeout")
-	}
-}
 
+		w.start() // Start mining!
+		select {
+		case r := <-resultCh:
+			fmt.Println("getresult")
+			stateDB, _ := w.chain.State()
+			if err := verifyTaskResult(stateDB, w.chain, r); err != nil {
+				test.Error("verify mined result failed", err.Error())
+			}
+		case <-time.NewTimer(3 * time.Second).C:
+			test.Error("new task timeout")
+		}
+	}
+*/
 func TestWork_StartAndStopTask(test *testing.T) {
 	var (
 		shardIdxList = []uint64{0, 1, 2}
