@@ -18,14 +18,8 @@
 package sstorminer
 
 import (
-	"fmt"
-	"math/big"
-	"sync"
-	"time"
-
+	"crypto/ecdsa"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/common/hexutil"
-	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -33,27 +27,27 @@ import (
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
+	"math/big"
+	"sync"
+	"time"
 )
 
 // Backend wraps all methods required for mining. Only full node is capable
 // to offer all the functions here.
 type Backend interface {
-	BlockChain() *core.BlockChain
+	BlockChain() BlockChain
 	TxPool() *core.TxPool
 	StateAtBlock(block *types.Block, reexec uint64, base *state.StateDB, checkLive bool, preferDisk bool) (statedb *state.StateDB, err error)
 }
 
 // Config is the configuration parameters of mining.
 type Config struct {
-	Etherbase  common.Address `toml:",omitempty"` // Public address for block mining rewards (default = first account)
-	Notify     []string       `toml:",omitempty"` // HTTP URL list to be notified of new work packages (only useful in ethash).
-	NotifyFull bool           `toml:",omitempty"` // Notify with pending block headers instead of work packages
-	ExtraData  hexutil.Bytes  `toml:",omitempty"` // Block extra data set by the miner
-	GasFloor   uint64         // Target gas floor for mined blocks.
-	GasCeil    uint64         // Target gas ceiling for mined blocks.
-	GasPrice   *big.Int       // Minimum gas price for mining a transaction
-	Recommit   time.Duration  // The time interval for miner to re-create mining work.
-	Noverify   bool           // Disable remote mining solution verification(only useful in ethash).
+	RandomChecks      int
+	MinimumDiff       *big.Int
+	TargetIntervalSec *big.Int
+	Cutoff            *big.Int
+	DiffAdjDivisor    *big.Int
+	Recommit          time.Duration // The time interval for miner to re-create mining work.
 }
 
 // Miner creates blocks and searches for proof-of-work values.
@@ -62,23 +56,21 @@ type Miner struct {
 	worker   *worker
 	coinbase common.Address
 	eth      Backend
-	engine   consensus.Engine
 	exitCh   chan struct{}
-	startCh  chan common.Address
+	startCh  chan struct{}
 	stopCh   chan struct{}
 
 	wg sync.WaitGroup
 }
 
-func New(eth Backend, config *Config, chainConfig *params.ChainConfig, mux *event.TypeMux, engine consensus.Engine, isLocalBlock func(header *types.Header) bool) *Miner {
+func New(eth Backend, config *Config, chainConfig *params.ChainConfig, mux *event.TypeMux, privKey *ecdsa.PrivateKey) *Miner {
 	miner := &Miner{
 		eth:     eth,
 		mux:     mux,
-		engine:  engine,
 		exitCh:  make(chan struct{}),
-		startCh: make(chan common.Address),
+		startCh: make(chan struct{}),
 		stopCh:  make(chan struct{}),
-		worker:  newWorker(config, chainConfig, engine, eth, mux, isLocalBlock, true),
+		worker:  newWorker(config, chainConfig, eth, mux, privKey, true),
 	}
 	miner.wg.Add(1)
 	go miner.update()
@@ -92,6 +84,7 @@ func New(eth Backend, config *Config, chainConfig *params.ChainConfig, mux *even
 func (miner *Miner) update() {
 	defer miner.wg.Done()
 
+	// todo Add sstorage evnet
 	events := miner.mux.Subscribe(downloader.StartEvent{}, downloader.DoneEvent{}, downloader.FailedEvent{})
 	defer func() {
 		if !events.Closed() {
@@ -123,21 +116,17 @@ func (miner *Miner) update() {
 			case downloader.FailedEvent:
 				canStart = true
 				if shouldStart {
-					miner.SetEtherbase(miner.coinbase)
 					miner.worker.start()
 				}
 			case downloader.DoneEvent:
 				canStart = true
 				if shouldStart {
-					miner.SetEtherbase(miner.coinbase)
 					miner.worker.start()
 				}
 				// Stop reacting to downloader events
 				events.Unsubscribe()
 			}
-		case addr := <-miner.startCh:
-			miner.SetEtherbase(addr)
-			miner.worker.init()
+		case <-miner.startCh:
 			if canStart {
 				miner.worker.start()
 			}
@@ -152,8 +141,8 @@ func (miner *Miner) update() {
 	}
 }
 
-func (miner *Miner) Start(coinbase common.Address) {
-	miner.startCh <- coinbase
+func (miner *Miner) Start() {
+	miner.startCh <- struct{}{}
 }
 
 func (miner *Miner) Stop() {
@@ -169,22 +158,7 @@ func (miner *Miner) Mining() bool {
 	return miner.worker.isRunning()
 }
 
-func (miner *Miner) Hashrate() uint64 {
-	if pow, ok := miner.engine.(consensus.PoW); ok {
-		return uint64(pow.Hashrate())
-	}
-	return 0
-}
-
-func (miner *Miner) SetExtra(extra []byte) error {
-	if uint64(len(extra)) > params.MaximumExtraDataSize {
-		return fmt.Errorf("extra exceeds max length. %d > %v", len(extra), params.MaximumExtraDataSize)
-	}
-	miner.worker.setExtra(extra)
-	return nil
-}
-
-func (miner *Miner) SetEtherbase(addr common.Address) {
-	miner.coinbase = addr
-	miner.worker.setEtherbase(addr)
+// SetRecommitInterval sets the interval for sealing work resubmitting.
+func (miner *Miner) SetRecommitInterval(interval time.Duration) {
+	miner.worker.setRecommitInterval(interval)
 }

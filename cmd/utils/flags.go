@@ -566,6 +566,14 @@ var (
 		Usage: "Add sharded storage data file",
 		Value: nil,
 	}
+	SstorageMineFlag = cli.BoolFlag{
+		Name:  "sstorage.mine",
+		Usage: "Enable sstorage mining",
+	}
+	SstorageNodeKeyFlag = cli.StringFlag{
+		Name:  "sstorage.nodekey",
+		Usage: "Sstorage miner node key file",
+	}
 	// Logging and debug settings
 	EthStatsURLFlag = cli.StringFlag{
 		Name:  "ethstats",
@@ -1124,6 +1132,12 @@ func setSstorage(ctx *cli.Context, cfg *ethconfig.Config) {
 	}
 	if ctx.GlobalIsSet(SstorageFileFlag.Name) {
 		cfg.SstorageFiles = ctx.GlobalStringSlice(SstorageFileFlag.Name)
+	}
+	if ctx.GlobalIsSet(SstorageMineFlag.Name) {
+		cfg.SstorageMine = ctx.GlobalBool(SstorageMineFlag.Name)
+	}
+	if ctx.GlobalIsSet(SstorageNodeKeyFlag.Name) {
+		cfg.SstorageNodeKey = ctx.GlobalString(SstorageNodeKeyFlag.Name)
 	}
 
 	sstorage.InitializeConfig()

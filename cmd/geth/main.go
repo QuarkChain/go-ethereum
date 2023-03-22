@@ -133,6 +133,8 @@ var (
 		utils.MinerNoVerifyFlag,
 		utils.SstorageShardFlag,
 		utils.SstorageFileFlag,
+		utils.SstorageMineFlag,
+		utils.SstorageNodeKeyFlag,
 		utils.NATFlag,
 		utils.NoDiscoverFlag,
 		utils.DiscoveryV5Flag,

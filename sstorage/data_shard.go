@@ -105,6 +105,38 @@ func (ds *DataShard) ReadEncoded(kvIdx uint64, readLen int) ([]byte, error) {
 	})
 }
 
+// Read the encoded data from storage and return it.
+func (ds *DataShard) ReadChunkEncoded(kvIdx uint64, chunkIdx uint64) ([]byte, error) {
+	return ds.readChunkWith(kvIdx, chunkIdx, func(cdata []byte, chunkIdx uint64) []byte {
+		return cdata
+	})
+}
+
+// Read the encoded data from storage and decode it.
+func (ds *DataShard) ReadChunk(kvIdx uint64, chunkIdx uint64, commit common.Hash) ([]byte, error) {
+	return ds.readChunkWith(kvIdx, chunkIdx, func(cdata []byte, chunkIdx uint64) []byte {
+		encodeKey := calcEncodeKey(commit, chunkIdx, ds.dataFiles[0].miner)
+		return decodeChunk(cdata, ds.dataFiles[0].encodeType, encodeKey)
+	})
+}
+
+// Read the encoded data from storage with a decoder.
+func (ds *DataShard) readChunkWith(kvIdx uint64, chunkIdx uint64, decoder func([]byte, uint64) []byte) ([]byte, error) {
+	if !ds.Contains(kvIdx) {
+		return nil, fmt.Errorf("kv not found")
+	}
+	if chunkIdx > ds.chunksPerKv {
+		return nil, fmt.Errorf("chunkIdx out of range, chunkIdx： %d vs chunksPerKv %d", chunkIdx, ds.chunksPerKv)
+	}
+	idx := kvIdx*ds.chunksPerKv + chunkIdx
+	data, err := ds.readChunk(idx, int(CHUNK_SIZE))
+	if err != nil {
+		return nil, err
+	}
+	data = decoder(data, chunkIdx)
+	return data, nil
+}
+
 // Read the encoded data from storage and decode it.
 func (ds *DataShard) Read(kvIdx uint64, readLen int, commit common.Hash) ([]byte, error) {
 	return ds.readWith(kvIdx, readLen, func(cdata []byte, chunkIdx uint64) []byte {

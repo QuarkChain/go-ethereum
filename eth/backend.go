@@ -20,6 +20,8 @@ package eth
 import (
 	"errors"
 	"fmt"
+	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/sstorminer"
 	"math/big"
 	"runtime"
 	"sync"
@@ -92,9 +94,10 @@ type Ethereum struct {
 
 	APIBackend *EthAPIBackend
 
-	miner     *miner.Miner
-	gasPrice  *big.Int
-	etherbase common.Address
+	miner      *miner.Miner
+	sstorMiner *sstorminer.Miner
+	gasPrice   *big.Int
+	etherbase  common.Address
 
 	networkID     uint64
 	netRPCService *ethapi.PublicNetAPI
@@ -272,6 +275,17 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 
 	eth.miner = miner.New(eth, &config.Miner, chainConfig, eth.EventMux(), eth.engine, eth.isLocalBlock)
 	eth.miner.SetExtra(makeExtraData(config.Miner.ExtraData))
+
+	if config.SstorageMine {
+		privKey, err := crypto.LoadECDSA(config.SstorageNodeKey)
+		if err != nil {
+			return nil, err
+		}
+		if len(sstorage.Shards()) == 0 {
+			return nil, fmt.Errorf("no shards is exist")
+		}
+		eth.sstorMiner = sstorminer.New(eth, &config.SStorMiner, chainConfig, eth.EventMux(), privKey)
+	}
 
 	eth.APIBackend = &EthAPIBackend{stack.Config().ExtRPCEnabled(), stack.Config().AllowUnprotectedTxs, eth, nil}
 	if eth.APIBackend.allowUnprotectedTxs {
@@ -475,6 +489,26 @@ func (s *Ethereum) SetEtherbase(etherbase common.Address) {
 
 	s.miner.SetEtherbase(etherbase)
 }
+
+// todo add start / stop mining for special shard
+
+// StartSstorMining starts the sstorage miner. If mining
+// is already running, this method just return.
+func (s *Ethereum) StartSstorMining() {
+	// If the miner was not running, initialize it
+	if !s.IsMining() {
+		go s.sstorMiner.Start()
+	}
+}
+
+// StopSstorMining terminates the sstorage miner.
+func (s *Ethereum) StopSstorMining() {
+	s.miner.Stop()
+}
+
+func (s *Ethereum) IsSstorMining() bool { return s.miner.Mining() }
+
+func (s *Ethereum) SstorMiner() *sstorminer.Miner { return s.sstorMiner }
 
 // StartMining starts the miner with the given number of CPU threads. If mining
 // is already running, this method adjust the number of threads allowed to use

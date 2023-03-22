@@ -17,17 +17,17 @@
 package sstorminer
 
 import (
+	"encoding/binary"
 	"errors"
+	"fmt"
 	"math/big"
 	"math/rand"
-	"sync/atomic"
+	"os"
 	"testing"
 	"time"
 
-	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus"
-	"github.com/ethereum/go-ethereum/consensus/clique"
 	"github.com/ethereum/go-ethereum/consensus/ethash"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/rawdb"
@@ -37,7 +37,11 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/event"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/ethereum/go-ethereum/sstorage"
+	"github.com/holiman/uint256"
+	"golang.org/x/crypto/sha3"
 )
 
 const (
@@ -53,7 +57,6 @@ var (
 	// Test chain configurations
 	testTxPoolConfig  core.TxPoolConfig
 	ethashChainConfig *params.ChainConfig
-	cliqueChainConfig *params.ChainConfig
 
 	// Test accounts
 	testBankKey, _  = crypto.GenerateKey()
@@ -67,10 +70,22 @@ var (
 	pendingTxs []*types.Transaction
 	newTxs     []*types.Transaction
 
-	testConfig = &Config{
-		Recommit: time.Second,
-		GasCeil:  params.GenesisGasLimit,
+	contract      = common.HexToAddress("0x0000000000000000000000000000000003330001")
+	kvEntriesBits = uint64(9)
+	kvEntries     = uint64(1) << 9
+	blocks        = 5
+
+	defaultConfig = &Config{
+		RandomChecks:      16,
+		MinimumDiff:       new(big.Int).SetUint64(1),
+		TargetIntervalSec: new(big.Int).SetUint64(3),
+		Cutoff:            new(big.Int).SetUint64(40),
+		DiffAdjDivisor:    new(big.Int).SetUint64(1024),
+		Recommit:          1 * time.Second,
 	}
+
+	diff       = new(big.Int).SetUint64(1024)
+	blockMined = new(big.Int).SetUint64(1)
 )
 
 func init() {
@@ -78,12 +93,6 @@ func init() {
 	testTxPoolConfig.Journal = ""
 	ethashChainConfig = new(params.ChainConfig)
 	*ethashChainConfig = *params.TestChainConfig
-	cliqueChainConfig = new(params.ChainConfig)
-	*cliqueChainConfig = *params.TestChainConfig
-	cliqueChainConfig.Clique = &params.CliqueConfig{
-		Period: 10,
-		Epoch:  30000,
-	}
 
 	signer := types.LatestSigner(params.TestChainConfig)
 	tx1 := types.MustSignNewTx(testBankKey, signer, &types.AccessListTx{
@@ -108,33 +117,67 @@ func init() {
 	rand.Seed(time.Now().UnixNano())
 }
 
-// testWorkerBackend implements worker.Backend interfaces and wraps all information needed during the testing.
-type testWorkerBackend struct {
-	db         ethdb.Database
-	txPool     *core.TxPool
-	chain      *core.BlockChain
-	testTxFeed event.Feed
-	genesis    *core.Genesis
-	uncleBlock *types.Block
+type wrapBlockChain struct {
+	*core.BlockChain
+	stateDB *state.StateDB
 }
 
-func newTestWorkerBackend(t *testing.T, chainConfig *params.ChainConfig, engine consensus.Engine, db ethdb.Database, n int) *testWorkerBackend {
+func (bc *wrapBlockChain) GetSstorageMiningInfo(root common.Hash, contract common.Address, shardId uint64) (*core.MiningInfo, error) {
+	return bc.GetSstorageMiningInfoWithStateDB(bc.stateDB, contract, shardId)
+}
+
+func (bc *wrapBlockChain) State() (*state.StateDB, error) {
+	return bc.stateDB, nil
+}
+
+func (bc *wrapBlockChain) ReadKVsByIndexList(contract common.Address, indexes []uint64, useMaxKVsize bool) ([]*core.KV, error) {
+	return bc.BlockChain.ReadKVsByIndexListWithState(bc.stateDB, contract, indexes, useMaxKVsize)
+}
+
+func hashAdd(hash common.Hash, i uint64) common.Hash {
+	return common.BytesToHash(new(big.Int).Add(hash.Big(), new(big.Int).SetUint64(i)).Bytes())
+}
+
+func (bc *wrapBlockChain) saveMiningInfo(shardId uint64, info *core.MiningInfo) {
+	position := getSlotHash(0, uint256.NewInt(shardId).Bytes32())
+	//	fmt.Println(position.Hex())
+	bc.stateDB.SetState(contract, position, info.MiningHash)
+	bc.stateDB.SetState(contract, hashAdd(position, 1), common.BigToHash(new(big.Int).SetUint64(info.LastMineTime)))
+	bc.stateDB.SetState(contract, hashAdd(position, 2), common.BigToHash(info.Difficulty))
+	bc.stateDB.SetState(contract, hashAdd(position, 3), common.BigToHash(info.BlockMined))
+}
+
+func (bc *wrapBlockChain) initMiningInfos(shardIdxList []uint64, diff *big.Int, blockMined *big.Int) map[uint64]*core.MiningInfo {
+	infos := make(map[uint64]*core.MiningInfo)
+	for _, idx := range shardIdxList {
+		info := new(core.MiningInfo)
+		info.MiningHash = crypto.Keccak256Hash()
+		info.LastMineTime = uint64(time.Now().Unix())
+		info.Difficulty = diff
+		info.BlockMined = blockMined
+		bc.saveMiningInfo(idx, info)
+		infos[idx] = info
+	}
+	return infos
+}
+
+// testWorkerBackend implements worker.Backend interfaces and wraps all information needed during the testing.
+type testWorkerBackend struct {
+	db          ethdb.Database
+	txPool      *core.TxPool
+	chain       BlockChain
+	testTxFeed  event.Feed
+	genesis     *core.Genesis
+	miningInfos map[uint64]*core.MiningInfo
+}
+
+func newTestWorkerBackend(t *testing.T, chainConfig *params.ChainConfig, engine consensus.Engine, shardIdxList []uint64,
+	db ethdb.Database, n int, shardIsFull bool) (*testWorkerBackend, map[uint64]*core.MiningInfo) {
 	var gspec = core.Genesis{
 		Config: chainConfig,
 		Alloc:  core.GenesisAlloc{testBankAddress: {Balance: testBankFunds}},
 	}
 
-	switch e := engine.(type) {
-	case *clique.Clique:
-		gspec.ExtraData = make([]byte, 32+common.AddressLength+crypto.SignatureLength)
-		copy(gspec.ExtraData[32:32+common.AddressLength], testBankAddress.Bytes())
-		e.Authorize(testBankAddress, func(account accounts.Account, s string, data []byte) ([]byte, error) {
-			return crypto.Sign(crypto.Keccak256(data), testBankKey)
-		})
-	case *ethash.Ethash:
-	default:
-		t.Fatalf("unexpected consensus engine type: %T", engine)
-	}
 	genesis := gspec.MustCommit(db)
 
 	chain, _ := core.NewBlockChain(db, &core.CacheConfig{TrieDirtyDisabled: true}, gspec.Config, engine, vm.Config{}, nil, nil)
@@ -149,521 +192,495 @@ func newTestWorkerBackend(t *testing.T, chainConfig *params.ChainConfig, engine 
 			t.Fatalf("failed to insert origin chain: %v", err)
 		}
 	}
-	parent := genesis
-	if n > 0 {
-		parent = chain.GetBlockByHash(chain.CurrentBlock().ParentHash())
+
+	stateDB, _ := chain.State()
+	wchain := wrapBlockChain{
+		BlockChain: chain,
+		stateDB:    stateDB,
 	}
-	blocks, _ := core.GenerateChain(chainConfig, parent, engine, db, 1, func(i int, gen *core.BlockGen) {
-		gen.SetCoinbase(testUserAddress)
-	})
+	infos := wchain.initMiningInfos(shardIdxList, diff, blockMined)
+	makeKVStorage(stateDB, contract, shardIdxList, 1<<kvEntriesBits, shardIsFull)
 
 	return &testWorkerBackend{
-		db:         db,
-		chain:      chain,
-		txPool:     txpool,
-		genesis:    &gspec,
-		uncleBlock: blocks[0],
-	}
+		db:      db,
+		chain:   &wchain,
+		txPool:  txpool,
+		genesis: &gspec,
+	}, infos
 }
 
-func (b *testWorkerBackend) BlockChain() *core.BlockChain { return b.chain }
-func (b *testWorkerBackend) TxPool() *core.TxPool         { return b.txPool }
+func (b *testWorkerBackend) BlockChain() BlockChain { return b.chain }
+func (b *testWorkerBackend) TxPool() *core.TxPool   { return b.txPool }
 func (b *testWorkerBackend) StateAtBlock(block *types.Block, reexec uint64, base *state.StateDB, checkLive bool, preferDisk bool) (statedb *state.StateDB, err error) {
 	return nil, errors.New("not supported")
 }
 
-func (b *testWorkerBackend) newRandomUncle() *types.Block {
-	var parent *types.Block
-	cur := b.chain.CurrentBlock()
-	if cur.NumberU64() == 0 {
-		parent = b.chain.Genesis()
-	} else {
-		parent = b.chain.GetBlockByHash(b.chain.CurrentBlock().ParentHash())
+func newTestWorker(t *testing.T, chainConfig *params.ChainConfig, engine consensus.Engine, db ethdb.Database, shardIdxList []uint64,
+	chunkSizeBits uint64, shardIsFull bool) (*worker, map[uint64]*core.MiningInfo, []string, *testWorkerBackend) {
+	shards, files := createSstorage(contract, shardIdxList, sstorage.CHUNK_SIZE_BITS+chunkSizeBits, kvEntriesBits, 1, common.Address{})
+	if shards == nil {
+		t.Fatalf("createSstorage failed")
 	}
-	blocks, _ := core.GenerateChain(b.chain.Config(), parent, b.chain.Engine(), b.db, 1, func(i int, gen *core.BlockGen) {
-		var addr = make([]byte, common.AddressLength)
-		rand.Read(addr)
-		gen.SetCoinbase(common.BytesToAddress(addr))
-	})
-	return blocks[0]
-}
 
-func (b *testWorkerBackend) newRandomTx(creation bool) *types.Transaction {
-	var tx *types.Transaction
-	gasPrice := big.NewInt(10 * params.InitialBaseFee)
-	if creation {
-		tx, _ = types.SignTx(types.NewContractCreation(b.txPool.Nonce(testBankAddress), big.NewInt(0), testGas, gasPrice, common.FromHex(testCode)), types.HomesteadSigner{}, testBankKey)
-	} else {
-		tx, _ = types.SignTx(types.NewTransaction(b.txPool.Nonce(testBankAddress), testUserAddress, big.NewInt(1000), params.TxGas, gasPrice, nil), types.HomesteadSigner{}, testBankKey)
-	}
-	return tx
-}
-
-func newTestWorker(t *testing.T, chainConfig *params.ChainConfig, engine consensus.Engine, db ethdb.Database, blocks int) (*worker, *testWorkerBackend) {
-	backend := newTestWorkerBackend(t, chainConfig, engine, db, blocks)
+	backend, infos := newTestWorkerBackend(t, chainConfig, engine, shardIdxList, db, blocks, shardIsFull)
 	backend.txPool.AddLocals(pendingTxs)
-	w := newWorker(testConfig, chainConfig, engine, backend, new(event.TypeMux), nil, false)
-	w.setEtherbase(testBankAddress)
-	return w, backend
+
+	w := newWorker(defaultConfig, chainConfig, backend, new(event.TypeMux), testBankKey, false)
+	return w, infos, files, backend
 }
 
-func TestGenerateBlockAndImportEthash(t *testing.T) {
-	testGenerateBlockAndImport(t, false)
-}
+func createSstorage(contract common.Address, shardIdxList []uint64, kvSizeBits,
+	kvEntriesBits, filePerShard uint64, miner common.Address) (map[common.Address][]uint64, []string) {
+	sm := sstorage.NewShardManager(contract, kvSizeBits, kvEntriesBits)
+	sstorage.ContractToShardManager[contract] = sm
+	kvSize := uint64(1) << kvSizeBits
+	kvEntries := uint64(1) << kvEntriesBits
 
-func TestGenerateBlockAndImportClique(t *testing.T) {
-	testGenerateBlockAndImport(t, true)
-}
-
-func testGenerateBlockAndImport(t *testing.T, isClique bool) {
-	var (
-		engine      consensus.Engine
-		chainConfig *params.ChainConfig
-		db          = rawdb.NewMemoryDatabase()
-	)
-	if isClique {
-		chainConfig = params.AllCliqueProtocolChanges
-		chainConfig.Clique = &params.CliqueConfig{Period: 1, Epoch: 30000}
-		engine = clique.New(chainConfig.Clique, db)
-	} else {
-		chainConfig = params.AllEthashProtocolChanges
-		engine = ethash.NewFaker()
-	}
-
-	chainConfig.LondonBlock = big.NewInt(0)
-	w, b := newTestWorker(t, chainConfig, engine, db, 0)
-	defer w.close()
-
-	// This test chain imports the mined blocks.
-	db2 := rawdb.NewMemoryDatabase()
-	b.genesis.MustCommit(db2)
-	chain, _ := core.NewBlockChain(db2, nil, b.chain.Config(), engine, vm.Config{}, nil, nil)
-	defer chain.Stop()
-
-	// Ignore empty commit here for less noise.
-	w.skipSealHook = func(task *task) bool {
-		return len(task.receipts) == 0
-	}
-
-	// Wait for mined blocks.
-	sub := w.mux.Subscribe(core.NewMinedBlockEvent{})
-	defer sub.Unsubscribe()
-
-	// Start mining!
-	w.start()
-
-	for i := 0; i < 5; i++ {
-		b.txPool.AddLocal(b.newRandomTx(true))
-		b.txPool.AddLocal(b.newRandomTx(false))
-		w.postSideBlock(core.ChainSideEvent{Block: b.newRandomUncle()})
-		w.postSideBlock(core.ChainSideEvent{Block: b.newRandomUncle()})
-
-		select {
-		case ev := <-sub.Chan():
-			block := ev.Data.(core.NewMinedBlockEvent).Block
-			if _, err := chain.InsertChain([]*types.Block{block}); err != nil {
-				t.Fatalf("failed to insert new mined block %d: %v", block.NumberU64(), err)
+	files := make([]string, 0)
+	for _, shardIdx := range shardIdxList {
+		sm.AddDataShard(shardIdx)
+		for i := uint64(0); i < filePerShard; i++ {
+			fileId := shardIdx*filePerShard + i
+			fileName := fmt.Sprintf(".\\ss%d.dat", fileId)
+			files = append(files, fileName)
+			chunkPerfile := kvEntries * kvSize / sstorage.CHUNK_SIZE / filePerShard
+			startChunkId := fileId * chunkPerfile
+			endChunkId := (fileId + 1) * chunkPerfile
+			_, err := sstorage.Create(fileName, startChunkId, endChunkId, 0, kvSize, sstorage.ENCODE_KECCAK_256, miner)
+			if err != nil {
+				log.Crit("open failed", "error", err)
 			}
-		case <-time.After(3 * time.Second): // Worker needs 1s to include new changes.
-			t.Fatalf("timeout")
+
+			var df *sstorage.DataFile
+			df, err = sstorage.OpenDataFile(fileName)
+			if err != nil {
+				log.Crit("open failed", "error", err)
+			}
+			sm.AddDataFile(df)
+		}
+	}
+
+	shards := make(map[common.Address][]uint64)
+	shards[contract] = shardIdxList
+	return shards, files
+}
+
+// getSlotHash generate slot hash to fetch Data from stateDB
+func getSlotHash(slotIdx uint64, key common.Hash) common.Hash {
+	slot := uint256.NewInt(slotIdx).Bytes32()
+
+	keydata := key.Bytes()
+	slotdata := slot[:]
+	data := append(keydata, slotdata...)
+
+	hasher := sha3.NewLegacyKeccak256().(crypto.KeccakState)
+	hasher.Write(data)
+
+	hashRes := common.Hash{}
+	hasher.Read(hashRes[:])
+
+	return hashRes
+}
+
+func generateMetadata(idx, size uint64, hash common.Hash) common.Hash {
+	meta := make([]byte, 0)
+	meta = append(meta, hash[:24]...)
+
+	size_bs := make([]byte, 8)
+	binary.BigEndian.PutUint64(size_bs, size)
+	meta = append(meta, size_bs[5:]...)
+
+	idx_bs := make([]byte, 8)
+	binary.BigEndian.PutUint64(idx_bs, idx)
+	meta = append(meta, idx_bs[3:]...)
+
+	return common.BytesToHash(meta)
+}
+
+func getSKey(contract common.Address, idx uint64) common.Hash {
+	slot := uint256.NewInt(idx).Bytes32()
+
+	keydata := contract.Bytes()
+	slotdata := slot[:]
+	data := append(keydata, slotdata...)
+
+	return crypto.Keccak256Hash(data)
+}
+
+// makeKVStorage generate a range of storage Data and its metadata
+func makeKVStorage(stateDB *state.StateDB, contract common.Address, shards []uint64, kvCount uint64, shardIsFull bool) {
+	sm, _ := sstorage.ContractToShardManager[contract]
+
+	for _, sidx := range shards {
+		last := (sidx + 1) * kvCount
+		if sidx == shards[len(shards)-1] && !shardIsFull {
+			last = sidx*kvCount + rand.Uint64()%kvCount
+		}
+		for i := sidx * kvCount; i < (sidx+1)*kvCount; i++ {
+			var val []byte
+			metaHash := crypto.Keccak256Hash(val)
+			if i < last {
+				val = make([]byte, 8)
+				binary.BigEndian.PutUint64(val, i)
+				val = append(contract.Bytes(), val...)
+				skey := getSKey(contract, i)
+				key := getSlotHash(2, uint256.NewInt(i).Bytes32())
+				stateDB.SetState(contract, key, skey)
+
+				metaHash = crypto.Keccak256Hash(val)
+				meta := generateMetadata(i, uint64(len(val)), metaHash)
+				key = getSlotHash(1, skey)
+				stateDB.SetState(contract, key, meta)
+			}
+
+			sm.TryWrite(i, val, common.BytesToHash(append(metaHash[:24], make([]byte, 8)...)))
 		}
 	}
 }
 
-func TestEmptyWorkEthash(t *testing.T) {
-	testEmptyWork(t, ethashChainConfig, ethash.NewFaker())
-}
-func TestEmptyWorkClique(t *testing.T) {
-	testEmptyWork(t, cliqueChainConfig, clique.New(cliqueChainConfig.Clique, rawdb.NewMemoryDatabase()))
+func updateMiningInfoAndInsertNewBlock(pinfo *core.MiningInfo, chain *wrapBlockChain, engine *ethash.Ethash, db ethdb.Database) error {
+	info := new(core.MiningInfo)
+	info.MiningHash = crypto.Keccak256Hash(pinfo.MiningHash.Bytes())
+	fmt.Println(info.MiningHash.Hex())
+	info.LastMineTime = uint64(time.Now().Unix())
+	info.Difficulty = diff
+	info.BlockMined = blockMined
+	chain.saveMiningInfo(0, info)
+	blocks, _ := core.GenerateChain(ethashChainConfig, chain.CurrentBlock(), engine, db, 1, func(i int, gen *core.BlockGen) {
+		gen.SetCoinbase(testBankAddress)
+	})
+	if _, err := chain.InsertChain(blocks); err != nil {
+		return fmt.Errorf("failed to insert origin chain: %v", err)
+	}
+	return nil
 }
 
-func testEmptyWork(t *testing.T, chainConfig *params.ChainConfig, engine consensus.Engine) {
-	defer engine.Close()
+func verifyTaskResult(stateDB *state.StateDB, chain BlockChain, r *result) error {
+	for i, proofs := range r.proofs {
+		_, meta, err := core.GetSstorageMetadata(stateDB, contract, r.kvIdxs[i])
+		if err != nil {
+			return err
+		}
+		data, got, err := r.task.shardManager.TryReadChunk(r.kvIdxs[i]*r.task.shardManager.ChunksPerKv()+r.chunkIdxs[i], common.BytesToHash(meta.HashInMeta))
+		if err != nil {
+			return err
+		}
+		if !got {
+			return fmt.Errorf("fail to get data for contract %s vkidx %d", contract.Hex(), r.kvIdxs[i])
+		}
+		vr := verify(meta.HashInMeta, crypto.Keccak256Hash(data), r.chunkIdxs[i], proofs)
+		if !vr {
+			return fmt.Errorf("verify proofs fail for index %d fail", r.kvIdxs[i])
+		}
+	}
+	return nil
+}
 
-	w, _ := newTestWorker(t, chainConfig, engine, rawdb.NewMemoryDatabase(), 0)
+func verifyTask(t *task, expectInfo *core.MiningInfo) bool {
+	if t == nil {
+		return false
+	}
+	return t.info.Equal(expectInfo)
+}
+
+func TestWork_SingleShard(test *testing.T) {
+	var (
+		shardIdxList = []uint64{0}
+		engine       = ethash.NewFaker()
+	)
+
+	w, infos, files, _ := newTestWorker(test, ethashChainConfig, engine, rawdb.NewMemoryDatabase(), shardIdxList, 0, true)
+
 	defer w.close()
+	defer engine.Close()
+	defer func(files []string) {
+		for _, file := range files {
+			os.Remove(file)
+		}
+	}(files)
 
 	var (
-		taskIndex int
-		taskCh    = make(chan struct{}, 2)
+		taskMined int
+		resultGet int
+		taskCh    = make(chan *task, 2)
+		resultCh  = make(chan *result, 2)
 	)
-	checkEqual := func(t *testing.T, task *task, index int) {
-		// The first empty work without any txs included
-		receiptLen, balance := 0, big.NewInt(0)
-		if index == 1 {
-			// The second full work with 1 tx included
-			receiptLen, balance = 1, big.NewInt(1000)
-		}
-		if len(task.receipts) != receiptLen {
-			t.Fatalf("receipt number mismatch: have %d, want %d", len(task.receipts), receiptLen)
-		}
-		if task.state.GetBalance(testUserAddress).Cmp(balance) != 0 {
-			t.Fatalf("account balance mismatch: have %d, want %d", task.state.GetBalance(testUserAddress), balance)
-		}
-	}
 	w.newTaskHook = func(task *task) {
-		if task.block.NumberU64() == 1 {
-			checkEqual(t, task, taskIndex)
-			taskIndex += 1
-			taskCh <- struct{}{}
-		}
+		taskMined += 1
+		taskCh <- task
 	}
-	w.skipSealHook = func(task *task) bool { return true }
-	w.fullTaskHook = func() {
-		time.Sleep(100 * time.Millisecond)
+	w.newResultHook = func(result *result) {
+		resultGet += 1
+		resultCh <- result
 	}
+
 	w.start() // Start mining!
 	for i := 0; i < 2; i += 1 {
 		select {
-		case <-taskCh:
-		case <-time.NewTimer(3 * time.Second).C:
-			t.Error("new task timeout")
-		}
-	}
-}
-
-func TestStreamUncleBlock(t *testing.T) {
-	ethash := ethash.NewFaker()
-	defer ethash.Close()
-
-	w, b := newTestWorker(t, ethashChainConfig, ethash, rawdb.NewMemoryDatabase(), 1)
-	defer w.close()
-
-	var taskCh = make(chan struct{})
-
-	taskIndex := 0
-	w.newTaskHook = func(task *task) {
-		if task.block.NumberU64() == 2 {
-			// The first task is an empty task, the second
-			// one has 1 pending tx, the third one has 1 tx
-			// and 1 uncle.
-			if taskIndex == 2 {
-				have := task.block.Header().UncleHash
-				want := types.CalcUncleHash([]*types.Header{b.uncleBlock.Header()})
-				if have != want {
-					t.Errorf("uncle hash mismatch: have %s, want %s", have.Hex(), want.Hex())
-				}
+		case t := <-taskCh:
+			info, ok := infos[t.shardIdx]
+			if !ok || info == nil {
+				test.Error("new task timeout")
 			}
-			taskCh <- struct{}{}
-			taskIndex += 1
-		}
-	}
-	w.skipSealHook = func(task *task) bool {
-		return true
-	}
-	w.fullTaskHook = func() {
-		time.Sleep(100 * time.Millisecond)
-	}
-	w.start()
-
-	for i := 0; i < 2; i += 1 {
-		select {
-		case <-taskCh:
-		case <-time.NewTimer(time.Second).C:
-			t.Error("new task timeout")
-		}
-	}
-
-	w.postSideBlock(core.ChainSideEvent{Block: b.uncleBlock})
-
-	select {
-	case <-taskCh:
-	case <-time.NewTimer(time.Second).C:
-		t.Error("new task timeout")
-	}
-}
-
-func TestRegenerateMiningBlockEthash(t *testing.T) {
-	testRegenerateMiningBlock(t, ethashChainConfig, ethash.NewFaker())
-}
-
-func TestRegenerateMiningBlockClique(t *testing.T) {
-	testRegenerateMiningBlock(t, cliqueChainConfig, clique.New(cliqueChainConfig.Clique, rawdb.NewMemoryDatabase()))
-}
-
-func testRegenerateMiningBlock(t *testing.T, chainConfig *params.ChainConfig, engine consensus.Engine) {
-	defer engine.Close()
-
-	w, b := newTestWorker(t, chainConfig, engine, rawdb.NewMemoryDatabase(), 0)
-	defer w.close()
-
-	var taskCh = make(chan struct{}, 3)
-
-	taskIndex := 0
-	w.newTaskHook = func(task *task) {
-		if task.block.NumberU64() == 1 {
-			// The first task is an empty task, the second
-			// one has 1 pending tx, the third one has 2 txs
-			if taskIndex == 2 {
-				receiptLen, balance := 2, big.NewInt(2000)
-				if len(task.receipts) != receiptLen {
-					t.Errorf("receipt number mismatch: have %d, want %d", len(task.receipts), receiptLen)
-				}
-				if task.state.GetBalance(testUserAddress).Cmp(balance) != 0 {
-					t.Errorf("account balance mismatch: have %d, want %d", task.state.GetBalance(testUserAddress), balance)
-				}
+			if !verifyTask(t, info) {
+				test.Error("verify task fail")
 			}
-			taskCh <- struct{}{}
-			taskIndex += 1
-		}
-	}
-	w.skipSealHook = func(task *task) bool {
-		return true
-	}
-	w.fullTaskHook = func() {
-		time.Sleep(100 * time.Millisecond)
-	}
-
-	w.start()
-	// Ignore the first two works
-	for i := 0; i < 2; i += 1 {
-		select {
-		case <-taskCh:
-		case <-time.NewTimer(time.Second).C:
-			t.Error("new task timeout")
-		}
-	}
-	b.txPool.AddLocals(newTxs)
-	time.Sleep(time.Second)
-
-	select {
-	case <-taskCh:
-	case <-time.NewTimer(time.Second).C:
-		t.Error("new task timeout")
-	}
-}
-
-func TestAdjustIntervalEthash(t *testing.T) {
-	testAdjustInterval(t, ethashChainConfig, ethash.NewFaker())
-}
-
-func TestAdjustIntervalClique(t *testing.T) {
-	testAdjustInterval(t, cliqueChainConfig, clique.New(cliqueChainConfig.Clique, rawdb.NewMemoryDatabase()))
-}
-
-func testAdjustInterval(t *testing.T, chainConfig *params.ChainConfig, engine consensus.Engine) {
-	defer engine.Close()
-
-	w, _ := newTestWorker(t, chainConfig, engine, rawdb.NewMemoryDatabase(), 0)
-	defer w.close()
-
-	w.skipSealHook = func(task *task) bool {
-		return true
-	}
-	w.fullTaskHook = func() {
-		time.Sleep(100 * time.Millisecond)
-	}
-	var (
-		progress = make(chan struct{}, 10)
-		result   = make([]float64, 0, 10)
-		index    = 0
-		start    uint32
-	)
-	w.resubmitHook = func(minInterval time.Duration, recommitInterval time.Duration) {
-		// Short circuit if interval checking hasn't started.
-		if atomic.LoadUint32(&start) == 0 {
+		case r := <-resultCh:
+			fmt.Println("getresult")
+			stateDB, _ := w.chain.State()
+			if err := verifyTaskResult(stateDB, w.chain, r); err != nil {
+				test.Error("verify mined result failed", err.Error())
+			}
 			return
+		case <-time.NewTimer(3 * time.Second).C:
+			test.Error("new task timeout")
 		}
-		var wantMinInterval, wantRecommitInterval time.Duration
-
-		switch index {
-		case 0:
-			wantMinInterval, wantRecommitInterval = 3*time.Second, 3*time.Second
-		case 1:
-			origin := float64(3 * time.Second.Nanoseconds())
-			estimate := origin*(1-intervalAdjustRatio) + intervalAdjustRatio*(origin/0.8+intervalAdjustBias)
-			wantMinInterval, wantRecommitInterval = 3*time.Second, time.Duration(estimate)*time.Nanosecond
-		case 2:
-			estimate := result[index-1]
-			min := float64(3 * time.Second.Nanoseconds())
-			estimate = estimate*(1-intervalAdjustRatio) + intervalAdjustRatio*(min-intervalAdjustBias)
-			wantMinInterval, wantRecommitInterval = 3*time.Second, time.Duration(estimate)*time.Nanosecond
-		case 3:
-			wantMinInterval, wantRecommitInterval = time.Second, time.Second
-		}
-
-		// Check interval
-		if minInterval != wantMinInterval {
-			t.Errorf("resubmit min interval mismatch: have %v, want %v ", minInterval, wantMinInterval)
-		}
-		if recommitInterval != wantRecommitInterval {
-			t.Errorf("resubmit interval mismatch: have %v, want %v", recommitInterval, wantRecommitInterval)
-		}
-		result = append(result, float64(recommitInterval.Nanoseconds()))
-		index += 1
-		progress <- struct{}{}
-	}
-	w.start()
-
-	time.Sleep(time.Second) // Ensure two tasks have been summitted due to start opt
-	atomic.StoreUint32(&start, 1)
-
-	w.setRecommitInterval(3 * time.Second)
-	select {
-	case <-progress:
-	case <-time.NewTimer(time.Second).C:
-		t.Error("interval reset timeout")
-	}
-
-	w.resubmitAdjustCh <- &intervalAdjust{inc: true, ratio: 0.8}
-	select {
-	case <-progress:
-	case <-time.NewTimer(time.Second).C:
-		t.Error("interval reset timeout")
-	}
-
-	w.resubmitAdjustCh <- &intervalAdjust{inc: false}
-	select {
-	case <-progress:
-	case <-time.NewTimer(time.Second).C:
-		t.Error("interval reset timeout")
-	}
-
-	w.setRecommitInterval(500 * time.Millisecond)
-	select {
-	case <-progress:
-	case <-time.NewTimer(time.Second).C:
-		t.Error("interval reset timeout")
 	}
 }
 
-func TestGetSealingWorkEthash(t *testing.T) {
-	testGetSealingWork(t, ethashChainConfig, ethash.NewFaker(), false)
-}
+func TestWork_MultiShards(test *testing.T) {
+	var (
+		shardIdxList = []uint64{0, 1}
+		engine       = ethash.NewFaker()
+	)
 
-func TestGetSealingWorkClique(t *testing.T) {
-	testGetSealingWork(t, cliqueChainConfig, clique.New(cliqueChainConfig.Clique, rawdb.NewMemoryDatabase()), false)
-}
+	w, _, files, _ := newTestWorker(test, ethashChainConfig, engine, rawdb.NewMemoryDatabase(), shardIdxList, 0, true)
 
-func TestGetSealingWorkPostMerge(t *testing.T) {
-	local := new(params.ChainConfig)
-	*local = *ethashChainConfig
-	local.TerminalTotalDifficulty = big.NewInt(0)
-	testGetSealingWork(t, local, ethash.NewFaker(), true)
-}
-
-func testGetSealingWork(t *testing.T, chainConfig *params.ChainConfig, engine consensus.Engine, postMerge bool) {
-	defer engine.Close()
-
-	w, b := newTestWorker(t, chainConfig, engine, rawdb.NewMemoryDatabase(), 0)
 	defer w.close()
+	defer engine.Close()
+	defer func(files []string) {
+		for _, file := range files {
+			os.Remove(file)
+		}
+	}(files)
 
-	w.setExtra([]byte{0x01, 0x02})
-	w.postSideBlock(core.ChainSideEvent{Block: b.uncleBlock})
-
-	w.skipSealHook = func(task *task) bool {
-		return true
+	var (
+		taskMined int
+		resultGet int
+		resultCh  = make(chan *result, 2)
+	)
+	w.newTaskHook = func(task *task) {
+		taskMined += 1
 	}
-	w.fullTaskHook = func() {
-		time.Sleep(100 * time.Millisecond)
-	}
-	timestamp := uint64(time.Now().Unix())
-	assertBlock := func(block *types.Block, number uint64, coinbase common.Address, random common.Hash) {
-		if block.Time() != timestamp {
-			// Sometime the timestamp will be mutated if the timestamp
-			// is even smaller than parent block's. It's OK.
-			t.Logf("Invalid timestamp, want %d, get %d", timestamp, block.Time())
-		}
-		if len(block.Uncles()) != 0 {
-			t.Error("Unexpected uncle block")
-		}
-		_, isClique := engine.(*clique.Clique)
-		if !isClique {
-			if len(block.Extra()) != 0 {
-				t.Error("Unexpected extra field")
-			}
-			if block.Coinbase() != coinbase {
-				t.Errorf("Unexpected coinbase got %x want %x", block.Coinbase(), coinbase)
-			}
-		} else {
-			if block.Coinbase() != (common.Address{}) {
-				t.Error("Unexpected coinbase")
-			}
-		}
-		if !isClique {
-			if block.MixDigest() != random {
-				t.Error("Unexpected mix digest")
-			}
-		}
-		if block.Nonce() != 0 {
-			t.Error("Unexpected block nonce")
-		}
-		if block.NumberU64() != number {
-			t.Errorf("Mismatched block number, want %d got %d", number, block.NumberU64())
-		}
-	}
-	var cases = []struct {
-		parent       common.Hash
-		coinbase     common.Address
-		random       common.Hash
-		expectNumber uint64
-		expectErr    bool
-	}{
-		{
-			b.chain.Genesis().Hash(),
-			common.HexToAddress("0xdeadbeef"),
-			common.HexToHash("0xcafebabe"),
-			uint64(1),
-			false,
-		},
-		{
-			b.chain.CurrentBlock().Hash(),
-			common.HexToAddress("0xdeadbeef"),
-			common.HexToHash("0xcafebabe"),
-			b.chain.CurrentBlock().NumberU64() + 1,
-			false,
-		},
-		{
-			b.chain.CurrentBlock().Hash(),
-			common.Address{},
-			common.HexToHash("0xcafebabe"),
-			b.chain.CurrentBlock().NumberU64() + 1,
-			false,
-		},
-		{
-			b.chain.CurrentBlock().Hash(),
-			common.Address{},
-			common.Hash{},
-			b.chain.CurrentBlock().NumberU64() + 1,
-			false,
-		},
-		{
-			common.HexToHash("0xdeadbeef"),
-			common.HexToAddress("0xdeadbeef"),
-			common.HexToHash("0xcafebabe"),
-			0,
-			true,
-		},
+	w.newResultHook = func(result *result) {
+		resultGet += 1
+		resultCh <- result
 	}
 
-	// This API should work even when the automatic sealing is not enabled
-	for _, c := range cases {
-		block, err := w.getSealingBlock(c.parent, timestamp, c.coinbase, c.random)
-		if c.expectErr {
-			if err == nil {
-				t.Error("Expect error but get nil")
+	w.start() // Start mining!
+	for i := 0; i < 2; i += 1 {
+		select {
+		case r := <-resultCh:
+			fmt.Println("getresult")
+			stateDB, _ := w.chain.State()
+			if err := verifyTaskResult(stateDB, w.chain, r); err != nil {
+				test.Error("verify mined result failed", err.Error())
 			}
-		} else {
-			if err != nil {
-				t.Errorf("Unexpected error %v", err)
-			}
-			assertBlock(block, c.expectNumber, c.coinbase, c.random)
+		case <-time.NewTimer(3 * time.Second).C:
+			test.Error("new task timeout")
 		}
 	}
-
-	// This API should work even when the automatic sealing is enabled
-	w.start()
-	for _, c := range cases {
-		block, err := w.getSealingBlock(c.parent, timestamp, c.coinbase, c.random)
-		if c.expectErr {
-			if err == nil {
-				t.Error("Expect error but get nil")
-			}
-		} else {
-			if err != nil {
-				t.Errorf("Unexpected error %v", err)
-			}
-			assertBlock(block, c.expectNumber, c.coinbase, c.random)
-		}
+	if resultGet != 2 {
+		test.Error("expected result count is 2")
 	}
 }
+
+func TestWork_TriggerByNewBlock(test *testing.T) {
+	var (
+		shardIdxList = []uint64{0}
+		engine       = ethash.NewFaker()
+		db           = rawdb.NewMemoryDatabase()
+	)
+
+	w, _, files, _ := newTestWorker(test, ethashChainConfig, engine, db, shardIdxList, 0, true)
+
+	defer w.close()
+	defer engine.Close()
+	defer func(files []string) {
+		for _, file := range files {
+			os.Remove(file)
+		}
+	}(files)
+
+	var (
+		taskMined int
+		resultGet int
+		resultCh  = make(chan *result, 2)
+	)
+	w.newTaskHook = func(task *task) {
+		taskMined += 1
+	}
+	w.newResultHook = func(result *result) {
+		resultGet += 1
+		resultCh <- result
+	}
+
+	w.start() // Start mining!
+	for i := 0; i < 2; i += 1 {
+		select {
+		case r := <-resultCh:
+			fmt.Println("getresult")
+			stateDB, _ := w.chain.State()
+			if err := verifyTaskResult(stateDB, w.chain, r); err != nil {
+				test.Error("verify mined result failed", err.Error())
+			}
+			updateMiningInfoAndInsertNewBlock(r.task.info, w.chain.(*wrapBlockChain), engine, db)
+		case <-time.NewTimer(3 * time.Second).C:
+			test.Error("new task timeout")
+		}
+	}
+	if resultGet != 2 {
+		test.Error("expected result count is 2")
+	}
+}
+
+func TestWork_ShardIsNotFull(test *testing.T) {
+	var (
+		taskMined    int
+		resultGet    int
+		resultCh     = make(chan *result, 2)
+		shardIdxList = []uint64{0}
+		engine       = ethash.NewFaker()
+		db           = rawdb.NewMemoryDatabase()
+	)
+
+	w, _, files, _ := newTestWorker(test, ethashChainConfig, engine, db, shardIdxList, 0, false)
+
+	defer w.close()
+	defer engine.Close()
+	defer func(files []string) {
+		for _, file := range files {
+			os.Remove(file)
+		}
+	}(files)
+
+	w.newTaskHook = func(task *task) {
+		taskMined += 1
+	}
+	w.newResultHook = func(result *result) {
+		resultGet += 1
+		resultCh <- result
+	}
+
+	w.start() // Start mining!
+	select {
+	case r := <-resultCh:
+		fmt.Println("getresult")
+		stateDB, _ := w.chain.State()
+		if err := verifyTaskResult(stateDB, w.chain, r); err != nil {
+			test.Error("verify mined result failed", err.Error())
+		}
+	case <-time.NewTimer(3 * time.Second).C:
+		test.Error("new task timeout")
+	}
+}
+
+func TestWork_StartAndStopTask(test *testing.T) {
+	var (
+		shardIdxList = []uint64{0, 1, 2}
+		engine       = ethash.NewFaker()
+	)
+
+	w, _, files, _ := newTestWorker(test, ethashChainConfig, engine, rawdb.NewMemoryDatabase(), shardIdxList, 0, true)
+
+	defer w.close()
+	defer engine.Close()
+	defer func(files []string) {
+		for _, file := range files {
+			os.Remove(file)
+		}
+	}(files)
+
+	var (
+		taskMined int
+		resultGet int
+		resultCh  = make(chan *result, 2)
+	)
+	w.newTaskHook = func(task *task) {
+		taskMined += 1
+	}
+	w.newResultHook = func(result *result) {
+		resultGet += 1
+		resultCh <- result
+	}
+
+	w.stopTask(contract, 0)
+	w.start() // Start mining!
+	for i := 0; i < 3; i += 1 {
+		select {
+		case r := <-resultCh:
+			//	fmt.Println("getresult")
+			stateDB, _ := w.chain.State()
+			if err := verifyTaskResult(stateDB, w.chain, r); err != nil {
+				test.Error("verify mined result failed", err.Error())
+			}
+		case <-time.NewTimer(2 * time.Second).C:
+			fmt.Println("get new result time out")
+		}
+	}
+	if resultGet != 2 {
+		test.Error("expected result count is 2")
+	}
+
+	w.startTask(contract, 0)
+	select {
+	case r := <-resultCh:
+		stateDB, _ := w.chain.State()
+		if err := verifyTaskResult(stateDB, w.chain, r); err != nil {
+			test.Error("verify mined result failed", err.Error())
+		}
+	case <-time.NewTimer(3 * time.Second).C:
+		test.Error("new task timeout")
+	}
+	if resultGet != 3 {
+		test.Error("expected result count is 3")
+	}
+}
+
+func TestWork_LargeKV(test *testing.T) {
+	var (
+		shardIdxList = []uint64{0}
+		engine       = ethash.NewFaker()
+		db           = rawdb.NewMemoryDatabase()
+	)
+
+	w, _, files, _ := newTestWorker(test, ethashChainConfig, engine, db, shardIdxList, 2, true)
+
+	defer w.close()
+	defer engine.Close()
+	defer func(files []string) {
+		for _, file := range files {
+			os.Remove(file)
+		}
+	}(files)
+
+	var (
+		taskMined int
+		resultGet int
+		resultCh  = make(chan *result, 2)
+	)
+	w.newTaskHook = func(task *task) {
+		taskMined += 1
+	}
+	w.newResultHook = func(result *result) {
+		resultGet += 1
+		resultCh <- result
+	}
+
+	w.start()
+	select {
+	case r := <-resultCh:
+		stateDB, _ := w.chain.State()
+		if err := verifyTaskResult(stateDB, w.chain, r); err != nil {
+			test.Error("verify mined result failed", err.Error())
+		}
+	case <-time.NewTimer(3 * time.Second).C:
+		test.Error("new task timeout")
+	}
+}
+
+// chenkPerKV
+// update task info trigger by new block
+// multi shard support
+// shard is not full
+// start and stop mine
