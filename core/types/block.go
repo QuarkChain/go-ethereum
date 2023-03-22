@@ -193,19 +193,6 @@ func NewMindReadingOutputIterator(b *Block) *MindReadingOutputIterator {
 	}
 }
 
-func (it *MindReadingOutputIterator) FindMindReadingOutput(tx *Transaction) []byte {
-	for {
-		output := it.uncles[it.index].GetMindReadingOutput(tx)
-		if output != nil {
-			return output
-		}
-		if it.index >= len(it.uncles) {
-			return nil
-		}
-		it.index++
-	}
-}
-
 func (it *MindReadingOutputIterator) GetNextMindReadingOutput(tx *Transaction) []byte {
 	if it.index >= len(it.uncles) {
 		return nil
@@ -292,6 +279,17 @@ func NewBlock(header *Header, txs []*Transaction, uncles []*Header, receipts []*
 	}
 
 	return b
+}
+
+func (b *Block) FindMindReadingOutput(tx *Transaction) []byte {
+
+	for i := 0; i < len(b.uncles); i++ {
+		output := b.uncles[i].GetMindReadingOutput(tx)
+		if output != nil {
+			return output
+		}
+	}
+	return nil
 }
 
 // NewBlockWithHeader creates a block with the given header data. The

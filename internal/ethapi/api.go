@@ -1627,8 +1627,7 @@ func (s *PublicTransactionPoolAPI) GetTransactionReceipt(ctx context.Context, ha
 
 	// obtain mindReadingOutput from block.uncles
 	block, err := s.b.BlockByHash(ctx, blockHash)
-	mrIterator := types.NewMindReadingOutputIterator(block)
-	var mindReadingOutput = mrIterator.FindMindReadingOutput(tx)
+	mindReadingOutput := block.FindMindReadingOutput(tx)
 
 	// Derive the sender.
 	bigblock := new(big.Int).SetUint64(blockNumber)
@@ -1690,8 +1689,7 @@ func (s *PublicTransactionPoolAPI) GetMindReadingOutput(ctx context.Context, has
 
 	// get external_call_result from uncles
 	block, err := s.b.BlockByHash(ctx, blockHash)
-	mrIterator := types.NewMindReadingOutputIterator(block)
-	var mindReadingOutput = mrIterator.FindMindReadingOutput(tx)
+	mindReadingOutput := block.FindMindReadingOutput(tx)
 
 	if mindReadingOutput == nil {
 		return nil, fmt.Errorf("can't find the externalCallResult for the given txhash %s", hash)
