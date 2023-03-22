@@ -183,7 +183,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			chainConfig.MindReading.EnableBlockNumber = config.MindReadingEnableBlockNumber
 		}
 		if config.IsMiner && chainConfig.MindReading.EnableBlockNumber.Cmp(big.NewInt(0)) >= 0 && chainConfig.MindReading.CallRpc == "" {
-			return nil, fmt.Errorf("Validator should enable MindReading with valid MindReadingCallRpc ")
+			return nil, fmt.Errorf("Validator must enable MindReading with valid MindReadingCallRpc ")
 		}
 	}
 

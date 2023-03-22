@@ -297,7 +297,7 @@ type MindReadingOutput struct {
 // MindReadingOutput returns the MindReadingOutput for the given transaction hash
 func (ec *Client) MindReadingOutput(ctx context.Context, txHash common.Hash) (*MindReadingOutput, error) {
 	var r *MindReadingOutput
-	err := ec.c.CallContext(ctx, &r, "eth_getExternalCallResult", txHash)
+	err := ec.c.CallContext(ctx, &r, "eth_getMindReadingOutput", txHash)
 	if err == nil {
 		if r == nil {
 			return nil, ethereum.NotFound
