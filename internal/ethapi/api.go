@@ -1292,10 +1292,10 @@ type RPCTransaction struct {
 	Type              hexutil.Uint64    `json:"type"`
 	Accesses          *types.AccessList `json:"accessList,omitempty"`
 	ChainID           *hexutil.Big      `json:"chainId,omitempty"`
-	MindReadingOutput *hexutil.Bytes    `json:"mindReadingOutput"`
 	V                 *hexutil.Big      `json:"v"`
 	R                 *hexutil.Big      `json:"r"`
 	S                 *hexutil.Big      `json:"s"`
+	MindReadingOutput *hexutil.Bytes    `json:"mindReadingOutput"`
 }
 
 // newRPCTransaction returns a transaction that will serialize to the RPC
@@ -1627,15 +1627,9 @@ func (s *PublicTransactionPoolAPI) GetTransactionReceipt(ctx context.Context, ha
 
 	// obtain mindReadingOutput from block.uncles
 	block, err := s.b.BlockByHash(ctx, blockHash)
-	var mindReadingOutput []byte
-	if block != nil {
-		uncles := block.Uncles()
-		for _, uncle := range uncles {
-			if uncle.TxHash == hash {
-				mindReadingOutput = uncle.Extra
-			}
-		}
-	}
+	mrIterator := types.NewMindReadingOutputIterator(block)
+	var mindReadingOutput = mrIterator.FindMindReadingOutput(tx)
+
 	// Derive the sender.
 	bigblock := new(big.Int).SetUint64(blockNumber)
 	signer := types.MakeSigner(s.b.ChainConfig(), bigblock)
@@ -1689,27 +1683,17 @@ func (s *PublicTransactionPoolAPI) GetTransactionReceipt(ctx context.Context, ha
 
 // GetMindReadingOutput returns the output after executing MindReading module
 func (s *PublicTransactionPoolAPI) GetMindReadingOutput(ctx context.Context, hash common.Hash) (map[string]interface{}, error) {
-	_, blockHash, blockNumber, index, err := s.b.GetTransaction(ctx, hash)
+	tx, blockHash, blockNumber, index, err := s.b.GetTransaction(ctx, hash)
 	if err != nil {
 		return nil, nil
 	}
 
 	// get external_call_result from uncles
 	block, err := s.b.BlockByHash(ctx, blockHash)
-	var mindReadingOutput []byte
-	var txWithExternalCallResult bool
-	if block != nil {
-		uncles := block.Uncles()
-		for _, uncle := range uncles {
-			if uncle.TxHash == hash {
-				mindReadingOutput = uncle.Extra
-				txWithExternalCallResult = true
-				break
-			}
-		}
-	}
+	mrIterator := types.NewMindReadingOutputIterator(block)
+	var mindReadingOutput = mrIterator.FindMindReadingOutput(tx)
 
-	if !txWithExternalCallResult {
+	if mindReadingOutput == nil {
 		return nil, fmt.Errorf("can't find the externalCallResult for the given txhash %s", hash)
 	}
 

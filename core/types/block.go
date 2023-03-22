@@ -193,6 +193,19 @@ func NewMindReadingOutputIterator(b *Block) *MindReadingOutputIterator {
 	}
 }
 
+func (it *MindReadingOutputIterator) FindMindReadingOutput(tx *Transaction) []byte {
+	for {
+		output := it.uncles[it.index].GetMindReadingOutput(tx)
+		if output != nil {
+			return output
+		}
+		if it.index >= len(it.uncles) {
+			return nil
+		}
+		it.index++
+	}
+}
+
 func (it *MindReadingOutputIterator) GetNextMindReadingOutput(tx *Transaction) []byte {
 	if it.index >= len(it.uncles) {
 		return nil
