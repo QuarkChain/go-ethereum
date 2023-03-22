@@ -63,7 +63,7 @@ func (c *blockChain) CurrentBlock() *types.Block {
 	return c.block
 }
 
-func (c *blockChain) VerifyAndWriteKV(contract common.Address, data map[uint64][]byte, provderAddr common.Address) (uint64, uint64, []uint64, error) {
+func (c *blockChain) VerifyAndWriteKV(contract common.Address, data map[uint64][]byte, providerAddr common.Address) (uint64, uint64, []uint64, error) {
 	var (
 		synced      uint64
 		syncedBytes uint64
@@ -84,7 +84,7 @@ func (c *blockChain) VerifyAndWriteKV(contract common.Address, data map[uint64][
 			continue
 		}
 
-		rawData, err := core.VerifyKV(sm, idx, val, meta, true)
+		rawData, err := core.VerifyKV(sm, idx, val, meta, true, providerAddr)
 		if err != nil {
 			log.Warn("processKVResponse: verify vkv fail", "error", err)
 			continue
@@ -220,10 +220,8 @@ func (t *testPeer) RequestKVRange(id uint64, contract common.Address, shardId ui
 }
 
 // RequestShardList fetches shard list support by the peer
-func (p *testPeer) RequestShardList(shards map[common.Address][]uint64) error {
-	p.logger.Trace("Fetching Shard list", "shards", shards)
-	//	p.remote
-
+func (t *testPeer) RequestShardList(shards map[common.Address][]uint64) error {
+	t.logger.Trace("Fetching Shard list", "shards", shards)
 	return nil
 }
 
@@ -239,7 +237,7 @@ func defaultKVRangeRequestHandler(t *testPeer, id uint64, contract common.Addres
 	if vals == nil {
 		t.test.Error("CreateKVRequestResponse fail: vals is nul.")
 	}
-	if err := t.remote.OnKVRange(t, id, vals); err != nil {
+	if err := t.remote.OnKVRange(t, id, common.Address{}, vals); err != nil {
 		t.test.Errorf("Remote side rejected our delivery: %v", err)
 		t.term()
 		return err
@@ -254,7 +252,7 @@ func defaultKVHealRequestHandler(t *testPeer, id uint64, contract common.Address
 	if vals == nil {
 		t.test.Error("CreateKVRequestResponse fail: vals is nul.")
 	}
-	if err := t.remote.OnKVs(t, id, vals); err != nil {
+	if err := t.remote.OnKVs(t, id, common.Address{}, vals); err != nil {
 		t.test.Errorf("Remote side rejected our delivery: %v", err)
 		t.term()
 		return err
@@ -281,7 +279,7 @@ func createKVRequestResponse(t *testPeer, id uint64, stateDB *state.StateDB, con
 			if err != nil {
 				return nil
 			}
-			bs, _, _ := sm.EncodeKV(idx, data, common.BytesToHash(meta.HashInMeta))
+			bs, _, _ := sm.EncodeKV(idx, data, common.BytesToHash(meta.HashInMeta), common.Address{})
 			if uint64(len(bs)) > meta.KVSize {
 				values = append(values, &core.KV{Idx: idx, Data: bs[:meta.KVSize]})
 			} else {
@@ -296,7 +294,7 @@ func createKVRequestResponse(t *testPeer, id uint64, stateDB *state.StateDB, con
 
 // emptyRequestKVRangeFn is a rejects AccountRangeRequests
 func emptyRequestKVRangeFn(t *testPeer, id uint64, contract common.Address, shardId uint64, kvList []uint64) error {
-	t.remote.OnKVRange(t, id, nil)
+	t.remote.OnKVRange(t, id, common.Address{}, nil)
 	return nil
 }
 

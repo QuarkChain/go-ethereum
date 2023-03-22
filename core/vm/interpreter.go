@@ -17,8 +17,11 @@
 package vm
 
 import (
+	"context"
 	"hash"
+	"math/big"
 
+	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/log"
@@ -35,6 +38,12 @@ type Config struct {
 
 	ExtraEips []int // Additional EIPS that are to be enabled
 	IsJsonRpc bool  // Whether the call is in context of JsonRpc
+}
+
+type MindReadingClient interface {
+	ethereum.TransactionReader
+	ChainID(ctx context.Context) (*big.Int, error)
+	BlockNumber(ctx context.Context) (uint64, error)
 }
 
 // ScopeContext contains the things that are per-call, such as stack and memory,
