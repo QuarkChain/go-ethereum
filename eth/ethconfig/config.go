@@ -232,10 +232,11 @@ type Config struct {
 	ValidatorChangeEpochId uint64
 
 	// Sstorage config
-	SstorageFiles   []string `toml:",omitempty"`
-	SstorageShards  []string `toml:",omitempty"`
-	SstorageMine    bool
-	SstorageNodeKey string
+	SstorageFiles         []string `toml:",omitempty"`
+	SstorageShards        []string `toml:",omitempty"`
+	SstorageMine          bool
+	SstorageNodeKey       string
+	SstorageMinerContract string
 }
 
 // CreateConsensusEngine creates a consensus engine for the given chain configuration.

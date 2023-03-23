@@ -78,7 +78,7 @@ func (c *blockChain) VerifyAndWriteKV(contract common.Address, data map[uint64][
 		synced++
 		syncedBytes += uint64(len(val))
 
-		metaHash, meta, err := core.GetSstorageMetadata(c.stateDB, contract, idx)
+		_, meta, err := core.GetSstorageMetadata(c.stateDB, contract, idx)
 		if err != nil || meta == nil {
 			log.Warn("processKVResponse: get vkv MetaHash for verification fail", "error", err)
 			continue
@@ -90,7 +90,7 @@ func (c *blockChain) VerifyAndWriteKV(contract common.Address, data map[uint64][
 			continue
 		}
 
-		success, err := sm.TryWrite(idx, rawData, metaHash)
+		success, err := sm.TryWrite(idx, rawData, common.BytesToHash(meta.HashInMeta))
 		if err != nil {
 			log.Warn("write kv fail", "error", err)
 			continue
@@ -461,9 +461,7 @@ func verifyKVs(stateDB *state.StateDB, data map[common.Address]map[uint64][]byte
 		}
 		for idx, val := range shards {
 			_, meta, err := core.GetSstorageMetadata(stateDB, contract, idx)
-			if _, ok := destroyedList[idx]; ok {
-				val = make([]byte, shardData.MaxKvSize())
-			}
+
 			if err != nil {
 				t.Fatalf("get MetaHash data fail with err: %s.", err.Error())
 			}
@@ -475,7 +473,7 @@ func verifyKVs(stateDB *state.StateDB, data map[common.Address]map[uint64][]byte
 				t.Fatalf("TryRead sstroage Data fail. err: %s", "shard Idx not support")
 			}
 
-			if !bytes.Equal(val, sval) {
+			if _, ok := destroyedList[idx]; !ok && !bytes.Equal(val, sval) {
 				t.Fatalf("verify KV failed; index: %d; val: %s; sval: %s",
 					idx, common.Bytes2Hex(val), common.Bytes2Hex(sval))
 			}

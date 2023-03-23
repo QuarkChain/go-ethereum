@@ -2518,7 +2518,7 @@ func (bc *BlockChain) VerifyAndWriteKV(contract common.Address, data map[uint64]
 			continue
 		}
 
-		success, err := sm.TryWrite(vkv.Idx, vkv.Data, vkv.MetaHash)
+		success, err := sm.TryWrite(vkv.Idx, vkv.Data, common.BytesToHash(meta.HashInMeta))
 		if err != nil {
 			log.Warn("write kv fail", "error", err)
 		}

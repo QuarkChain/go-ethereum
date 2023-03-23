@@ -89,7 +89,8 @@ type BlockChain interface {
 
 // task contains all information for consensus engine sealing and result submitting.
 type task struct {
-	contract        common.Address
+	storageContract common.Address
+	minerContract   common.Address
 	shardIdx        uint64
 	kvSizeBits      uint64
 	chunkSizeBits   uint64
@@ -270,13 +271,14 @@ type worker struct {
 	newResultHook func(*result)
 }
 
-func newWorker(config *Config, chainConfig *params.ChainConfig, eth Backend, mux *event.TypeMux, privKey *ecdsa.PrivateKey, init bool) *worker {
+func newWorker(config *Config, chainConfig *params.ChainConfig, eth Backend, chain BlockChain, mux *event.TypeMux, privKey *ecdsa.PrivateKey,
+	minerContract common.Address, init bool) *worker {
 	worker := &worker{
 		config:             config,
 		chainConfig:        chainConfig,
 		eth:                eth,
 		mux:                mux,
-		chain:              eth.BlockChain(),
+		chain:              chain,
 		tasks:              make([]*task, 0),
 		chainHeadCh:        make(chan core.ChainHeadEvent, chainHeadChanSize),
 		newWorkCh:          make(chan *newWorkReq),
@@ -292,17 +294,17 @@ func newWorker(config *Config, chainConfig *params.ChainConfig, eth Backend, mux
 	}
 	for addr, sm := range sstor.ContractToShardManager {
 		for idx, shard := range sm.ShardMap() {
-			//			info, _ := worker.chain.GetSstorageMiningInfo(worker.chain.CurrentBlock().Root(), addr, idx)
 			task := task{
-				contract:      addr,
-				shardIdx:      idx,
-				kvSizeBits:    sm.MaxKvSizeBits(),
-				chunkSizeBits: sm.ChunksPerKvBits(),
-				kvEntriesBits: sm.KvEntriesBits(),
-				miner:         shard.Miner(),
-				shardManager:  sm,
-				running:       1,
-				info:          nil,
+				storageContract: addr,
+				minerContract:   minerContract,
+				shardIdx:        idx,
+				kvSizeBits:      sm.MaxKvSizeBits(),
+				chunkSizeBits:   sm.ChunksPerKvBits(),
+				kvEntriesBits:   sm.KvEntriesBits(),
+				miner:           shard.Miner(),
+				shardManager:    sm,
+				running:         1,
+				info:            nil,
 			}
 			worker.tasks = append(worker.tasks, &task)
 		}
@@ -368,7 +370,7 @@ func (w *worker) isRunning() bool {
 // start sets the running status as 1 for a task and triggers task start chan.
 func (w *worker) startTask(contract common.Address, shardIdx uint64) {
 	for _, task := range w.tasks {
-		if task.contract == contract && task.shardIdx == shardIdx && !task.isRunning() {
+		if task.storageContract == contract && task.shardIdx == shardIdx && !task.isRunning() {
 			task.start()
 			w.taskStartCh <- struct{}{}
 		}
@@ -378,7 +380,7 @@ func (w *worker) startTask(contract common.Address, shardIdx uint64) {
 // stop sets the running status as 0 for a task.
 func (w *worker) stopTask(contract common.Address, shardIdx uint64) {
 	for _, task := range w.tasks {
-		if task.contract == contract && task.shardIdx == shardIdx && task.isRunning() {
+		if task.storageContract == contract && task.shardIdx == shardIdx && task.isRunning() {
 			task.stop()
 		}
 	}
@@ -536,7 +538,7 @@ func (w *worker) updateTaskInfo(root common.Hash, timestamp int64) {
 
 	updated := false
 	for _, task := range w.tasks {
-		info, err := w.chain.GetSstorageMiningInfo(root, task.contract, task.shardIdx)
+		info, err := w.chain.GetSstorageMiningInfo(root, task.minerContract, task.shardIdx)
 		if err != nil {
 			log.Warn("failed to get sstorage mining info", "error", err.Error())
 		}
@@ -659,7 +661,7 @@ func (w *worker) mineTask(t *task) (bool, error) {
 		// Check if the data matches the hash in metadata.
 		if requiredDiff.Cmp(new(big.Int).SetBytes(hash0.Bytes())) < 0 {
 			proofs := make([][]common.Hash, 0)
-			kvs, err := w.chain.ReadKVsByIndexList(t.contract, kvIdxs, true)
+			kvs, err := w.chain.ReadKVsByIndexList(t.storageContract, kvIdxs, true)
 			if err != nil {
 				return false, err
 			}
@@ -710,7 +712,7 @@ func (w *worker) submitMinedResult(result *result) error {
 
 	baseTx := &types.DynamicFeeTx{
 		ChainID:   w.chainConfig.ChainID,
-		To:        &result.task.contract,
+		To:        &result.task.minerContract,
 		Nonce:     nonce,
 		GasTipCap: w.priceOracle.suggestGasTip,
 		GasFeeCap: gasFeeCap,

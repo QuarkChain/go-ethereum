@@ -21,8 +21,6 @@ import (
 	"crypto/ecdsa"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core"
-	"github.com/ethereum/go-ethereum/core/state"
-	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/eth/downloader"
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/log"
@@ -35,9 +33,8 @@ import (
 // Backend wraps all methods required for mining. Only full node is capable
 // to offer all the functions here.
 type Backend interface {
-	BlockChain() BlockChain
+	BlockChain() *core.BlockChain
 	TxPool() *core.TxPool
-	StateAtBlock(block *types.Block, reexec uint64, base *state.StateDB, checkLive bool, preferDisk bool) (statedb *state.StateDB, err error)
 }
 
 // Config is the configuration parameters of mining.
@@ -52,25 +49,23 @@ type Config struct {
 
 // Miner creates blocks and searches for proof-of-work values.
 type Miner struct {
-	mux      *event.TypeMux
-	worker   *worker
-	coinbase common.Address
-	eth      Backend
-	exitCh   chan struct{}
-	startCh  chan struct{}
-	stopCh   chan struct{}
+	mux     *event.TypeMux
+	worker  *worker
+	eth     Backend
+	exitCh  chan struct{}
+	startCh chan struct{}
+	stopCh  chan struct{}
 
 	wg sync.WaitGroup
 }
 
-func New(eth Backend, config *Config, chainConfig *params.ChainConfig, mux *event.TypeMux, privKey *ecdsa.PrivateKey) *Miner {
+func New(eth Backend, config *Config, chainConfig *params.ChainConfig, mux *event.TypeMux, privKey *ecdsa.PrivateKey, minerContract common.Address) *Miner {
 	miner := &Miner{
-		eth:     eth,
 		mux:     mux,
 		exitCh:  make(chan struct{}),
 		startCh: make(chan struct{}),
 		stopCh:  make(chan struct{}),
-		worker:  newWorker(config, chainConfig, eth, mux, privKey, true),
+		worker:  newWorker(config, chainConfig, eth, eth.BlockChain(), mux, privKey, minerContract, true),
 	}
 	miner.wg.Add(1)
 	go miner.update()

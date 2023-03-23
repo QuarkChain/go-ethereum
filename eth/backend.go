@@ -284,7 +284,11 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		if len(sstorage.Shards()) == 0 {
 			return nil, fmt.Errorf("no shards is exist")
 		}
-		eth.sstorMiner = sstorminer.New(eth, &config.SStorMiner, chainConfig, eth.EventMux(), privKey)
+		if config.SstorageMinerContract == "" {
+			return nil, fmt.Errorf("miner contract is needed when the sstorage mine is enabled.")
+		}
+		minerContract := common.HexToAddress(config.SstorageMinerContract)
+		eth.sstorMiner = sstorminer.New(eth, &config.SStorMiner, chainConfig, eth.EventMux(), privKey, minerContract)
 	}
 
 	eth.APIBackend = &EthAPIBackend{stack.Config().ExtRPCEnabled(), stack.Config().AllowUnprotectedTxs, eth, nil}

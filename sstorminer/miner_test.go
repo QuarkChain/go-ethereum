@@ -18,7 +18,6 @@
 package sstorminer
 
 import (
-	"errors"
 	"testing"
 	"time"
 
@@ -47,16 +46,12 @@ func NewMockBackend(bc *core.BlockChain, txPool *core.TxPool) *mockBackend {
 	}
 }
 
-func (m *mockBackend) BlockChain() BlockChain {
+func (m *mockBackend) BlockChain() *core.BlockChain {
 	return m.bc
 }
 
 func (m *mockBackend) TxPool() *core.TxPool {
 	return m.txPool
-}
-
-func (m *mockBackend) StateAtBlock(block *types.Block, reexec uint64, base *state.StateDB, checkLive bool, preferDisk bool) (statedb *state.StateDB, err error) {
-	return nil, errors.New("not supported")
 }
 
 type testBlockChain struct {
@@ -188,7 +183,6 @@ func TestStartStopMiner(t *testing.T) {
 	waitForMiningState(t, miner, true)
 	miner.Stop()
 	waitForMiningState(t, miner, false)
-
 }
 
 func TestCloseMiner(t *testing.T) {
@@ -244,7 +238,7 @@ func createMiner(t *testing.T) (*Miner, *event.TypeMux, func(skipMiner bool)) {
 	// Create event Mux
 	mux := new(event.TypeMux)
 	// Create Miner
-	miner := New(backend, &config, chainConfig, mux, nil)
+	miner := New(backend, &config, chainConfig, mux, nil, common.Address{})
 	cleanup := func(skipMiner bool) {
 		bc.Stop()
 		engine.Close()

@@ -135,6 +135,7 @@ var (
 		utils.SstorageFileFlag,
 		utils.SstorageMineFlag,
 		utils.SstorageNodeKeyFlag,
+		utils.SstorageMinerContractFlag,
 		utils.NATFlag,
 		utils.NoDiscoverFlag,
 		utils.DiscoveryV5Flag,

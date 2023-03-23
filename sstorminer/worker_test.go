@@ -70,6 +70,7 @@ var (
 	pendingTxs []*types.Transaction
 	newTxs     []*types.Transaction
 
+	minerContract = common.HexToAddress("0x0000000000000000000000000000000000000001")
 	contract      = common.HexToAddress("0x0000000000000000000000000000000003330001")
 	kvEntriesBits = uint64(9)
 	kvEntries     = uint64(1) << 9
@@ -141,10 +142,10 @@ func hashAdd(hash common.Hash, i uint64) common.Hash {
 func (bc *wrapBlockChain) saveMiningInfo(shardId uint64, info *core.MiningInfo) {
 	position := getSlotHash(0, uint256.NewInt(shardId).Bytes32())
 	//	fmt.Println(position.Hex())
-	bc.stateDB.SetState(contract, position, info.MiningHash)
-	bc.stateDB.SetState(contract, hashAdd(position, 1), common.BigToHash(new(big.Int).SetUint64(info.LastMineTime)))
-	bc.stateDB.SetState(contract, hashAdd(position, 2), common.BigToHash(info.Difficulty))
-	bc.stateDB.SetState(contract, hashAdd(position, 3), common.BigToHash(info.BlockMined))
+	bc.stateDB.SetState(minerContract, position, info.MiningHash)
+	bc.stateDB.SetState(minerContract, hashAdd(position, 1), common.BigToHash(new(big.Int).SetUint64(info.LastMineTime)))
+	bc.stateDB.SetState(minerContract, hashAdd(position, 2), common.BigToHash(info.Difficulty))
+	bc.stateDB.SetState(minerContract, hashAdd(position, 3), common.BigToHash(info.BlockMined))
 }
 
 func (bc *wrapBlockChain) initMiningInfos(shardIdxList []uint64, diff *big.Int, blockMined *big.Int) map[uint64]*core.MiningInfo {
@@ -165,14 +166,14 @@ func (bc *wrapBlockChain) initMiningInfos(shardIdxList []uint64, diff *big.Int, 
 type testWorkerBackend struct {
 	db          ethdb.Database
 	txPool      *core.TxPool
-	chain       BlockChain
+	chain       *core.BlockChain
 	testTxFeed  event.Feed
 	genesis     *core.Genesis
 	miningInfos map[uint64]*core.MiningInfo
 }
 
 func newTestWorkerBackend(t *testing.T, chainConfig *params.ChainConfig, engine consensus.Engine, shardIdxList []uint64,
-	db ethdb.Database, n int, shardIsFull bool) (*testWorkerBackend, map[uint64]*core.MiningInfo) {
+	db ethdb.Database, n int, shardIsFull bool) *testWorkerBackend {
 	var gspec = core.Genesis{
 		Config: chainConfig,
 		Alloc:  core.GenesisAlloc{testBankAddress: {Balance: testBankFunds}},
@@ -193,24 +194,16 @@ func newTestWorkerBackend(t *testing.T, chainConfig *params.ChainConfig, engine 
 		}
 	}
 
-	stateDB, _ := chain.State()
-	wchain := wrapBlockChain{
-		BlockChain: chain,
-		stateDB:    stateDB,
-	}
-	infos := wchain.initMiningInfos(shardIdxList, diff, blockMined)
-	makeKVStorage(stateDB, contract, shardIdxList, 1<<kvEntriesBits, shardIsFull)
-
 	return &testWorkerBackend{
 		db:      db,
-		chain:   &wchain,
+		chain:   chain,
 		txPool:  txpool,
 		genesis: &gspec,
-	}, infos
+	}
 }
 
-func (b *testWorkerBackend) BlockChain() BlockChain { return b.chain }
-func (b *testWorkerBackend) TxPool() *core.TxPool   { return b.txPool }
+func (b *testWorkerBackend) BlockChain() *core.BlockChain { return b.chain }
+func (b *testWorkerBackend) TxPool() *core.TxPool         { return b.txPool }
 func (b *testWorkerBackend) StateAtBlock(block *types.Block, reexec uint64, base *state.StateDB, checkLive bool, preferDisk bool) (statedb *state.StateDB, err error) {
 	return nil, errors.New("not supported")
 }
@@ -222,10 +215,18 @@ func newTestWorker(t *testing.T, chainConfig *params.ChainConfig, engine consens
 		t.Fatalf("createSstorage failed")
 	}
 
-	backend, infos := newTestWorkerBackend(t, chainConfig, engine, shardIdxList, db, blocks, shardIsFull)
+	backend := newTestWorkerBackend(t, chainConfig, engine, shardIdxList, db, blocks, shardIsFull)
 	backend.txPool.AddLocals(pendingTxs)
 
-	w := newWorker(defaultConfig, chainConfig, backend, new(event.TypeMux), testBankKey, false)
+	stateDB, _ := backend.chain.State()
+	wchain := wrapBlockChain{
+		BlockChain: backend.chain,
+		stateDB:    stateDB,
+	}
+	infos := wchain.initMiningInfos(shardIdxList, diff, blockMined)
+	makeKVStorage(stateDB, contract, shardIdxList, 1<<kvEntriesBits, shardIsFull)
+
+	w := newWorker(defaultConfig, chainConfig, backend, &wchain, new(event.TypeMux), testBankKey, minerContract, false)
 	return w, infos, files, backend
 }
 
@@ -333,7 +334,7 @@ func makeKVStorage(stateDB *state.StateDB, contract common.Address, shards []uin
 				stateDB.SetState(contract, key, meta)
 			}
 
-			sm.TryWrite(i, val, common.BytesToHash(append(metaHash[:24], make([]byte, 8)...)))
+			sm.TryWrite(i, val, common.BytesToHash(metaHash[:24]))
 		}
 	}
 }
@@ -366,7 +367,7 @@ func verifyTaskResult(stateDB *state.StateDB, chain BlockChain, r *result) error
 			return err
 		}
 		if !got {
-			return fmt.Errorf("fail to get data for contract %s vkidx %d", contract.Hex(), r.kvIdxs[i])
+			return fmt.Errorf("fail to get data for storageContract %s vkidx %d", contract.Hex(), r.kvIdxs[i])
 		}
 		vr := verify(meta.HashInMeta, crypto.Keccak256Hash(data), r.chunkIdxs[i], proofs)
 		if !vr {
@@ -679,9 +680,3 @@ func TestWork_LargeKV(test *testing.T) {
 		test.Error("new task timeout")
 	}
 }
-
-// chenkPerKV
-// update task info trigger by new block
-// multi shard support
-// shard is not full
-// start and stop mine
