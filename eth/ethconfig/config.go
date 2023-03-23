@@ -18,7 +18,6 @@
 package ethconfig
 
 import (
-	"github.com/ethereum/go-ethereum/sstorminer"
 	"math/big"
 	"os"
 	"os/user"
@@ -40,6 +39,7 @@ import (
 	"github.com/ethereum/go-ethereum/miner"
 	"github.com/ethereum/go-ethereum/node"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/ethereum/go-ethereum/sstorminer"
 )
 
 // FullNodeGPO contains default gasprice oracle settings for full node.

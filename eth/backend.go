@@ -20,8 +20,6 @@ package eth
 import (
 	"errors"
 	"fmt"
-	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/sstorminer"
 	"math/big"
 	"runtime"
 	"sync"
@@ -41,6 +39,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/state/pruner"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/eth/downloader"
 	"github.com/ethereum/go-ethereum/eth/ethconfig"
 	"github.com/ethereum/go-ethereum/eth/filters"
@@ -62,6 +61,7 @@ import (
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/ethereum/go-ethereum/sstorage"
+	"github.com/ethereum/go-ethereum/sstorminer"
 )
 
 // Config contains the configuration options of the ETH protocol.
@@ -500,17 +500,17 @@ func (s *Ethereum) SetEtherbase(etherbase common.Address) {
 // is already running, this method just return.
 func (s *Ethereum) StartSstorMining() {
 	// If the miner was not running, initialize it
-	if !s.IsMining() {
+	if !s.IsSstorMining() {
 		go s.sstorMiner.Start()
 	}
 }
 
 // StopSstorMining terminates the sstorage miner.
 func (s *Ethereum) StopSstorMining() {
-	s.miner.Stop()
+	s.sstorMiner.Stop()
 }
 
-func (s *Ethereum) IsSstorMining() bool { return s.miner.Mining() }
+func (s *Ethereum) IsSstorMining() bool { return s.sstorMiner.Mining() }
 
 func (s *Ethereum) SstorMiner() *sstorminer.Miner { return s.sstorMiner }
 

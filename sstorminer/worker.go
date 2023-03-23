@@ -187,10 +187,11 @@ type priceOracle struct {
 	limit         int
 }
 
-// The TipGap provided in the SuggestGasTipCap method (provide by EthAPIBackend) will extract the smallest 3 TipGaps
+// The TipGap provided in the SuggestGasTipCap method (provided by EthAPIBackend) will extract the smallest 3 TipGaps
 // from each of the latest n blocks, sort them, and take the median according to the set percentile.
 //
-// # To make it simple, if the transaction volume is small, suggestGasTip set to 0, otherwise the third smallest GasTip is used.
+// # To make it simple, if the transaction volume is small, suggestGasTip set to 0, otherwise the third smallest GasTip
+//  in the latest block is used.
 //
 // updatePriceOracle update suggestGasTip according to block.
 func (o *priceOracle) updatePriceOracle(block *types.Block) {
