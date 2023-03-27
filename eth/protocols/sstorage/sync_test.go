@@ -101,12 +101,16 @@ func (c *blockChain) VerifyAndWriteKV(contract common.Address, data map[uint64][
 	return synced, syncedBytes, inserted, nil
 }
 
-func (c *blockChain) ReadEncodedKVsByIndexList(contract common.Address, indexes []uint64) ([]*core.KV, error) {
+func (c *blockChain) ReadEncodedKVsByIndexList(contract common.Address, shardId uint64, indexes []uint64) (common.Address, []*core.KV, error) {
 	sm := sstorage.ContractToShardManager[contract]
 	if sm == nil {
-		return nil, fmt.Errorf("shard manager for contract %s is not support", contract.Hex())
+		return common.Address{}, nil, fmt.Errorf("shard manager for contract %s is not support", contract.Hex())
 	}
 
+	miner, ok := sm.GetShardMiner(shardId)
+	if !ok {
+		return common.Address{}, nil, fmt.Errorf("shard %d do not support for contract %s", shardId, contract.Hex())
+	}
 	res := make([]*core.KV, 0)
 	for _, idx := range indexes {
 		_, meta, err := core.GetSstorageMetadata(c.stateDB, contract, idx)
@@ -120,15 +124,20 @@ func (c *blockChain) ReadEncodedKVsByIndexList(contract common.Address, indexes 
 		}
 	}
 
-	return res, nil
+	return miner, res, nil
 }
 
-func (c *blockChain) ReadEncodedKVsByIndexRange(contract common.Address, origin uint64, limit uint64, bytes uint64) ([]*core.KV, error) {
+func (c *blockChain) ReadEncodedKVsByIndexRange(contract common.Address, shardId uint64, origin uint64,
+	limit uint64, bytes uint64) (common.Address, []*core.KV, error) {
 	sm := sstorage.ContractToShardManager[contract]
 	if sm == nil {
-		return nil, fmt.Errorf("shard manager for contract %s is not support", contract.Hex())
+		return common.Address{}, nil, fmt.Errorf("shard manager for contract %s is not support", contract.Hex())
 	}
 
+	miner, ok := sm.GetShardMiner(shardId)
+	if !ok {
+		return common.Address{}, nil, fmt.Errorf("shard %d do not support for contract %s", shardId, contract.Hex())
+	}
 	res := make([]*core.KV, 0)
 	read := uint64(0)
 	for idx := origin; idx <= limit; idx++ {
@@ -147,7 +156,7 @@ func (c *blockChain) ReadEncodedKVsByIndexRange(contract common.Address, origin 
 		}
 	}
 
-	return res, nil
+	return miner, res, nil
 }
 
 func (c *blockChain) GetSstorageLastKvIdx(contract common.Address) (uint64, error) {

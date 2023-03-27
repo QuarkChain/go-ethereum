@@ -213,11 +213,12 @@ type BlockChain interface {
 	VerifyAndWriteKV(contract common.Address, data map[uint64][]byte, provderAddr common.Address) (uint64, uint64, []uint64, error)
 
 	// ReadEncodedKVsByIndexList Read the encoded KVs by a list of KV index.
-	ReadEncodedKVsByIndexList(contract common.Address, indexes []uint64) ([]*core.KV, error)
+	ReadEncodedKVsByIndexList(contract common.Address, shardId uint64, indexes []uint64) (common.Address, []*core.KV, error)
 
 	// ReadEncodedKVsByIndexRange Read encoded KVs sequentially starting from origin until the index exceeds the limit or
 	// the amount of data read is greater than the bytes.
-	ReadEncodedKVsByIndexRange(contract common.Address, origin uint64, limit uint64, bytes uint64) ([]*core.KV, error)
+	ReadEncodedKVsByIndexRange(contract common.Address, shardId uint64, origin uint64,
+		limit uint64, bytes uint64) (common.Address, []*core.KV, error)
 
 	// GetSstorageLastKvIdx get LastKvIdx from a sstorage contract with latest stateDB.
 	GetSstorageLastKvIdx(contract common.Address) (uint64, error)
