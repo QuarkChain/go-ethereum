@@ -6,6 +6,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/sstorage/pora"
 )
 
 // A DataShard is a logical shard that manages multiple DataFiles.
@@ -155,14 +156,60 @@ func calcEncodeKey(commit common.Hash, chunkIdx uint64, miner common.Address) co
 	return crypto.Keccak256Hash(bb)
 }
 
-func encodeChunk(b []byte, maskType uint64, encodeKey common.Hash) []byte {
-	// TODO:
-	return b
+func encodeChunk(bs []byte, encodeType uint64, encodeKey common.Hash) []byte {
+	if len(bs) > int(CHUNK_SIZE) {
+		panic("cannot encode chunk with size > CHUNK_SIZE")
+	}
+	if encodeType == ENCODE_KECCAK_256 {
+		output := make([]byte, CHUNK_SIZE)
+		j := 0
+		for i := 0; i < int(CHUNK_SIZE); i++ {
+			b := byte(0)
+			if i < len(bs) {
+				b = bs[i]
+			}
+			output[i] = b ^ encodeKey[j]
+			j = j + 1
+			if j >= len(encodeKey) {
+				j = 0
+			}
+		}
+		return output
+	} else if encodeType == NO_ENCODE {
+		return bs
+	} else if encodeType == ENCODE_ETHASH {
+		return MaskDataInPlace(pora.GetMaskData(0, encodeKey, int(CHUNK_SIZE), nil), bs)
+	} else {
+		panic("unsupported encode type")
+	}
 }
 
-func decodeChunk(b []byte, maskType uint64, encodeKey common.Hash) []byte {
-	// TODO:
-	return b
+func decodeChunk(bs []byte, encodeType uint64, encodeKey common.Hash) []byte {
+	if len(bs) > int(CHUNK_SIZE) {
+		panic("cannot encode chunk with size > CHUNK_SIZE")
+	}
+	if encodeType == ENCODE_KECCAK_256 {
+		output := make([]byte, len(bs))
+		j := 0
+		for i := 0; i < len(bs); i++ {
+			b := byte(0)
+			if i < len(bs) {
+				b = bs[i]
+			}
+			output[i] = b ^ encodeKey[j]
+			j = j + 1
+			if j >= len(encodeKey) {
+				j = 0
+			}
+		}
+		return output
+	} else if encodeType == NO_ENCODE {
+		return bs
+	} else if encodeType == ENCODE_ETHASH {
+		return MaskDataInPlace(pora.GetMaskData(0, encodeKey, len(bs), nil), bs)
+	} else {
+		panic("unsupported encode type")
+	}
 }
 
 // Write a value of the KV to the store.  The value will be encoded with kvIdx and SP address.
