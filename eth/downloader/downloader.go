@@ -689,9 +689,11 @@ func (d *Downloader) fetchHead(p *peerConnection) (head *types.Header, pivot *ty
 // calculateRequestSpan calculates what headers to request from a peer when trying to determine the
 // common ancestor.
 // It returns parameters to be used for peer.RequestHeadersByNumber:
-//  from - starting block number
-//  count - number of headers to request
-//  skip - number of headers to skip
+//
+//	from - starting block number
+//	count - number of headers to request
+//	skip - number of headers to skip
+//
 // and also returns 'max', the last block which is expected to be returned by the remote peers,
 // given the (from,count,skip)
 func calculateRequestSpan(remoteHeight, localHeight uint64) (int64, int, int, uint64) {
@@ -1655,9 +1657,9 @@ func (d *Downloader) DeliverSnapPacket(peer *snap.Peer, packet snap.Packet) erro
 func (d *Downloader) DeliverSstoragePacket(peer *sstorage.Peer, packet sstorage.Packet) error {
 	switch packet := packet.(type) {
 	case *sstorage.KVsPacket:
-		return d.SstorSyncer.OnKVs(peer, packet.ID, packet.KVs)
+		return d.SstorSyncer.OnKVs(peer, packet.ID, packet.ProviderAddr, packet.KVs)
 	case *sstorage.KVRangePacket:
-		return d.SstorSyncer.OnKVRange(peer, packet.ID, packet.KVs)
+		return d.SstorSyncer.OnKVRange(peer, packet.ID, packet.ProviderAddr, packet.KVs)
 	default:
 		return fmt.Errorf("unexpected snap packet type: %T", packet)
 	}

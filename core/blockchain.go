@@ -2448,7 +2448,7 @@ func GetSstorageMetadata(s *state.StateDB, contract common.Address, index uint64
 }
 
 // VerifyKV verify kv using SstorageMetadata
-func VerifyKV(sm *sstorage.ShardManager, idx uint64, val []byte, meta *SstorageMetadata, isEncoded bool) ([]byte, error) {
+func VerifyKV(sm *sstorage.ShardManager, idx uint64, val []byte, meta *SstorageMetadata, isEncoded bool, providerAddr common.Address) ([]byte, error) {
 	if idx != meta.KVIdx {
 		return nil, fmt.Errorf("verifyKV fail: kv Idx mismatch; idx: %d; MetaHash KVIdx: %d", idx, meta.KVIdx)
 	}
@@ -2458,7 +2458,7 @@ func VerifyKV(sm *sstorage.ShardManager, idx uint64, val []byte, meta *SstorageM
 		if sm == nil {
 			return nil, fmt.Errorf("empty sm to verify KV")
 		}
-		d, r, err := sm.DecodeKV(meta.KVIdx, val, common.BytesToHash(meta.HashInMeta))
+		d, r, err := sm.DecodeKV(meta.KVIdx, val, common.BytesToHash(meta.HashInMeta), providerAddr)
 		if !r || err != nil {
 			return nil, fmt.Errorf("unmask KV fail, err: %v", err)
 		}
@@ -2507,7 +2507,7 @@ func (bc *BlockChain) VerifyAndWriteKV(contract common.Address, data map[uint64]
 			continue
 		}
 
-		rawData, err := VerifyKV(sm, idx, val, meta, true)
+		rawData, err := VerifyKV(sm, idx, val, meta, true, providerAddr)
 		if err != nil {
 			log.Warn("processKVResponse: verify vkv fail", "error", err)
 			continue
@@ -2550,15 +2550,19 @@ func (bc *BlockChain) VerifyAndWriteKV(contract common.Address, data map[uint64]
 }
 
 // ReadEncodedKVsByIndexList Read the masked KVs by a list of KV index.
-func (bc *BlockChain) ReadEncodedKVsByIndexList(contract common.Address, indexes []uint64) ([]*KV, error) {
+func (bc *BlockChain) ReadEncodedKVsByIndexList(contract common.Address, shardId uint64, indexes []uint64) (common.Address, []*KV, error) {
 	sm := sstorage.ContractToShardManager[contract]
 	if sm == nil {
-		return nil, fmt.Errorf("shard manager for contract %s is not support", contract.Hex())
+		return common.Address{}, nil, fmt.Errorf("shard manager for contract %s is not support", contract.Hex())
 	}
 
+	miner, ok := sm.GetShardMiner(shardId)
+	if !ok {
+		return common.Address{}, nil, fmt.Errorf("shard %d do not support for contract %s", shardId, contract.Hex())
+	}
 	stateDB, err := bc.StateAt(bc.CurrentBlock().Root())
 	if err != nil {
-		return nil, err
+		return common.Address{}, nil, err
 	}
 	res := make([]*KV, 0)
 	for _, idx := range indexes {
@@ -2573,20 +2577,25 @@ func (bc *BlockChain) ReadEncodedKVsByIndexList(contract common.Address, indexes
 		}
 	}
 
-	return res, nil
+	return miner, res, nil
 }
 
 // ReadEncodedKVsByIndexRange Read masked KVs sequentially starting from origin until the index exceeds the limit or
 // the amount of data read is greater than the bytes.
-func (bc *BlockChain) ReadEncodedKVsByIndexRange(contract common.Address, origin uint64, limit uint64, bytes uint64) ([]*KV, error) {
+func (bc *BlockChain) ReadEncodedKVsByIndexRange(contract common.Address, shardId uint64, origin uint64,
+	limit uint64, bytes uint64) (common.Address, []*KV, error) {
 	sm := sstorage.ContractToShardManager[contract]
 	if sm == nil {
-		return nil, fmt.Errorf("shard manager for contract %s is not support", contract.Hex())
+		return common.Address{}, nil, fmt.Errorf("shard manager for contract %s is not support", contract.Hex())
 	}
 
+	miner, ok := sm.GetShardMiner(shardId)
+	if !ok {
+		return common.Address{}, nil, fmt.Errorf("shard %d do not support for contract %s", shardId, contract.Hex())
+	}
 	stateDB, err := bc.StateAt(bc.CurrentBlock().Root())
 	if err != nil {
-		return nil, err
+		return common.Address{}, nil, err
 	}
 	res := make([]*KV, 0)
 	read := uint64(0)
@@ -2606,7 +2615,7 @@ func (bc *BlockChain) ReadEncodedKVsByIndexRange(contract common.Address, origin
 		}
 	}
 
-	return res, nil
+	return miner, res, nil
 }
 
 // GetSstorageLastKvIdx get LastKvIdx from a sstorage contract with latest stateDB.
