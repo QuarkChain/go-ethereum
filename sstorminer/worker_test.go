@@ -140,7 +140,7 @@ func hashAdd(hash common.Hash, i uint64) common.Hash {
 }
 
 func (bc *wrapBlockChain) saveMiningInfo(shardId uint64, info *core.MiningInfo) {
-	position := getSlotHash(0, uint256.NewInt(shardId).Bytes32())
+	position := getSlotHash(3, uint256.NewInt(shardId).Bytes32())
 	bc.stateDB.SetState(minerContract, position, info.MiningHash)
 	bc.stateDB.SetState(minerContract, hashAdd(position, 1), common.BigToHash(new(big.Int).SetUint64(info.LastMineTime)))
 	bc.stateDB.SetState(minerContract, hashAdd(position, 2), common.BigToHash(info.Difficulty))

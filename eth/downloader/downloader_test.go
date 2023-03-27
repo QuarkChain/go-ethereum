@@ -711,7 +711,7 @@ func testMultiProtoSync(t *testing.T, protocol uint, mode SyncMode) {
 
 	// Create peers of every type
 	tester.newPeer("peer 66", eth.ETH66, chain.blocks[1:])
-	//tester.newPeer("peer 65", eth.ETH67, chain.blocks[1:)
+	// tester.newPeer("peer 65", eth.ETH67, chain.blocks[1:)
 
 	// Synchronise with the requested peer and make sure all blocks were retrieved
 	if err := tester.sync(fmt.Sprintf("peer %d", protocol), nil, mode); err != nil {
