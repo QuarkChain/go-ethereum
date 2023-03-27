@@ -126,7 +126,7 @@ func (ds *DataShard) readChunkWith(kvIdx uint64, chunkIdx uint64, decoder func([
 	if !ds.Contains(kvIdx) {
 		return nil, fmt.Errorf("kv not found")
 	}
-	if chunkIdx > ds.chunksPerKv {
+	if chunkIdx >= ds.chunksPerKv {
 		return nil, fmt.Errorf("chunkIdx out of range, chunkIdx： %d vs chunksPerKv %d", chunkIdx, ds.chunksPerKv)
 	}
 	idx := kvIdx*ds.chunksPerKv + chunkIdx
@@ -134,7 +134,7 @@ func (ds *DataShard) readChunkWith(kvIdx uint64, chunkIdx uint64, decoder func([
 	if err != nil {
 		return nil, err
 	}
-	data = decoder(data, chunkIdx)
+	data = decoder(data, idx)
 	return data, nil
 }
 
@@ -238,7 +238,7 @@ func decodeChunk(bs []byte, encodeType uint64, encodeKey common.Hash) []byte {
 	} else if encodeType == NO_ENCODE {
 		return bs
 	} else if encodeType == ENCODE_ETHASH {
-		return MaskDataInPlace(pora.GetMaskData(0, encodeKey, len(bs), nil), bs)
+		return UnmaskDataInPlace(pora.GetMaskData(0, encodeKey, len(bs), nil), bs)
 	} else {
 		panic("unsupported encode type")
 	}
@@ -253,20 +253,12 @@ func (ds *DataShard) Write(kvIdx uint64, b []byte, commit common.Hash) error {
 	if uint64(len(b)) > ds.kvSize {
 		return fmt.Errorf("write data too large")
 	}
-
+	cb := make([]byte, ds.kvSize)
+	copy(cb, b)
 	for i := uint64(0); i < ds.chunksPerKv; i++ {
-		off := int(i * CHUNK_SIZE)
-		if off >= len(b) {
-			break
-		}
-		writeLen := len(b) - off
-		if writeLen > int(CHUNK_SIZE) {
-			writeLen = int(CHUNK_SIZE)
-		}
-
 		chunkIdx := kvIdx*ds.chunksPerKv + i
 		encodeKey := calcEncodeKey(commit, chunkIdx, ds.Miner())
-		encodedChunk := encodeChunk(b[off:off+writeLen], ds.EncodeType(), encodeKey)
+		encodedChunk := encodeChunk(cb[int(i*CHUNK_SIZE):int((i+1)*CHUNK_SIZE)], ds.EncodeType(), encodeKey)
 		err := ds.writeChunk(chunkIdx, encodedChunk)
 
 		if err != nil {

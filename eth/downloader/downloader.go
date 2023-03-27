@@ -224,7 +224,7 @@ type BlockChain interface {
 }
 
 // New creates a new downloader to fetch hashes and blocks from remote peers.
-func New(checkpoint uint64, stateDb ethdb.Database, mux *event.TypeMux, chain BlockChain, lightchain LightChain, dropPeer peerDropFn) *Downloader {
+func New(checkpoint uint64, stateDb ethdb.Database, mux *event.TypeMux, chain *core.BlockChain, lightchain LightChain, dropPeer peerDropFn) *Downloader {
 	if lightchain == nil {
 		lightchain = chain
 	}

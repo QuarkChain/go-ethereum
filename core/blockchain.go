@@ -2353,8 +2353,7 @@ func (bc *BlockChain) PreExecuteBlock(block *types.Block) (err error) {
 }
 
 var (
-	emptyHash        = common.Hash{}
-	defaultHashBytes = crypto.Keccak256Hash().Bytes()
+	emptyHash = common.Hash{}
 )
 
 type SstorageMetadata struct {
@@ -2419,10 +2418,9 @@ func GetDefaultMetadata(index uint64) (common.Hash, *SstorageMetadata) {
 	meta := &SstorageMetadata{
 		KVIdx:      index,
 		KVSize:     uint64(0),
-		HashInMeta: defaultHashBytes[:24],
+		HashInMeta: make([]byte, 24),
 	}
 	hashBytes := make([]byte, 32)
-	copy(hashBytes[:24], meta.HashInMeta)
 	binary.BigEndian.PutUint32(hashBytes[27:], uint32(index))
 	return common.BytesToHash(hashBytes), meta
 }
@@ -2530,16 +2528,16 @@ func (bc *BlockChain) VerifyAndWriteKV(contract common.Address, data map[uint64]
 }
 
 // ReadKVsByIndexList Read the KVs by a list of KV index.
-func (bc *BlockChain) ReadKVsByIndexList(contract common.Address, indexes []uint64, useMaxKVsize bool) ([]*KV, error) {
+func (bc *BlockChain) ReadKVsByIndexList(contract common.Address, indexes []uint64, returnEmpty bool) ([]*KV, error) {
 	stateDB, err := bc.StateAt(bc.CurrentBlock().Root())
 	if err != nil {
 		return nil, err
 	}
 
-	return bc.ReadKVsByIndexListWithState(stateDB, contract, indexes, useMaxKVsize)
+	return bc.ReadKVsByIndexListWithState(stateDB, contract, indexes, returnEmpty)
 }
 
-func (bc *BlockChain) ReadKVsByIndexListWithState(stateDB *state.StateDB, contract common.Address, indexes []uint64, useMaxKVsize bool) ([]*KV, error) {
+func (bc *BlockChain) ReadKVsByIndexListWithState(stateDB *state.StateDB, contract common.Address, indexes []uint64, returnEmpty bool) ([]*KV, error) {
 	sm := sstorage.ContractToShardManager[contract]
 	if sm == nil {
 		return nil, fmt.Errorf("shard manager for contract %s is not support", contract.Hex())
@@ -2548,14 +2546,15 @@ func (bc *BlockChain) ReadKVsByIndexListWithState(stateDB *state.StateDB, contra
 	res := make([]*KV, 0)
 	for _, idx := range indexes {
 		_, meta, err := GetSstorageMetadata(stateDB, contract, idx)
+		if returnEmpty && meta.KVSize == 0 {
+			kv := KV{idx, make([]byte, 0)}
+			res = append(res, &kv)
+			continue
+		}
 		if err != nil {
 			continue
 		}
-		l := int(meta.KVSize)
-		if useMaxKVsize {
-			l = int(sm.MaxKvSize())
-		}
-		data, ok, err := sm.TryRead(idx, l, common.BytesToHash(meta.HashInMeta))
+		data, ok, err := sm.TryRead(idx, int(meta.KVSize), common.BytesToHash(meta.HashInMeta))
 		if ok && err == nil {
 			kv := KV{idx, data}
 			res = append(res, &kv)
@@ -2683,7 +2682,7 @@ func (bc *BlockChain) GetSstorageMiningInfo(root common.Hash, contract common.Ad
 
 func (bc *BlockChain) GetSstorageMiningInfoWithStateDB(stateDB *state.StateDB, contract common.Address, shardId uint64) (*MiningInfo, error) {
 	info := new(MiningInfo)
-	position := getSlotHash(0, uint256.NewInt(shardId).Bytes32())
+	position := getSlotHash(3, uint256.NewInt(shardId).Bytes32())
 	info.MiningHash = stateDB.GetState(contract, position)
 	if info.MiningHash == emptyHash {
 		return nil, fmt.Errorf("fail to get mining info for shard %d", shardId)

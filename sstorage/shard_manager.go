@@ -9,24 +9,24 @@ import (
 type ShardManager struct {
 	shardMap        map[uint64]*DataShard
 	contractAddress common.Address
-	kvSize          uint64
-	chunksPerKv     uint64
-	kvEntries       uint64
 	kvSizeBits      uint64
+	kvSize          uint64
 	chunksPerKvBits uint64
+	chunksPerKv     uint64
 	kvEntriesBits   uint64
+	kvEntries       uint64
 }
 
 func NewShardManager(contractAddress common.Address, kvSizeBits uint64, kvEntriesBits uint64) *ShardManager {
 	return &ShardManager{
 		shardMap:        make(map[uint64]*DataShard),
 		contractAddress: contractAddress,
-		kvSize:          1 << kvSizeBits,
-		chunksPerKv:     (1 << kvSizeBits) / CHUNK_SIZE,
-		kvEntries:       1 << kvEntriesBits,
 		kvSizeBits:      kvSizeBits,
-		chunksPerKvBits: kvSizeBits - CHUNK_SIZE_BITS,
+		kvSize:          1 << kvSizeBits,
 		kvEntriesBits:   kvEntriesBits,
+		kvEntries:       1 << kvEntriesBits,
+		chunksPerKvBits: kvSizeBits - CHUNK_SIZE_BITS,
+		chunksPerKv:     (1 << kvSizeBits) / CHUNK_SIZE,
 	}
 }
 

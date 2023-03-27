@@ -141,7 +141,6 @@ func hashAdd(hash common.Hash, i uint64) common.Hash {
 
 func (bc *wrapBlockChain) saveMiningInfo(shardId uint64, info *core.MiningInfo) {
 	position := getSlotHash(0, uint256.NewInt(shardId).Bytes32())
-	//	fmt.Println(position.Hex())
 	bc.stateDB.SetState(minerContract, position, info.MiningHash)
 	bc.stateDB.SetState(minerContract, hashAdd(position, 1), common.BigToHash(new(big.Int).SetUint64(info.LastMineTime)))
 	bc.stateDB.SetState(minerContract, hashAdd(position, 2), common.BigToHash(info.Difficulty))
@@ -318,8 +317,8 @@ func makeKVStorage(stateDB *state.StateDB, contract common.Address, shards []uin
 			last = sidx*kvCount + rand.Uint64()%kvCount
 		}
 		for i := sidx * kvCount; i < (sidx+1)*kvCount; i++ {
-			var val []byte
-			metaHash := crypto.Keccak256Hash(val)
+			val := make([]byte, 0)
+			metaHash := common.Hash{}
 			if i < last {
 				val = make([]byte, 8)
 				binary.BigEndian.PutUint64(val, i)
@@ -328,7 +327,7 @@ func makeKVStorage(stateDB *state.StateDB, contract common.Address, shards []uin
 				key := getSlotHash(2, uint256.NewInt(i).Bytes32())
 				stateDB.SetState(contract, key, skey)
 
-				metaHash = crypto.Keccak256Hash(val)
+				metaHash = merkleRootWithMinTree(val, sm.ChunksPerKv(), sstorage.CHUNK_SIZE)
 				meta := generateMetadata(i, uint64(len(val)), metaHash)
 				key = getSlotHash(1, skey)
 				stateDB.SetState(contract, key, meta)
@@ -342,7 +341,6 @@ func makeKVStorage(stateDB *state.StateDB, contract common.Address, shards []uin
 func updateMiningInfoAndInsertNewBlock(pinfo *core.MiningInfo, chain *wrapBlockChain, engine *ethash.Ethash, db ethdb.Database) error {
 	info := new(core.MiningInfo)
 	info.MiningHash = crypto.Keccak256Hash(pinfo.MiningHash.Bytes())
-	fmt.Println(info.MiningHash.Hex())
 	info.LastMineTime = uint64(time.Now().Unix())
 	info.Difficulty = diff
 	info.BlockMined = blockMined
@@ -358,18 +356,25 @@ func updateMiningInfoAndInsertNewBlock(pinfo *core.MiningInfo, chain *wrapBlockC
 
 func verifyTaskResult(stateDB *state.StateDB, chain BlockChain, r *result) error {
 	for i, proofs := range r.proofs {
-		_, meta, err := core.GetSstorageMetadata(stateDB, contract, r.kvIdxs[i])
-		if err != nil {
-			return err
+		_, meta, _ := core.GetSstorageMetadata(stateDB, contract, r.kvIdxs[i])
+		hash := common.Hash{}
+		off := sstorage.CHUNK_SIZE * r.chunkIdxs[i]
+		if meta.KVSize > off {
+			data, got, err := r.task.shardManager.TryReadChunk(r.kvIdxs[i]*r.task.shardManager.ChunksPerKv()+r.chunkIdxs[i], common.BytesToHash(meta.HashInMeta))
+			if err != nil {
+				return err
+			}
+			if !got {
+				return fmt.Errorf("fail to get data for storageContract %s vkidx %d", contract.Hex(), r.kvIdxs[i])
+			}
+
+			if meta.KVSize < off+sstorage.CHUNK_SIZE {
+				data = data[:meta.KVSize-off]
+			}
+			hash = crypto.Keccak256Hash(data)
 		}
-		data, got, err := r.task.shardManager.TryReadChunk(r.kvIdxs[i]*r.task.shardManager.ChunksPerKv()+r.chunkIdxs[i], common.BytesToHash(meta.HashInMeta))
-		if err != nil {
-			return err
-		}
-		if !got {
-			return fmt.Errorf("fail to get data for storageContract %s vkidx %d", contract.Hex(), r.kvIdxs[i])
-		}
-		vr := verify(meta.HashInMeta, crypto.Keccak256Hash(data), r.chunkIdxs[i], proofs)
+
+		vr := verify(meta.HashInMeta, hash, r.chunkIdxs[i], proofs)
 		if !vr {
 			return fmt.Errorf("verify proofs fail for index %d fail", r.kvIdxs[i])
 		}
@@ -427,10 +432,9 @@ func TestWork_SingleShard(test *testing.T) {
 				test.Error("verify task fail")
 			}
 		case r := <-resultCh:
-			fmt.Println("getresult")
 			stateDB, _ := w.chain.State()
 			if err := verifyTaskResult(stateDB, w.chain, r); err != nil {
-				test.Error("verify mined result failed", err.Error())
+				test.Error("verify mined result failed:", err.Error())
 			}
 			return
 		case <-time.NewTimer(3 * time.Second).C:
@@ -472,7 +476,6 @@ func TestWork_MultiShards(test *testing.T) {
 	for i := 0; i < 2; i += 1 {
 		select {
 		case r := <-resultCh:
-			fmt.Println("getresult")
 			stateDB, _ := w.chain.State()
 			if err := verifyTaskResult(stateDB, w.chain, r); err != nil {
 				test.Error("verify mined result failed", err.Error())
@@ -520,7 +523,6 @@ func TestWork_TriggerByNewBlock(test *testing.T) {
 	for i := 0; i < 2; i += 1 {
 		select {
 		case r := <-resultCh:
-			fmt.Println("getresult")
 			stateDB, _ := w.chain.State()
 			if err := verifyTaskResult(stateDB, w.chain, r); err != nil {
 				test.Error("verify mined result failed", err.Error())
@@ -535,48 +537,46 @@ func TestWork_TriggerByNewBlock(test *testing.T) {
 	}
 }
 
-/*
-	func TestWork_ShardIsNotFull(test *testing.T) {
-		var (
-			taskMined    int
-			resultGet    int
-			resultCh     = make(chan *result, 2)
-			shardIdxList = []uint64{0}
-			engine       = ethash.NewFaker()
-			db           = rawdb.NewMemoryDatabase()
-		)
+func TestWork_ShardIsNotFull(test *testing.T) {
+	var (
+		taskMined    int
+		resultGet    int
+		resultCh     = make(chan *result, 2)
+		shardIdxList = []uint64{0}
+		engine       = ethash.NewFaker()
+		db           = rawdb.NewMemoryDatabase()
+	)
 
-		w, _, files, _ := newTestWorker(test, ethashChainConfig, engine, db, shardIdxList, 0, false)
+	w, _, files, _ := newTestWorker(test, ethashChainConfig, engine, db, shardIdxList, 0, false)
 
-		defer w.close()
-		defer engine.Close()
-		defer func(files []string) {
-			for _, file := range files {
-				os.Remove(file)
-			}
-		}(files)
-
-		w.newTaskHook = func(task *task) {
-			taskMined += 1
+	defer w.close()
+	defer engine.Close()
+	defer func(files []string) {
+		for _, file := range files {
+			os.Remove(file)
 		}
-		w.newResultHook = func(result *result) {
-			resultGet += 1
-			resultCh <- result
-		}
+	}(files)
 
-		w.start() // Start mining!
-		select {
-		case r := <-resultCh:
-			fmt.Println("getresult")
-			stateDB, _ := w.chain.State()
-			if err := verifyTaskResult(stateDB, w.chain, r); err != nil {
-				test.Error("verify mined result failed", err.Error())
-			}
-		case <-time.NewTimer(3 * time.Second).C:
-			test.Error("new task timeout")
-		}
+	w.newTaskHook = func(task *task) {
+		taskMined += 1
 	}
-*/
+	w.newResultHook = func(result *result) {
+		resultGet += 1
+		resultCh <- result
+	}
+
+	w.start() // Start mining!
+	select {
+	case r := <-resultCh:
+		stateDB, _ := w.chain.State()
+		if err := verifyTaskResult(stateDB, w.chain, r); err != nil {
+			test.Error("verify mined result failed", err.Error())
+		}
+	case <-time.NewTimer(3 * time.Second).C:
+		test.Error("new task timeout")
+	}
+}
+
 func TestWork_StartAndStopTask(test *testing.T) {
 	var (
 		shardIdxList = []uint64{0, 1, 2}
@@ -611,7 +611,6 @@ func TestWork_StartAndStopTask(test *testing.T) {
 	for i := 0; i < 3; i += 1 {
 		select {
 		case r := <-resultCh:
-			//	fmt.Println("getresult")
 			stateDB, _ := w.chain.State()
 			if err := verifyTaskResult(stateDB, w.chain, r); err != nil {
 				test.Error("verify mined result failed", err.Error())
@@ -674,9 +673,78 @@ func TestWork_LargeKV(test *testing.T) {
 	case r := <-resultCh:
 		stateDB, _ := w.chain.State()
 		if err := verifyTaskResult(stateDB, w.chain, r); err != nil {
-			test.Error("verify mined result failed", err.Error())
+			test.Error("verify mined result failed:", err.Error())
 		}
 	case <-time.NewTimer(3 * time.Second).C:
 		test.Error("new task timeout")
+	}
+}
+
+func TestWork_ProofsCreateAndVerify(test *testing.T) {
+	type testCase struct {
+		chunkPerKVBits uint64
+		val            []byte
+	}
+
+	testCases := []testCase{
+		{
+			chunkPerKVBits: uint64(1),
+			val:            contract.Bytes(),
+		},
+		{
+			chunkPerKVBits: uint64(1),
+			val:            make([]byte, 0),
+		},
+		{
+			chunkPerKVBits: uint64(4),
+			val:            make([]byte, 0),
+		},
+		{
+			chunkPerKVBits: uint64(4),
+			val:            contract.Bytes(),
+		},
+		{
+			chunkPerKVBits: uint64(4),
+			val:            append(make([]byte, sstorage.CHUNK_SIZE), contract.Bytes()...),
+		},
+		{
+			chunkPerKVBits: uint64(4),
+			val:            append(make([]byte, sstorage.CHUNK_SIZE*2), contract.Bytes()...),
+		},
+		{
+			chunkPerKVBits: uint64(4),
+			val:            append(make([]byte, sstorage.CHUNK_SIZE*3), contract.Bytes()...),
+		},
+	}
+
+	for _, tc := range testCases {
+		testWork_ProofsCreateAndVerify(test, tc.val, tc.chunkPerKVBits)
+	}
+}
+
+func testWork_ProofsCreateAndVerify(test *testing.T, val []byte, chunkPerKVBits uint64) {
+	chunkPerKV := uint64(1) << chunkPerKVBits
+	datalen := uint64(len(val))
+
+	root := merkleRootWithMinTree(val, chunkPerKV, sstorage.CHUNK_SIZE)
+	for i := uint64(0); i < chunkPerKV; i++ {
+		hash := common.Hash{}
+		off := i * sstorage.CHUNK_SIZE
+
+		ps, err := getProof(val, sstorage.CHUNK_SIZE, chunkPerKVBits, i)
+		if err != nil {
+			test.Error("error:", err.Error())
+		}
+		if off < datalen {
+			size := datalen - off
+			if size > sstorage.CHUNK_SIZE {
+				size = sstorage.CHUNK_SIZE
+			}
+			hash = crypto.Keccak256Hash(val[off : off+size])
+		}
+		vr := verify(root.Bytes()[:24], hash, i, ps)
+		if !vr {
+			test.Error("verify proof fail, chunk ", i)
+		}
 	}
 }

@@ -190,8 +190,8 @@ type priceOracle struct {
 // The TipGap provided in the SuggestGasTipCap method (provided by EthAPIBackend) will extract the smallest 3 TipGaps
 // from each of the latest n blocks, sort them, and take the median according to the set percentile.
 //
-// # To make it simple, if the transaction volume is small, suggestGasTip set to 0, otherwise the third smallest GasTip
-//  in the latest block is used.
+// To make it simple, if the transaction volume is small, suggestGasTip set to 0, otherwise the third smallest GasTip
+// in the latest block is used.
 //
 // updatePriceOracle update suggestGasTip according to block.
 func (o *priceOracle) updatePriceOracle(block *types.Block) {
@@ -409,12 +409,10 @@ func (w *worker) newWorkLoop(recommit time.Duration) {
 	for {
 		select {
 		case <-w.startCh:
-			fmt.Println("start")
 			w.updateTaskInfo(w.chain.CurrentBlock().Root(), time.Now().Unix())
 			timer.Reset(recommit)
 
 		case head := <-w.chainHeadCh:
-			fmt.Println("new chain head")
 			w.updateTaskInfo(head.Block.Root(), time.Now().Unix())
 			timer.Reset(recommit)
 
@@ -422,7 +420,6 @@ func (w *worker) newWorkLoop(recommit time.Duration) {
 			// If sealing is running resubmit a new work cycle periodically to pull in
 			// higher priced transactions. Disable this overhead for pending blocks.
 			if w.isRunning() {
-				fmt.Println("time out")
 				timer.Reset(recommit)
 				w.updateTaskInfo(w.chain.CurrentBlock().Root(), time.Now().Unix())
 			}
@@ -460,25 +457,19 @@ func (w *worker) mainLoop() {
 	for {
 		select {
 		case <-w.newWorkCh:
-			fmt.Println("get new work")
 			interrupt()
 			stopCh = make(chan struct{})
 			w.commitWork(stopCh)
-			fmt.Println("new work")
 
 		case <-w.taskDoneCh:
-			fmt.Println("get task done")
 			interrupt()
 			stopCh = make(chan struct{})
 			w.commitWork(stopCh)
-			fmt.Println("task done")
 
 		case <-w.taskStartCh:
-			fmt.Println("get task start")
 			interrupt()
 			stopCh = make(chan struct{})
 			w.commitWork(stopCh)
-			fmt.Println("task start")
 
 		case <-w.exitCh:
 			return
@@ -496,7 +487,6 @@ func (w *worker) taskLoop() {
 	for {
 		select {
 		case task := <-w.taskCh:
-			fmt.Println("get task")
 			if w.newTaskHook != nil {
 				w.newTaskHook(task)
 			}
@@ -519,7 +509,6 @@ func (w *worker) resultLoop() {
 	for {
 		select {
 		case result := <-w.resultCh:
-			fmt.Println("get result")
 			if w.newResultHook != nil {
 				w.newResultHook(result)
 			}
@@ -661,7 +650,7 @@ func (w *worker) mineTask(t *task) (bool, error) {
 
 		// Check if the data matches the hash in metadata.
 		if requiredDiff.Cmp(new(big.Int).SetBytes(hash0.Bytes())) < 0 {
-			proofs := make([][]common.Hash, 0)
+			proofs := make([][]common.Hash, len(kvIdxs))
 			kvs, err := w.chain.ReadKVsByIndexList(t.storageContract, kvIdxs, true)
 			if err != nil {
 				return false, err
@@ -671,7 +660,7 @@ func (w *worker) mineTask(t *task) (bool, error) {
 			}
 
 			for i := 0; i < len(dataSet); i++ {
-				if kvs[i].Idx != kvIdxs[i] {
+				if kvs[i].Idx == kvIdxs[i] {
 					ps, err := getProof(kvs[i].Data, sstor.CHUNK_SIZE, t.chunkSizeBits, chunkIdxs[i])
 					if err != nil {
 						return false, err

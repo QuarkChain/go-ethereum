@@ -25,10 +25,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/rawdb"
-
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethdb"
@@ -53,6 +52,7 @@ const (
 var ErrCancelled = errors.New("sync cancelled")
 
 var (
+	empty                       = make([]byte, 0)
 	requestTimeoutInMillisecond = 1000 * time.Millisecond // Millisecond
 )
 
@@ -492,6 +492,19 @@ func (s *Syncer) loadSyncStatus() {
 			lastKvIndex = 0
 		}
 		for _, sid := range shards {
+			// if the shard is not full, fill in the data shard with []byte{},
+			if lastKvIndex < sm.KvEntries()*(sid+1)-1 {
+				go func() {
+					lastIdx, err := s.chain.GetSstorageLastKvIdx(contract)
+					if err != nil {
+						log.Info("loadSyncStatus failed when update: get lastKvIdx")
+						lastIdx = 0
+					}
+					for i := lastIdx; i < sm.KvEntries()*(sid+1)-1; i++ {
+						sm.TryWrite(i, empty, common.Hash{})
+					}
+				}()
+			}
 			exist := false
 			for _, task := range progress.Tasks {
 				if task.Contract == contract && task.ShardId == sid {
