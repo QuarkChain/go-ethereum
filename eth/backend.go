@@ -191,7 +191,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		}
 	}
 
-	log.Info("Initialised mindReading configuration", *chainConfig.MindReading)
+	log.Info("Initialised mindReading configuration", "mindReading conf", *chainConfig.MindReading)
 
 	if err = chainDb.StartFreeze(chainDb, chainConfig); err != nil {
 		log.Crit("Failed to StartFreeze", "error", err)
