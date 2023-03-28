@@ -257,10 +257,8 @@ var (
 	}
 
 	Web3QTestnetValBootnodes = []string{
-		//"/ip4/68.183.157.114/udp/33333/quic/p2p/12D3KooWEZ94qZgJgUNYiLwXahknkniYgozxw5eocijZJkew6Mj5",
-		//"/ip4/128.199.102.174/udp/33333/quic/p2p/12D3KooWNjKALie7Cdpb4KG8axgABA4VCCsKoBQdvYvRhVZhbtPk",
-		"/ip4/127.0.0.1/udp/33333/quic/p2p/12D3KooWEZ94qZgJgUNYiLwXahknkniYgozxw5eocijZJkew6Mj5",
-		"/ip4/127.0.0.1/udp/33334/quic/p2p/12D3KooWRAPv94qoUn8dAa3NQpZGKjaBcdiaqCETrcuyo2rT2ZvV",
+		"/ip4/68.183.157.114/udp/33333/quic/p2p/12D3KooWEZ94qZgJgUNYiLwXahknkniYgozxw5eocijZJkew6Mj5",
+		"/ip4/128.199.102.174/udp/33333/quic/p2p/12D3KooWNjKALie7Cdpb4KG8axgABA4VCCsKoBQdvYvRhVZhbtPk",
 	}
 
 	// Web3QTestnetChainConfig contains the chain parameters to run a node on the Web3Q test network.
@@ -282,7 +280,7 @@ var (
 		PisaBlock:           big.NewInt(0),
 		ArrowGlacierBlock:   nil,
 		Tendermint: &TendermintConfig{
-			Epoch:                  10080,
+			Epoch:                  1000,
 			ValidatorContract:      "",
 			ContractChainID:        0,
 			ValidatorChangeEpochId: 0,
