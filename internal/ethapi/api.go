@@ -738,10 +738,10 @@ func (s *PublicBlockChainAPI) GetHeaderByHash(ctx context.Context, hash common.H
 }
 
 // GetBlockByNumber returns the requested canonical block.
-// * When blockNr is -1 the chain head is returned.
-// * When blockNr is -2 the pending chain head is returned.
-// * When fullTx is true all transactions in the block are returned, otherwise
-//   only the transaction hash is returned.
+//   - When blockNr is -1 the chain head is returned.
+//   - When blockNr is -2 the pending chain head is returned.
+//   - When fullTx is true all transactions in the block are returned, otherwise
+//     only the transaction hash is returned.
 func (s *PublicBlockChainAPI) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber, fullTx bool) (map[string]interface{}, error) {
 	block, err := s.b.BlockByNumber(ctx, number)
 	if block != nil && err == nil {
@@ -1627,7 +1627,7 @@ func (s *PublicTransactionPoolAPI) GetTransactionReceipt(ctx context.Context, ha
 
 	// obtain mindReadingOutput from block.uncles
 	block, err := s.b.BlockByHash(ctx, blockHash)
-	mindReadingOutput := block.FindMindReadingOutput(tx)
+	mindReadingOutput := block.FindMindReadingOutput(tx.Hash())
 
 	// Derive the sender.
 	bigblock := new(big.Int).SetUint64(blockNumber)
@@ -1689,7 +1689,7 @@ func (s *PublicTransactionPoolAPI) GetMindReadingOutput(ctx context.Context, has
 
 	// get external_call_result from uncles
 	block, err := s.b.BlockByHash(ctx, blockHash)
-	mindReadingOutput := block.FindMindReadingOutput(tx)
+	mindReadingOutput := block.FindMindReadingOutput(tx.Hash())
 
 	if mindReadingOutput == nil {
 		return nil, fmt.Errorf("can't find the externalCallResult for the given txhash %s", hash)
