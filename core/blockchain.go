@@ -236,6 +236,7 @@ func (mr MindReadingEnv) GenerateVMMindReadingCtx(blockNumber *big.Int, RelayMin
 		MRClient:         mr.MRClient,
 		ReuseMindReading: RelayMindReadingOutput,
 		MREnable:         enable,
+		Version:          mr.Version,
 		ChainId:          mr.SupportChainId,
 		MinimumConfirms:  mr.MinimumConfirms,
 	}
@@ -2627,7 +2628,6 @@ func (bc *BlockChain) setMindReading(chainConfig *params.ChainConfig) error {
 		bc.mindReading.Version = chainConfig.MindReading.Version
 		bc.mindReading.SupportChainId = chainConfig.MindReading.SupportChainId
 		bc.mindReading.MinimumConfirms = chainConfig.MindReading.MinimumConfirms
-		log.Warn("already configured blockchain.MindReading", " bc.mindReading", bc.mindReading)
 		if chainConfig.MindReading.CallRpc != "" {
 			newClient, err := ethclient.Dial(bc.chainConfig.MindReading.CallRpc)
 			if err != nil {
@@ -2642,6 +2642,7 @@ func (bc *BlockChain) setMindReading(chainConfig *params.ChainConfig) error {
 			}
 			bc.mindReading.MRClient = newClient
 		}
+		log.Warn("already configured blockchain.MindReading", " bc.mindReading", bc.mindReading)
 	}
 	return nil
 }
