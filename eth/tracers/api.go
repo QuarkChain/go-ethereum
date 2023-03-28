@@ -825,10 +825,12 @@ func (api *API) TraceTransaction(ctx context.Context, hash common.Hash, config *
 	if err != nil {
 		return nil, err
 	}
+
 	txctx := &Context{
 		BlockHash: blockHash,
 		TxIndex:   int(index),
 		TxHash:    hash,
+		MrOutput:  block.FindMindReadingOutput(hash),
 	}
 	return api.traceTx(ctx, msg, txctx, vmctx, statedb, config)
 }
