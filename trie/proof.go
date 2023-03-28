@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethdb"
@@ -89,58 +90,28 @@ func (t *Trie) Prove(key []byte, fromLevel uint, proofDb ethdb.KeyValueWriter) e
 	return nil
 }
 
-func (t *Trie) GetProof(key []byte, fromLevel uint) ([]node, [][]byte, error) {
-	// Collect all nodes on the path to key.
-	key = keybytesToHex(key)
-	var nodes []node
-	tn := t.root
-	for len(key) > 0 && tn != nil {
-		switch n := tn.(type) {
-		case *shortNode:
-			if len(key) < len(n.Key) || !bytes.Equal(n.Key, key[:len(n.Key)]) {
-				// The trie doesn't contain the key.
-				tn = nil
-			} else {
-				tn = n.Val
-				key = key[len(n.Key):]
-			}
-			nodes = append(nodes, n)
-		case *fullNode:
-			tn = n.Children[key[0]]
-			key = key[1:]
-			nodes = append(nodes, n)
-		case hashNode:
-			var err error
-			tn, err = t.resolveHash(n, nil)
-			if err != nil {
-				log.Error(fmt.Sprintf("Unhandled trie error: %v", err))
-				return nil, nil, err
-			}
-		default:
-			panic(fmt.Sprintf("%T: invalid node: %v", tn, tn))
-		}
-	}
-	hasher := newHasher(false)
-	defer returnHasherToPool(hasher)
+type value []byte
 
-	nodesValue := make([]node, 0)
-	nodesValueBytes := make([][]byte, 0)
-	for i, n := range nodes {
-		if fromLevel > 0 {
-			fromLevel--
-			continue
-		}
-		var hn node
-		n, hn = hasher.proofHash(n)
-		if _, ok := hn.(hashNode); ok || i == 0 {
-			// If the node's database encoding is a hash (or is the
-			// root node), it becomes a proof element.
-			enc, _ := rlp.EncodeToBytes(n)
-			nodesValue = append(nodesValue, n)
-			nodesValueBytes = append(nodesValueBytes, enc)
-		}
-	}
-	return nodesValue, nodesValueBytes, nil
+func (v value) EncodeRLP(w io.Writer) error {
+	_, err := w.Write(v)
+	return err
+}
+
+type receiptProofList []value
+
+func (n *receiptProofList) Put(key []byte, value []byte) error {
+	*n = append(*n, value)
+	return nil
+}
+
+func (n *receiptProofList) Delete(key []byte) error {
+	panic("not supported")
+}
+
+func (t *Trie) GetReceiptProofList(key []byte) ([]value, error) {
+	var proof receiptProofList
+	err := t.Prove(key, 0, &proof)
+	return proof, err
 }
 
 // Prove constructs a merkle proof for key. The result contains all encoded nodes
@@ -389,9 +360,9 @@ findFork:
 // unset removes all internal node references either the left most or right most.
 // It can meet these scenarios:
 //
-// - The given path is existent in the trie, unset the associated nodes with the
-//   specific direction
-// - The given path is non-existent in the trie
+//   - The given path is existent in the trie, unset the associated nodes with the
+//     specific direction
+//   - The given path is non-existent in the trie
 //   - the fork point is a fullnode, the corresponding child pointed by path
 //     is nil, return
 //   - the fork point is a shortnode, the shortnode is included in the range,
@@ -506,15 +477,15 @@ func hasRightElement(node node, key []byte) bool {
 // Expect the normal case, this function can also be used to verify the following
 // range proofs:
 //
-// - All elements proof. In this case the proof can be nil, but the range should
-//   be all the leaves in the trie.
+//   - All elements proof. In this case the proof can be nil, but the range should
+//     be all the leaves in the trie.
 //
-// - One element proof. In this case no matter the edge proof is a non-existent
-//   proof or not, we can always verify the correctness of the proof.
+//   - One element proof. In this case no matter the edge proof is a non-existent
+//     proof or not, we can always verify the correctness of the proof.
 //
-// - Zero element proof. In this case a single non-existent proof is enough to prove.
-//   Besides, if there are still some other leaves available on the right side, then
-//   an error will be returned.
+//   - Zero element proof. In this case a single non-existent proof is enough to prove.
+//     Besides, if there are still some other leaves available on the right side, then
+//     an error will be returned.
 //
 // Except returning the error to indicate the proof is valid or not, the function will
 // also return a flag to indicate whether there exists more accounts/slots in the trie.
