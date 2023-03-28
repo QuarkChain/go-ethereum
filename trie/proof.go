@@ -90,14 +90,15 @@ func (t *Trie) Prove(key []byte, fromLevel uint, proofDb ethdb.KeyValueWriter) e
 	return nil
 }
 
-type value []byte
+// rlpedData to avoid encoding a value twice by RLP
+type rlpedData []byte
 
-func (v value) EncodeRLP(w io.Writer) error {
+func (v rlpedData) EncodeRLP(w io.Writer) error {
 	_, err := w.Write(v)
 	return err
 }
 
-type receiptProofList []value
+type receiptProofList []rlpedData
 
 func (n *receiptProofList) Put(key []byte, value []byte) error {
 	*n = append(*n, value)
@@ -108,7 +109,7 @@ func (n *receiptProofList) Delete(key []byte) error {
 	panic("not supported")
 }
 
-func (t *Trie) GetReceiptProofList(key []byte) ([]value, error) {
+func (t *Trie) GetReceiptProofList(key []byte) ([]rlpedData, error) {
 	var proof receiptProofList
 	err := t.Prove(key, 0, &proof)
 	return proof, err
