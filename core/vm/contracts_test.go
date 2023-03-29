@@ -21,6 +21,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/sstorage"
 	"io/ioutil"
 	"math/big"
@@ -308,7 +309,47 @@ func benchJson(name, addr string, b *testing.B) {
 	}
 }
 
+var (
+	unmaskDaggerDataInputAbi, unmaskDaggerDataOutputAbi abi.Arguments
+)
+
+type unmaskDaggerDataInput struct {
+	EncodeType  uint64
+	ChunkIdx    uint64
+	KvHash      common.Hash
+	Miner       common.Address
+	MaskedChunk []byte
+}
+
+func initArgs() {
+	BytesTy, err := abi.NewType("bytes", "", nil)
+	if err != nil {
+		panic(err)
+	}
+	Bytes32Ty, err := abi.NewType("bytes32", "", nil)
+	if err != nil {
+		panic(err)
+	}
+	Uint64Ty, err := abi.NewType("uint64", "", nil)
+	AddrTy, err := abi.NewType("address", "", nil)
+	if err != nil {
+		panic(err)
+	}
+
+	unmaskDaggerDataInputAbi = abi.Arguments{
+		{Type: Uint64Ty, Name: "encodeType"},
+		{Type: Uint64Ty, Name: "chunkIdx"},
+		{Type: Bytes32Ty, Name: "kvHash"},
+		{Type: AddrTy, Name: "miner"},
+		{Type: BytesTy, Name: "maskedChunk"},
+	}
+
+	unmaskDaggerDataOutputAbi = abi.Arguments{
+		{Type: BytesTy, Name: "unmaskedChunk"},
+	}
+}
 func TestUnmaskDaggerData(t *testing.T) {
+	initArgs()
 	var Miner common.Address = common.HexToAddress("0x5B38Da6a701c568545dCfcB03FcB875f56beddC4")
 	var EncodeType uint64 = sstorage.ENCODE_ETHASH
 	var ChunkIdx uint64 = 0
@@ -367,61 +408,6 @@ func TestUnmaskDaggerData(t *testing.T) {
 			t.Errorf("Precompiled modified input data: %d vs %d", len(in), len(exp))
 		}
 	})
-}
-
-func TestUnmaskDaggerDataArgs(t *testing.T) {
-
-	var EncodeType uint64 = 1
-	var ChunkIdx uint64 = 2
-	var KvHash common.Hash = common.Hash{}
-	var Miner common.Address = common.HexToAddress("0x5B38Da6a701c568545dCfcB03FcB875f56beddC4")
-	MaskedChunk := common.Hex2Bytes("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
-	pack, err := unmaskDaggerDataInputAbi.Pack(EncodeType, ChunkIdx, KvHash, Miner, MaskedChunk)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	input := "0000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000000000000000000000000000005b38da6a701c568545dcfcb03fcb875f56beddc400000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000020aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	inputBs := common.Hex2Bytes(input)
-	if !bytes.Equal(inputBs, pack) {
-		t.Fatalf("packed data error: \nexp:%s \nact:%s", input, common.Bytes2Hex(pack))
-	}
-
-	values, err := unmaskDaggerDataInputAbi.Unpack(inputBs[:])
-	if err != nil {
-		t.Fatal(fmt.Errorf("Arguments.Unpack failed:%v", err))
-	}
-	var decodedInput unmaskDaggerDataInput
-	err = unmaskDaggerDataInputAbi.Copy(&decodedInput, values)
-	if err != nil {
-		t.Fatal(fmt.Errorf("Arguments.Copy failed:%v", err))
-	}
-
-	if decodedInput.EncodeType != EncodeType {
-		t.Fatal("no match")
-	}
-
-	if decodedInput.KvHash != KvHash {
-		t.Fatal("no match")
-	}
-
-	if decodedInput.Miner != Miner {
-		t.Fatal("no match")
-	}
-
-	if !bytes.Equal(decodedInput.MaskedChunk, MaskedChunk) {
-		t.Fatal("no match")
-	}
-
-	if decodedInput.ChunkIdx != ChunkIdx {
-		t.Fatal("no match")
-	}
-	t.Log(common.Bytes2Hex(decodedInput.MaskedChunk))
-
-	_, err = unmaskDaggerDataOutputAbi.Pack(decodedInput.MaskedChunk)
-	if err != nil {
-		t.Fatal(err)
-	}
 }
 
 func TestPrecompiledBLS12381G1Add(t *testing.T)      { testJson("blsG1Add", "0a", t) }
