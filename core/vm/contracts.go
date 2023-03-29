@@ -27,7 +27,6 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/math"
-	"github.com/ethereum/go-ethereum/consensus/ethash"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/crypto/blake2b"
 	"github.com/ethereum/go-ethereum/crypto/bls12381"
@@ -35,8 +34,6 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/sstorage"
-	"github.com/ethereum/go-ethereum/sstorage/pora"
-
 	//lint:ignore SA1019 Needed for precompile
 	"golang.org/x/crypto/ripemd160"
 )
@@ -834,70 +831,30 @@ func (l *sstoragePisaUnmaskDaggerData) RunWith(env *PrecompiledContractCallEnv, 
 		return nil, errors.New("invalid caller")
 	}
 
+	// solidity input format = abi.encode(uint64 encodeType,uint64 chunkIdx,bytes32 kvHash,address miner,bytes memory maskedData )
 	values, err := unmaskDaggerDataInputAbi.Unpack(input[:])
 	if err != nil {
 		return nil, fmt.Errorf("Arguments.Unpack failed:%v", err)
 	}
-	var decoded unmaskDaggerDataInput
-	err = unmaskDaggerDataInputAbi.Copy(&decoded, values)
+	var decodedInput unmaskDaggerDataInput
+	err = unmaskDaggerDataInputAbi.Copy(&decodedInput, values)
 	if err != nil {
 		return nil, fmt.Errorf("Arguments.Copy failed:%v", err)
 	}
 
-	return unmaskDaggerDataImpl(caller, decoded)
+	if uint64(len(decodedInput.MaskedChunk)) != sstorage.CHUNK_SIZE {
+		return nil, fmt.Errorf("the length of maskedChunk no equals to CHUNK_SIZE")
+	}
 
+	// get encoded key and decode masked chunk
+	commit := common.Hash{}
+	encodeKey := sstorage.CalcEncodeKey(commit, decodedInput.ChunkIdx, decodedInput.Miner)
+	unmaskedChunk := sstorage.DecodeChunk(decodedInput.MaskedChunk, decodedInput.EncodeType, encodeKey)
+	return unmaskDaggerDataOutputAbi.Pack(unmaskedChunk)
 }
 
 // TODO: remove is not supported yet
 type sstoragePisaRemoveRaw struct {
-}
-
-func unmaskDaggerDataImpl(caller common.Address, decoded unmaskDaggerDataInput) ([]byte, error) {
-	if uint64(len(decoded.MaskedChunk)) > sstorage.CHUNK_SIZE {
-		return nil, fmt.Errorf("invalid chunk size")
-	}
-
-	epoch := decoded.Epoch.Uint64()
-	cache := pora.Cache(epoch)
-
-	size := ethash.DatasetSizeForEpoch(epoch)
-
-	shardMgr := sstorage.ContractToShardManager[caller]
-	if shardMgr == nil {
-		return nil, fmt.Errorf("invalid caller")
-	}
-	realHash := make([]byte, len(decoded.Hash)+8)
-	copy(realHash, decoded.Hash[:])
-
-	// in order to not touch the input buffer
-	copyBytes := make([]byte, len(decoded.MaskedChunk))
-	copy(copyBytes, decoded.MaskedChunk)
-	decoded.MaskedChunk = copyBytes
-
-	for i := 0; i < len(decoded.MaskedChunk)/ethash.GetMixBytes(); i++ {
-		pora.ToRealHash(decoded.Hash, shardMgr.MaxKvSize(), uint64(i), realHash, false)
-		mask := ethash.HashimotoForMaskLight(size, cache.Cache, realHash)
-		if len(mask) != ethash.GetMixBytes() {
-			panic("#mask != MixBytes")
-		}
-		for j := 0; j < ethash.GetMixBytes(); j++ {
-			decoded.MaskedChunk[i*ethash.GetMixBytes()+j] ^= mask[j]
-		}
-	}
-	tailBytes := len(decoded.MaskedChunk) % ethash.GetMixBytes()
-	if tailBytes > 0 {
-		i := len(decoded.MaskedChunk) / ethash.GetMixBytes()
-		pora.ToRealHash(decoded.Hash, shardMgr.MaxKvSize(), uint64(i), realHash, false)
-		mask := ethash.HashimotoForMaskLight(size, cache.Cache, realHash)
-		if len(mask) != ethash.GetMixBytes() {
-			panic("#mask != MixBytes")
-		}
-		for j := 0; j < tailBytes; j++ {
-			decoded.MaskedChunk[i*ethash.GetMixBytes()+j] ^= mask[j]
-		}
-	}
-
-	return unmaskDaggerDataOutputAbi.Pack(decoded.MaskedChunk)
 }
 
 var (
@@ -905,8 +862,10 @@ var (
 )
 
 type unmaskDaggerDataInput struct {
-	Epoch       *big.Int
-	Hash        common.Hash
+	EncodeType  uint64
+	ChunkIdx    uint64
+	KvHash      common.Hash
+	Miner       common.Address
 	MaskedChunk []byte
 }
 
@@ -919,14 +878,17 @@ func init() {
 	if err != nil {
 		panic(err)
 	}
-	IntTy, err := abi.NewType("uint256", "", nil)
+	Uint64Ty, err := abi.NewType("uint64", "", nil)
+	AddrTy, err := abi.NewType("address", "", nil)
 	if err != nil {
 		panic(err)
 	}
 
 	unmaskDaggerDataInputAbi = abi.Arguments{
-		{Type: IntTy, Name: "epoch"},
-		{Type: Bytes32Ty, Name: "hash"},
+		{Type: Uint64Ty, Name: "encodeType"},
+		{Type: Uint64Ty, Name: "chunkIdx"},
+		{Type: Bytes32Ty, Name: "kvHash"},
+		{Type: AddrTy, Name: "miner"},
 		{Type: BytesTy, Name: "maskedChunk"},
 	}
 

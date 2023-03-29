@@ -21,6 +21,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/ethereum/go-ethereum/sstorage"
 	"io/ioutil"
 	"math/big"
 	"testing"
@@ -30,7 +31,6 @@ import (
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/params"
-	"github.com/ethereum/go-ethereum/sstorage"
 )
 
 // precompiledTest defines the input/output pairs for precompiled contract tests.
@@ -309,28 +309,31 @@ func benchJson(name, addr string, b *testing.B) {
 }
 
 func TestUnmaskDaggerData(t *testing.T) {
+	var Miner common.Address = common.HexToAddress("0x5B38Da6a701c568545dCfcB03FcB875f56beddC4")
+	var EncodeType uint64 = sstorage.ENCODE_ETHASH
+	var ChunkIdx uint64 = 0
+	var KvHash common.Hash = common.Hash{}
+	UnmaskedChunk := [4 * 1024]byte{0x01, 0x2}
+	encodedKey := sstorage.CalcEncodeKey(KvHash, ChunkIdx, Miner)
+	maskedChunk := sstorage.EncodeChunk(UnmaskedChunk[:], sstorage.ENCODE_ETHASH, encodedKey)
+
 	sstorage.InitializeConfig()
 	p := &sstoragePisaUnmaskDaggerData{}
 
-	hash := common.Hash{0x01, 0x2}
-	epoch := big.NewInt(1)
-	maskedChunk := [4 * 1024]byte{0x03, 0x4}
-	input := unmaskDaggerDataInput{Epoch: epoch, Hash: hash, MaskedChunk: maskedChunk[:]}
-	packed, err := unmaskDaggerDataInputAbi.Pack(epoch, hash, maskedChunk[:])
+	packed, err := unmaskDaggerDataInputAbi.Pack(EncodeType, ChunkIdx, KvHash, Miner, maskedChunk[:])
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	caller := sstorage.ShardInfos[0].Contract
-	expected, err := unmaskDaggerDataImpl(caller, input)
+	expOutput, err := unmaskDaggerDataOutputAbi.Pack(UnmaskedChunk[:])
 	if err != nil {
 		t.Fatal(err)
 	}
-
 	test := precompiledTest{
 		Name:     "TestUnmaskDaggerData",
 		Input:    hex.EncodeToString(packed),
-		Expected: hex.EncodeToString(expected),
+		Expected: hex.EncodeToString(expOutput),
 	}
 	in := common.Hex2Bytes(test.Input)
 	gas := p.RequiredGas(in)
@@ -353,7 +356,7 @@ func TestUnmaskDaggerData(t *testing.T) {
 		if res, _, err := RunPrecompiledContract(env, p, in, gas); err != nil {
 			t.Error(err)
 		} else if common.Bytes2Hex(res) != test.Expected {
-			t.Errorf("Expected %v, got %v", test.Expected, common.Bytes2Hex(res))
+			t.Errorf("\nexp %v \ngot %v", test.Expected, common.Bytes2Hex(res))
 		}
 		if expGas := test.Gas; expGas != gas {
 			t.Errorf("%v: gas wrong, expected %d, got %d", test.Name, expGas, gas)
@@ -367,33 +370,57 @@ func TestUnmaskDaggerData(t *testing.T) {
 }
 
 func TestUnmaskDaggerDataArgs(t *testing.T) {
-	hash := common.Hash{0x01, 0x2}
-	epoch := big.NewInt(1)
-	maskedChunk := [4 * 1024]byte{0x03, 0x4}
-	packed, err := unmaskDaggerDataInputAbi.Pack(epoch, hash, maskedChunk[:])
+
+	var EncodeType uint64 = 1
+	var ChunkIdx uint64 = 2
+	var KvHash common.Hash = common.Hash{}
+	var Miner common.Address = common.HexToAddress("0x5B38Da6a701c568545dCfcB03FcB875f56beddC4")
+	MaskedChunk := common.Hex2Bytes("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	pack, err := unmaskDaggerDataInputAbi.Pack(EncodeType, ChunkIdx, KvHash, Miner, MaskedChunk)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	values, err := unmaskDaggerDataInputAbi.Unpack(packed)
-	if err != nil {
-		t.Fatal(err)
+	input := "0000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000000000000000000000000000005b38da6a701c568545dcfcb03fcb875f56beddc400000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000020aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	inputBs := common.Hex2Bytes(input)
+	if !bytes.Equal(inputBs, pack) {
+		t.Fatalf("packed data error: \nexp:%s \nact:%s", input, common.Bytes2Hex(pack))
 	}
 
-	var decoded unmaskDaggerDataInput
-	err = unmaskDaggerDataInputAbi.Copy(&decoded, values)
+	values, err := unmaskDaggerDataInputAbi.Unpack(inputBs[:])
 	if err != nil {
-		t.Fatal(err)
+		t.Fatal(fmt.Errorf("Arguments.Unpack failed:%v", err))
 	}
-	if decoded.Epoch.Cmp(epoch) != 0 {
-		t.Fatal("height mismatch")
+	var decodedInput unmaskDaggerDataInput
+	err = unmaskDaggerDataInputAbi.Copy(&decodedInput, values)
+	if err != nil {
+		t.Fatal(fmt.Errorf("Arguments.Copy failed:%v", err))
 	}
 
-	if decoded.Hash != hash {
-		t.Fatal("hash mismatch")
+	if decodedInput.EncodeType != EncodeType {
+		t.Fatal("no match")
 	}
-	if !bytes.Equal(decoded.MaskedChunk, maskedChunk[:]) {
-		t.Fatal("maskedChunk mismatch")
+
+	if decodedInput.KvHash != KvHash {
+		t.Fatal("no match")
+	}
+
+	if decodedInput.Miner != Miner {
+		t.Fatal("no match")
+	}
+
+	if !bytes.Equal(decodedInput.MaskedChunk, MaskedChunk) {
+		t.Fatal("no match")
+	}
+
+	if decodedInput.ChunkIdx != ChunkIdx {
+		t.Fatal("no match")
+	}
+	t.Log(common.Bytes2Hex(decodedInput.MaskedChunk))
+
+	_, err = unmaskDaggerDataOutputAbi.Pack(decodedInput.MaskedChunk)
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 
