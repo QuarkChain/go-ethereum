@@ -824,6 +824,16 @@ func (l *sstoragePisaUnmaskDaggerData) Run(input []byte) ([]byte, error) {
 }
 
 func (l *sstoragePisaUnmaskDaggerData) RunWith(env *PrecompiledContractCallEnv, input []byte) ([]byte, error) {
+
+	// solidity input format = abi.encode(uint64 encodeType,uint64 chunkIdx,bytes32 kvHash,address miner,bytes memory maskedData )
+	// 0000000000000000000000000000000000000000000000000000000000000001
+	// 0000000000000000000000000000000000000000000000000000000000000002
+	// 0000000000000000000000000000000000000000000000000000000000000000
+	// 0000000000000000000000005b38da6a701c568545dcfcb03fcb875f56beddc4
+	// 00000000000000000000000000000000000000000000000000000000000000a0
+	// 0000000000000000000000000000000000000000000000000000000000000002
+	// aaaa000000000000000000000000000000000000000000000000000000000000
+
 	evm := env.evm
 	caller := env.caller.Address()
 	maxKVSize := evm.StateDB.SstorageMaxKVSize(caller)
@@ -831,70 +841,33 @@ func (l *sstoragePisaUnmaskDaggerData) RunWith(env *PrecompiledContractCallEnv, 
 		return nil, errors.New("invalid caller")
 	}
 
-	// solidity input format = abi.encode(uint64 encodeType,uint64 chunkIdx,bytes32 kvHash,address miner,bytes memory maskedData )
-	values, err := unmaskDaggerDataInputAbi.Unpack(input[:])
-	if err != nil {
-		return nil, fmt.Errorf("Arguments.Unpack failed:%v", err)
-	}
-	var decodedInput unmaskDaggerDataInput
-	err = unmaskDaggerDataInputAbi.Copy(&decodedInput, values)
-	if err != nil {
-		return nil, fmt.Errorf("Arguments.Copy failed:%v", err)
-	}
+	encodeType := new(big.Int).SetBytes(getData(input, 0, 32)).Uint64()
+	chunkIdx := new(big.Int).SetBytes(getData(input, 32, 32)).Uint64()
+	kvHash := common.BytesToHash(getData(input, 64, 32))
+	miner := common.BytesToAddress(getData(input, 96, 32))
+	dataptr := new(big.Int).SetBytes(getData(input, 128, 32)).Uint64()
+	datalen := new(big.Int).SetBytes(getData(input, 160, 32)).Uint64()
+	maskedChunkData := getData(input, dataptr+32, datalen)
 
-	if uint64(len(decodedInput.MaskedChunk)) != sstorage.CHUNK_SIZE {
+	if uint64(len(maskedChunkData)) != sstorage.CHUNK_SIZE || datalen != sstorage.CHUNK_SIZE {
 		return nil, fmt.Errorf("the length of maskedChunk no equals to CHUNK_SIZE")
 	}
 
+	if !sstorage.IsValidEncodeType(encodeType) {
+		return nil, fmt.Errorf("invalid encode type %d", encodeType)
+	}
 	// get encoded key and decode masked chunk
-	commit := common.Hash{}
-	encodeKey := sstorage.CalcEncodeKey(commit, decodedInput.ChunkIdx, decodedInput.Miner)
-	unmaskedChunk := sstorage.DecodeChunk(decodedInput.MaskedChunk, decodedInput.EncodeType, encodeKey)
-	return unmaskDaggerDataOutputAbi.Pack(unmaskedChunk)
+	encodeKey := sstorage.CalcEncodeKey(kvHash, chunkIdx, miner)
+	unmaskedChunk := sstorage.DecodeChunk(maskedChunkData, encodeType, encodeKey)
+
+	pb := make([]byte, 64)
+	binary.BigEndian.PutUint64(pb[32-8:32], 32)
+	binary.BigEndian.PutUint64(pb[64-8:64], uint64(len(unmaskedChunk)))
+	return append(pb, unmaskedChunk...), nil
 }
 
 // TODO: remove is not supported yet
 type sstoragePisaRemoveRaw struct {
-}
-
-var (
-	unmaskDaggerDataInputAbi, unmaskDaggerDataOutputAbi abi.Arguments
-)
-
-type unmaskDaggerDataInput struct {
-	EncodeType  uint64
-	ChunkIdx    uint64
-	KvHash      common.Hash
-	Miner       common.Address
-	MaskedChunk []byte
-}
-
-func init() {
-	BytesTy, err := abi.NewType("bytes", "", nil)
-	if err != nil {
-		panic(err)
-	}
-	Bytes32Ty, err := abi.NewType("bytes32", "", nil)
-	if err != nil {
-		panic(err)
-	}
-	Uint64Ty, err := abi.NewType("uint64", "", nil)
-	AddrTy, err := abi.NewType("address", "", nil)
-	if err != nil {
-		panic(err)
-	}
-
-	unmaskDaggerDataInputAbi = abi.Arguments{
-		{Type: Uint64Ty, Name: "encodeType"},
-		{Type: Uint64Ty, Name: "chunkIdx"},
-		{Type: Bytes32Ty, Name: "kvHash"},
-		{Type: AddrTy, Name: "miner"},
-		{Type: BytesTy, Name: "maskedChunk"},
-	}
-
-	unmaskDaggerDataOutputAbi = abi.Arguments{
-		{Type: BytesTy, Name: "unmaskedChunk"},
-	}
 }
 
 var (
