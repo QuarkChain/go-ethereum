@@ -192,6 +192,19 @@ func encodeChunk(bs []byte, encodeType uint64, encodeKey common.Hash) []byte {
 	}
 }
 
+func IsValidEncodeType(encodeType uint64) bool {
+	switch encodeType {
+	case ENCODE_KECCAK_256:
+		return true
+	case NO_ENCODE:
+		return true
+	case ENCODE_ETHASH:
+		return true
+	default:
+		return false
+	}
+}
+
 func DecodeChunk(bs []byte, encodeType uint64, encodeKey common.Hash) []byte {
 	return decodeChunk(bs, encodeType, encodeKey)
 }
