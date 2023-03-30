@@ -174,8 +174,8 @@ func (h *Header) EmptyReceipts() bool {
 }
 
 // GetMindReadingOutput return the MindReadingOutput when the txHash matches between h.txHash and tx.Hash()
-func (h *Header) GetMindReadingOutput(tx *Transaction) []byte {
-	if h.TxHash == tx.Hash() {
+func (h *Header) GetMindReadingOutput(txhash common.Hash) []byte {
+	if h.TxHash == txhash {
 		return h.Extra
 	}
 	return nil
@@ -197,7 +197,7 @@ func (it *MindReadingOutputIterator) GetNextMindReadingOutput(tx *Transaction) [
 	if it.index >= len(it.uncles) {
 		return nil
 	}
-	output := it.uncles[it.index].GetMindReadingOutput(tx)
+	output := it.uncles[it.index].GetMindReadingOutput(tx.Hash())
 	if output != nil {
 		it.index++
 	}
@@ -279,6 +279,17 @@ func NewBlock(header *Header, txs []*Transaction, uncles []*Header, receipts []*
 	}
 
 	return b
+}
+
+// FindMindReadingOutput find the mrOutput corresponding to the input-tx if exists
+func (b *Block) FindMindReadingOutput(txhash common.Hash) []byte {
+	for i := 0; i < len(b.uncles); i++ {
+		output := b.uncles[i].GetMindReadingOutput(txhash)
+		if output != nil {
+			return output
+		}
+	}
+	return nil
 }
 
 // NewBlockWithHeader creates a block with the given header data. The

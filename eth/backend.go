@@ -172,6 +172,26 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			chainConfig.Tendermint.ValRpc = config.ValRpc
 		}
 	}
+	if config.MindReadingEnableBlockNumber != nil || chainConfig.MindReading != nil {
+		if chainConfig.MindReading == nil {
+			chainConfig.MindReading = &params.MindReadingConfig{}
+		}
+
+		if config.MindReadingSupportChainId != 0 {
+			chainConfig.MindReading.SupportChainId = config.MindReadingSupportChainId
+		}
+		if config.MindReadingCallRpc != "" {
+			chainConfig.MindReading.CallRpc = config.MindReadingCallRpc
+		}
+		if config.MindReadingEnableBlockNumber != nil {
+			chainConfig.MindReading.EnableBlockNumber = config.MindReadingEnableBlockNumber
+		}
+		if config.IsMiner && chainConfig.MindReading.EnableBlockNumber.Cmp(big.NewInt(0)) >= 0 && chainConfig.MindReading.CallRpc == "" {
+			return nil, fmt.Errorf("Validator must enable MindReading with valid MindReadingCallRpc ")
+		}
+	}
+
+	log.Info("Initialised mindReading configuration", "mindReading conf", *chainConfig.MindReading)
 
 	if err = chainDb.StartFreeze(chainDb, chainConfig); err != nil {
 		log.Crit("Failed to StartFreeze", "error", err)

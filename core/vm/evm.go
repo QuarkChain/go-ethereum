@@ -218,6 +218,9 @@ func (evm *EVM) IsMindReadingEnabled() bool {
 
 // PresetCCCOutputs pre-sets the result of the cross-chain-call and is used when verifying the correctness of the transaction
 func (evm *EVM) PresetCCCOutputs(versionedResult []byte) error {
+	if versionedResult == nil || len(versionedResult) == 0 {
+		return nil
+	}
 	if evm.IsMindReadingEnabled() && evm.MRContext.ReuseMindReading {
 		return evm.setCCCOutputs(versionedResult)
 	}

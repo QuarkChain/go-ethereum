@@ -1501,7 +1501,6 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractCallEnv, input []byte, 
 	if len(input) != CrossChainCallInputLength {
 		return nil, 0, ErrInvalidCrossChainCallInputLength
 	}
-
 	if !env.evm.IsMindReadingEnabled() {
 		return nil, 0, ErrCrossChainCallNoEnabled
 	}

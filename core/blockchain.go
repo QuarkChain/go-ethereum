@@ -19,6 +19,7 @@ package core
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -228,13 +229,14 @@ type MindReadingEnv struct {
 
 func (mr MindReadingEnv) GenerateVMMindReadingCtx(blockNumber *big.Int, RelayMindReadingOutput bool) *vm.MindReadingContext {
 	var enable bool
-	if mr.EnableBlockNumber != nil && mr.EnableBlockNumber.Cmp(blockNumber) >= 0 {
+	if mr.EnableBlockNumber != nil && blockNumber.Cmp(mr.EnableBlockNumber) >= 0 {
 		enable = true
 	}
 	return &vm.MindReadingContext{
 		MRClient:         mr.MRClient,
 		ReuseMindReading: RelayMindReadingOutput,
 		MREnable:         enable,
+		Version:          mr.Version,
 		ChainId:          mr.SupportChainId,
 		MinimumConfirms:  mr.MinimumConfirms,
 	}
@@ -279,9 +281,13 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *par
 	bc.validator = NewBlockValidator(chainConfig, bc, engine)
 	bc.prefetcher = newStatePrefetcher(chainConfig, bc, engine)
 	bc.processor = NewStateProcessor(chainConfig, bc, engine)
-	bc.setMindReading(chainConfig)
 
 	var err error
+	err = bc.setMindReading(chainConfig)
+	if err != nil {
+		return nil, err
+	}
+
 	bc.hc, err = NewHeaderChain(db, chainConfig, engine, bc.insertStopped)
 	if err != nil {
 		return nil, err
@@ -2636,8 +2642,16 @@ func (bc *BlockChain) setMindReading(chainConfig *params.ChainConfig) error {
 			if err != nil {
 				return err
 			}
+			cid, err := newClient.ChainID(context.Background())
+			if err != nil {
+				return err
+			}
+			if cid.Uint64() != bc.mindReading.SupportChainId {
+				return fmt.Errorf("supportChainId [%d] no match with chainId [%d] connected with ethclient", bc.mindReading.SupportChainId, cid.Uint64())
+			}
 			bc.mindReading.MRClient = newClient
 		}
+		log.Warn("already configured blockchain.MindReading", " bc.mindReading", bc.mindReading)
 	}
 	return nil
 }
