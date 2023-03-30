@@ -95,7 +95,7 @@ func verify(root []byte, dataHash common.Hash, chunkIdx uint64, proofs []common.
 	return bytes.Compare(root[:24], r.Bytes()[:24]) == 0
 }
 
-func merkleRootWithMinTree(data []byte, chunkPerKV uint64, chunkSize uint64) common.Hash {
+func merkleRoot(data []byte, chunkPerKV uint64, chunkSize uint64) common.Hash {
 	l := uint64(len(data))
 	if l == 0 {
 		return common.Hash{}
@@ -123,4 +123,55 @@ func merkleRootWithMinTree(data []byte, chunkPerKV uint64, chunkSize uint64) com
 		n = n / 2
 	}
 	return nodes[0]
+}
+
+func findNChunk(dataLen, chunkSize uint64) (uint64, uint64) {
+	if dataLen == 0 {
+		return 0, 0
+	}
+	n := (dataLen+chunkSize-1)/chunkSize - 1
+	nChunkBits := uint64(0)
+	for n != 0 {
+		nChunkBits++
+		n = n >> 1
+	}
+
+	return uint64(1) << nChunkBits, nChunkBits
+}
+
+func getProofWithMinTree(data []byte, chunkSize, nChunkBits, chunkIdx uint64) ([]common.Hash, error) {
+	if len(data) == 0 {
+		return []common.Hash{}, nil
+	}
+	nChunks := uint64(1) << nChunkBits
+	if chunkIdx >= nChunks {
+		return []common.Hash{}, fmt.Errorf("index out of scope")
+	}
+	nMinChunks, nMinChunkBits := findNChunk(uint64(len(data)), chunkSize)
+	if chunkIdx >= nMinChunks {
+		return []common.Hash{}, nil
+	}
+	return getProof(data, chunkSize, nMinChunkBits, chunkIdx)
+}
+
+func verifyWithMinTree(root []byte, dataHash common.Hash, chunkIdx uint64, proofs []common.Hash) bool {
+	nMinChunkBits := uint64(len(proofs))
+	if chunkIdx >= uint64(1)<<nMinChunkBits {
+		return bytes.Compare(dataHash.Bytes(), make([]byte, 32)) == 0
+	}
+	r, err := calculateRootWithProof(dataHash, chunkIdx, proofs)
+	if err != nil {
+		return false
+	}
+
+	return bytes.Compare(root[:24], r.Bytes()[:24]) == 0
+}
+
+func merkleRootWithMinTree(data []byte, chunkSize uint64) common.Hash {
+	l := uint64(len(data))
+	if l == 0 {
+		return common.Hash{}
+	}
+	nChunk, _ := findNChunk(uint64(len(data)), chunkSize)
+	return merkleRoot(data, nChunk, chunkSize)
 }

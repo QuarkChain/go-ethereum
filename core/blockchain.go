@@ -2394,17 +2394,16 @@ func GetSstorageMetadata(s *state.StateDB, contract common.Address, index uint64
 	// 	uint24 kvSize;
 	// 	bytes24 hash;
 	// }
-	defaultHash, defaultMeta := GetDefaultMetadata(index)
 	position := getSlotHash(2, uint256.NewInt(index).Bytes32())
 	skey := s.GetState(contract, position)
 	if skey == emptyHash {
-		return defaultHash, defaultMeta, fmt.Errorf("fail to get skey for index %d", index)
+		return emptyHash, nil, fmt.Errorf("fail to get skey for index %d", index)
 	}
 
 	position = getSlotHash(1, skey)
 	meta := s.GetState(contract, position)
 	if meta == emptyHash {
-		return defaultHash, defaultMeta, fmt.Errorf("fail to get SstorageMetadata for skey %s", skey.Hex())
+		return emptyHash, nil, fmt.Errorf("fail to get SstorageMetadata for skey %s", skey.Hex())
 	}
 
 	return meta, &SstorageMetadata{
@@ -2454,6 +2453,34 @@ func VerifyKV(sm *sstorage.ShardManager, idx uint64, val []byte, meta *SstorageM
 	}
 
 	return data, nil
+}
+
+func (bc *BlockChain) FillSstorWithEmptyKV(contract common.Address, start, limit uint64) (uint64, error) {
+	sm := sstorage.ContractToShardManager[contract]
+	if sm == nil {
+		return start, fmt.Errorf("kv verify fail: contract not support, contract: %s", contract.Hex())
+	}
+
+	bc.chainmu.TryLock()
+	defer bc.chainmu.Unlock()
+
+	empty := make([]byte, 0)
+	lastKvIdx, err := bc.GetSstorageLastKvIdx(contract)
+	if err != nil {
+		return start, fmt.Errorf("get lastKvIdx for FillEmptyKV fail, err: %s", err.Error())
+	}
+	for idx := start; idx <= limit; idx++ {
+		if lastKvIdx > idx {
+			continue
+		}
+		_, err = sm.TryWrite(idx, empty, common.Hash{})
+		if err != nil {
+			err = fmt.Errorf("write empty to kv file fail, index: %d; error: %s", idx, err.Error())
+			return idx, err
+		}
+	}
+
+	return limit + 1, nil
 }
 
 // VerifyAndWriteKV verify a list of raw KV data using the metadata saved in the local level DB and write successfully verified
@@ -2543,16 +2570,21 @@ func (bc *BlockChain) ReadKVsByIndexListWithState(stateDB *state.StateDB, contra
 		return nil, fmt.Errorf("shard manager for contract %s is not support", contract.Hex())
 	}
 
+	val := stateDB.GetState(contract, uint256.NewInt(0).Bytes32())
+	lastIndex := new(big.Int).SetBytes(val.Bytes()).Uint64()
+
 	res := make([]*KV, 0)
 	for _, idx := range indexes {
-		_, meta, err := GetSstorageMetadata(stateDB, contract, idx)
-		if returnEmpty && meta.KVSize == 0 {
-			kv := KV{idx, make([]byte, 0)}
-			res = append(res, &kv)
+		if idx >= lastIndex {
+			if returnEmpty {
+				kv := KV{idx, make([]byte, 0)}
+				res = append(res, &kv)
+			}
 			continue
 		}
+		_, meta, err := GetSstorageMetadata(stateDB, contract, idx)
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("get storage metadata fail, err: ", err.Error())
 		}
 		data, ok, err := sm.TryRead(idx, int(meta.KVSize), common.BytesToHash(meta.HashInMeta))
 		if ok && err == nil {

@@ -99,21 +99,14 @@ func (ds *DataShard) GetStorageFile(chunkIdx uint64) *DataFile {
 	return nil
 }
 
-// Read the encoded data from storage and return it.
-func (ds *DataShard) ReadEncoded(kvIdx uint64, readLen int) ([]byte, error) {
-	return ds.readWith(kvIdx, readLen, func(cdata []byte, chunkIdx uint64) []byte {
-		return cdata
-	})
-}
-
-// Read the encoded data from storage and return it.
+// ReadChunkEncoded read the encoded data from storage and return it.
 func (ds *DataShard) ReadChunkEncoded(kvIdx uint64, chunkIdx uint64) ([]byte, error) {
 	return ds.readChunkWith(kvIdx, chunkIdx, func(cdata []byte, chunkIdx uint64) []byte {
 		return cdata
 	})
 }
 
-// Read the encoded data from storage and decode it.
+// ReadChunk read the encoded data from storage and decode it.
 func (ds *DataShard) ReadChunk(kvIdx uint64, chunkIdx uint64, commit common.Hash) ([]byte, error) {
 	return ds.readChunkWith(kvIdx, chunkIdx, func(cdata []byte, chunkIdx uint64) []byte {
 		encodeKey := calcEncodeKey(commit, chunkIdx, ds.dataFiles[0].miner)
@@ -121,7 +114,7 @@ func (ds *DataShard) ReadChunk(kvIdx uint64, chunkIdx uint64, commit common.Hash
 	})
 }
 
-// Read the encoded data from storage with a decoder.
+// readChunkWith read the encoded chunk from storage with a decoder.
 func (ds *DataShard) readChunkWith(kvIdx uint64, chunkIdx uint64, decoder func([]byte, uint64) []byte) ([]byte, error) {
 	if !ds.Contains(kvIdx) {
 		return nil, fmt.Errorf("kv not found")
@@ -138,6 +131,13 @@ func (ds *DataShard) readChunkWith(kvIdx uint64, chunkIdx uint64, decoder func([
 	return data, nil
 }
 
+// ReadEncoded read the encoded data from storage and return it.
+func (ds *DataShard) ReadEncoded(kvIdx uint64, readLen int) ([]byte, error) {
+	return ds.readWith(kvIdx, readLen, func(cdata []byte, chunkIdx uint64) []byte {
+		return cdata
+	})
+}
+
 // Read the encoded data from storage and decode it.
 func (ds *DataShard) Read(kvIdx uint64, readLen int, commit common.Hash) ([]byte, error) {
 	return ds.readWith(kvIdx, readLen, func(cdata []byte, chunkIdx uint64) []byte {
@@ -146,7 +146,7 @@ func (ds *DataShard) Read(kvIdx uint64, readLen int, commit common.Hash) ([]byte
 	})
 }
 
-// Read the encoded data from storage with a decoder.
+// readWith read the encoded data from storage with a decoder.
 func (ds *DataShard) readWith(kvIdx uint64, readLen int, decoder func([]byte, uint64) []byte) ([]byte, error) {
 	if !ds.Contains(kvIdx) {
 		return nil, fmt.Errorf("kv not found")
@@ -262,7 +262,7 @@ func (ds *DataShard) Write(kvIdx uint64, b []byte, commit common.Hash) error {
 		err := ds.writeChunk(chunkIdx, encodedChunk)
 
 		if err != nil {
-			return nil
+			return err
 		}
 	}
 	return nil

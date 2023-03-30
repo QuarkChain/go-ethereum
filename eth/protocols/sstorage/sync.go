@@ -134,14 +134,27 @@ type kvHealResponse struct {
 // kvTask represents the sync task for a sstorage shard.
 type kvTask struct {
 	// These fields get serialized to leveldb on shutdown
-	Contract   common.Address // Contract address
-	ShardId    uint64         // ShardId
-	KvSubTasks []*kvSubTask
-	HealTask   *kvHealTask
+	Contract        common.Address // Contract address
+	ShardId         uint64         // ShardId
+	KvSubTasks      []*kvSubTask
+	HealTask        *kvHealTask
+	KvSubEmptyTasks []*kvSubEmptyTask
 
 	statelessPeers map[string]struct{} // Peers that failed to deliver kv Data
 
 	done bool // Flag whether the task can be removed
+}
+
+// task which is used to write empty to sstorage file, so the files will fill up with encode data
+type kvSubEmptyTask struct {
+	kvTask *kvTask
+
+	next  uint64
+	First uint64
+	Last  uint64
+
+	isRunning bool
+	done      bool // Flag whether the task can be removed
 }
 
 type kvSubTask struct {
@@ -246,6 +259,10 @@ type BlockChain interface {
 	// KVs to the sstorage file. And return the inserted KV index list.
 	VerifyAndWriteKV(contract common.Address, data map[uint64][]byte, providerAddress common.Address) (uint64, uint64, []uint64, error)
 
+	// FillSstorWithEmptyKV get the lastKVIndex and if the kv index need to fill is larger than or equal to lastKVIndex
+	// fill up the kv with empty ([]byte{}), so the data in the file will be filled with encode empty data
+	FillSstorWithEmptyKV(contract common.Address, start, limit uint64) (uint64, error)
+
 	// ReadEncodedKVsByIndexList Read the masked KVs by a list of KV index.
 	ReadEncodedKVsByIndexList(contract common.Address, shardId uint64, indexes []uint64) (common.Address, []*core.KV, error)
 
@@ -287,6 +304,8 @@ type Syncer struct {
 	kvRangeReqs   map[uint64]*kvRangeRequest // KV requests currently running
 	kvHealReqs    map[uint64]*kvHealRequest  // KV heal requests currently running
 
+	runningEmptyTaskTreads int // Number of working threads for processing empty task
+
 	kvSynced  uint64             // Number of kvs downloaded
 	kvBytes   common.StorageSize // Number of kv bytes downloaded
 	kvSyncing uint64             // Number of kvs downloading
@@ -314,10 +333,11 @@ func NewSyncer(db ethdb.KeyValueStore, chain BlockChain, sstorageInfo map[common
 		rates:    msgrate.NewTrackers(log.New("proto", "sstorage")),
 		update:   make(chan struct{}, 1),
 
-		kvRangeIdlers: make(map[string]struct{}),
-		kvHealIdlers:  make(map[string]struct{}),
-		kvRangeReqs:   make(map[uint64]*kvRangeRequest),
-		kvHealReqs:    make(map[uint64]*kvHealRequest),
+		kvRangeIdlers:          make(map[string]struct{}),
+		kvHealIdlers:           make(map[string]struct{}),
+		runningEmptyTaskTreads: 0,
+		kvRangeReqs:            make(map[uint64]*kvRangeRequest),
+		kvHealReqs:             make(map[uint64]*kvHealRequest),
 	}
 }
 
@@ -430,6 +450,8 @@ func (s *Syncer) Sync(cancel chan struct{}) error {
 		// Assign all the Data retrieval tasks to any free peers
 		s.assignKVHealTasks(kvHealResps, kvHealReqFails, cancel)
 
+		s.assignKVEmptyTasks()
+
 		// Wait for something to happen
 		select {
 		case <-time.After(requestTimeoutInMillisecond):
@@ -478,6 +500,10 @@ func (s *Syncer) loadSyncStatus() {
 					kvSubTask.kvTask = task
 					kvSubTask.next = kvSubTask.First
 				}
+				for _, kvSubEmptyTask := range task.KvSubEmptyTasks {
+					kvSubEmptyTask.kvTask = task
+					kvSubEmptyTask.next = kvSubEmptyTask.First
+				}
 			}
 			s.kvSynced, s.kvBytes = progress.KVSynced, progress.KVBytes
 		}
@@ -492,19 +518,6 @@ func (s *Syncer) loadSyncStatus() {
 			lastKvIndex = 0
 		}
 		for _, sid := range shards {
-			// if the shard is not full, fill in the data shard with []byte{},
-			if lastKvIndex < sm.KvEntries()*(sid+1)-1 {
-				go func() {
-					lastIdx, err := s.chain.GetSstorageLastKvIdx(contract)
-					if err != nil {
-						log.Info("loadSyncStatus failed when update: get lastKvIdx")
-						lastIdx = 0
-					}
-					for i := lastIdx; i < sm.KvEntries()*(sid+1)-1; i++ {
-						sm.TryWrite(i, empty, common.Hash{})
-					}
-				}()
-			}
 			exist := false
 			for _, task := range progress.Tasks {
 				if task.Contract == contract && task.ShardId == sid {
@@ -516,13 +529,7 @@ func (s *Syncer) loadSyncStatus() {
 			if exist {
 				continue
 			}
-			first, limit := sm.KvEntries()*sid, sm.KvEntries()*(sid+1)-1
-			if lastKvIndex > 0 && first >= lastKvIndex {
-				continue
-			}
-			if lastKvIndex > 0 && limit >= lastKvIndex {
-				limit = lastKvIndex - 1
-			}
+
 			task := kvTask{
 				Contract:       contract,
 				ShardId:        sid,
@@ -534,6 +541,18 @@ func (s *Syncer) loadSyncStatus() {
 				kvTask:  &task,
 				Indexes: make(map[uint64]int64),
 			}
+
+			first, limit := sm.KvEntries()*sid, sm.KvEntries()*(sid+1)-1
+			firstEmpty, limitForEmpty := uint64(0), uint64(0)
+			if lastKvIndex > 0 && first >= lastKvIndex {
+				firstEmpty, limitForEmpty = first, limit
+				limit = first - 1
+			}
+			if lastKvIndex > 0 && limit >= lastKvIndex {
+				firstEmpty, limitForEmpty = lastKvIndex, limit
+				limit = lastKvIndex - 1
+			}
+
 			subTasks := make([]*kvSubTask, 0)
 			// split task for a shard to 16 subtasks and if one batch is too small
 			// set to minSubTaskSize
@@ -542,7 +561,7 @@ func (s *Syncer) loadSyncStatus() {
 				maxTaskSize = minSubTaskSize
 			}
 
-			for first < limit {
+			for first <= limit {
 				last := first + maxTaskSize
 				if last > limit {
 					last = limit
@@ -559,14 +578,39 @@ func (s *Syncer) loadSyncStatus() {
 				first = last + 1
 			}
 
-			task.HealTask, task.KvSubTasks = &healTask, subTasks
+			subEmptyTasks := make([]*kvSubEmptyTask, 0)
+			if limitForEmpty > 0 {
+				maxEmptyTaskSize := (limitForEmpty - firstEmpty + maxConcurrency) / maxConcurrency
+				if maxEmptyTaskSize < minSubTaskSize {
+					maxEmptyTaskSize = minSubTaskSize
+				}
+
+				for firstEmpty <= limitForEmpty {
+					last := firstEmpty + maxEmptyTaskSize
+					if last > limitForEmpty {
+						last = limitForEmpty
+					}
+					subTask := kvSubEmptyTask{
+						kvTask: &task,
+						next:   firstEmpty,
+						First:  firstEmpty,
+						Last:   last,
+						done:   false,
+					}
+
+					subEmptyTasks = append(subEmptyTasks, &subTask)
+					firstEmpty = last + 1
+				}
+			}
+
+			task.HealTask, task.KvSubTasks, task.KvSubEmptyTasks = &healTask, subTasks, subEmptyTasks
 			s.tasks = append(s.tasks, &task)
 		}
 	}
 
 	allDone := true
 	for _, task := range s.tasks {
-		if len(task.KvSubTasks) > 0 || len(task.HealTask.Indexes) > 0 {
+		if len(task.KvSubTasks) > 0 || len(task.HealTask.Indexes) > 0 || len(task.KvSubEmptyTasks) > 0 {
 			allDone = false
 			break
 		}
@@ -618,7 +662,13 @@ func (s *Syncer) cleanKVTasks() {
 				i--
 			}
 		}
-		if len(task.KvSubTasks) > 0 {
+		for i := 0; i < len(task.KvSubEmptyTasks); i++ {
+			if task.KvSubEmptyTasks[i].done {
+				task.KvSubEmptyTasks = append(task.KvSubEmptyTasks[:i], task.KvSubEmptyTasks[i+1:]...)
+				i--
+			}
+		}
+		if len(task.KvSubTasks) > 0 || len(task.KvSubEmptyTasks) > 0 {
 			allDone = false
 		}
 	}
@@ -836,6 +886,44 @@ func (s *Syncer) assignKVHealTasks(success chan *kvHealResponse, fail chan *kvHe
 		defer req.task.lock.Unlock()
 		for _, idx := range indexes {
 			req.task.Indexes[idx] = time.Now().UnixMilli()
+		}
+	}
+}
+
+// assignKVEmptyTasks attempts to match idle peers to heal kv requests to retrieval missing kv from the kv range request.
+func (s *Syncer) assignKVEmptyTasks() {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
+	if s.runningEmptyTaskTreads >= maxConcurrency {
+		return
+	}
+	s.runningEmptyTaskTreads++
+
+	// Iterate over all the tasks and try to find a pending one
+	for _, task := range s.tasks {
+		for _, subEmptyTask := range task.KvSubEmptyTasks {
+			if subEmptyTask.isRunning {
+				continue
+			}
+			subTask := subEmptyTask
+			subTask.isRunning = true
+			start, limit := subTask.next, subTask.Last
+			if limit >= start+minSubTaskSize {
+				limit = start + minSubTaskSize
+			}
+			go func(eTask *kvSubEmptyTask, contract common.Address, start, limit uint64) {
+				next, err := s.chain.FillSstorWithEmptyKV(contract, start, limit)
+				if err != nil {
+					log.Warn("fill in empty fail", "err", err.Error())
+				}
+				eTask.next = next
+				if eTask.next > eTask.Last {
+					eTask.done = true
+				}
+				eTask.isRunning = false
+				s.runningEmptyTaskTreads--
+			}(subTask, task.Contract, start, limit)
 		}
 	}
 }

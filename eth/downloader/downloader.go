@@ -212,6 +212,10 @@ type BlockChain interface {
 	// KVs to the sstorage file. And return the inserted KV index list.
 	VerifyAndWriteKV(contract common.Address, data map[uint64][]byte, provderAddr common.Address) (uint64, uint64, []uint64, error)
 
+	// FillSstorWithEmptyKV get the lastKVIndex and if the kv index need to fill is larger than or equal to lastKVIndex
+	// fill up the kv with empty ([]byte{}), so the data in the file will be filled with encode empty data
+	FillSstorWithEmptyKV(contract common.Address, start, limit uint64) (uint64, error)
+
 	// ReadEncodedKVsByIndexList Read the encoded KVs by a list of KV index.
 	ReadEncodedKVsByIndexList(contract common.Address, shardId uint64, indexes []uint64) (common.Address, []*core.KV, error)
 

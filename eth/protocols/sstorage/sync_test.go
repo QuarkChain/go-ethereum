@@ -63,6 +63,31 @@ func (c *blockChain) CurrentBlock() *types.Block {
 	return c.block
 }
 
+func (bc *blockChain) FillSstorWithEmptyKV(contract common.Address, start, limit uint64) (uint64, error) {
+	sm := sstorage.ContractToShardManager[contract]
+	if sm == nil {
+		return start, fmt.Errorf("kv verify fail: contract not support, contract: %s", contract.Hex())
+	}
+
+	empty := make([]byte, 0)
+	lastKvIdx, err := bc.GetSstorageLastKvIdx(contract)
+	if err != nil {
+		return start, fmt.Errorf("get lastKvIdx for FillEmptyKV fail, err: %s", err.Error())
+	}
+	for idx := start; idx <= limit; idx++ {
+		if lastKvIdx > idx {
+			continue
+		}
+		_, err = sm.TryWrite(idx, empty, common.Hash{})
+		if err != nil {
+			err = fmt.Errorf("write empty to kv file fail, index: %d; error: %s", idx, err.Error())
+			return idx, err
+		}
+	}
+
+	return limit + 1, nil
+}
+
 func (c *blockChain) VerifyAndWriteKV(contract common.Address, data map[uint64][]byte, providerAddr common.Address) (uint64, uint64, []uint64, error) {
 	var (
 		synced      uint64
@@ -478,8 +503,7 @@ func verifyKVs(stateDB *state.StateDB, data map[common.Address]map[uint64][]byte
 
 			if _, ok := destroyedList[idx]; ok {
 				val = make([]byte, sstorage.CHUNK_SIZE)
-				_, defaultMeta := core.GetDefaultMetadata(idx)
-				sval, ok, err = shardData.TryReadChunk(idx, common.BytesToHash(defaultMeta.HashInMeta))
+				sval, ok, err = shardData.TryReadChunk(idx, common.BytesToHash(make([]byte, 24)))
 				if err != nil {
 					t.Fatalf("TryReadChunk fail. err: %s", err.Error())
 				}
@@ -699,8 +723,8 @@ func TestSync(t *testing.T) {
 		return source
 	}
 
-	data, _ := makeKVStorage(stateDB, contract, []uint64{0}, kvEntriesBits)
-	syncer := setupSyncer(shards, stateDB, kvEntriesBits, mkSource("source", shards, data))
+	data, _ := makeKVStorage(stateDB, contract, []uint64{0}, kvEntries)
+	syncer := setupSyncer(shards, stateDB, kvEntries, mkSource("source", shards, data))
 	done := checkStall(t, term)
 	if err := syncer.Sync(cancel); err != nil {
 		t.Fatalf("sync failed: %v", err)

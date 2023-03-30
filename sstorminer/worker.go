@@ -661,7 +661,7 @@ func (w *worker) mineTask(t *task) (bool, error) {
 
 			for i := 0; i < len(dataSet); i++ {
 				if kvs[i].Idx == kvIdxs[i] {
-					ps, err := getProof(kvs[i].Data, sstor.CHUNK_SIZE, t.chunkSizeBits, chunkIdxs[i])
+					ps, err := getProofWithMinTree(kvs[i].Data, sstor.CHUNK_SIZE, t.chunkSizeBits, chunkIdxs[i])
 					if err != nil {
 						return false, err
 					}

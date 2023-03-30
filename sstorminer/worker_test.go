@@ -41,7 +41,6 @@ import (
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/sstorage"
 	"github.com/holiman/uint256"
-	"golang.org/x/crypto/sha3"
 )
 
 const (
@@ -268,18 +267,11 @@ func createSstorage(contract common.Address, shardIdxList []uint64, kvSizeBits,
 // getSlotHash generate slot hash to fetch Data from stateDB
 func getSlotHash(slotIdx uint64, key common.Hash) common.Hash {
 	slot := uint256.NewInt(slotIdx).Bytes32()
+	keyData := key.Bytes()
+	slotData := slot[:]
+	data := append(keyData, slotData...)
 
-	keydata := key.Bytes()
-	slotdata := slot[:]
-	data := append(keydata, slotdata...)
-
-	hasher := sha3.NewLegacyKeccak256().(crypto.KeccakState)
-	hasher.Write(data)
-
-	hashRes := common.Hash{}
-	hasher.Read(hashRes[:])
-
-	return hashRes
+	return crypto.Keccak256Hash(data)
 }
 
 func generateMetadata(idx, size uint64, hash common.Hash) common.Hash {
@@ -311,6 +303,7 @@ func getSKey(contract common.Address, idx uint64) common.Hash {
 func makeKVStorage(stateDB *state.StateDB, contract common.Address, shards []uint64, kvCount uint64, shardIsFull bool) {
 	sm, _ := sstorage.ContractToShardManager[contract]
 
+	lastKvIdx := uint64(0)
 	for _, sidx := range shards {
 		last := (sidx + 1) * kvCount
 		if sidx == shards[len(shards)-1] && !shardIsFull {
@@ -327,7 +320,7 @@ func makeKVStorage(stateDB *state.StateDB, contract common.Address, shards []uin
 				key := getSlotHash(2, uint256.NewInt(i).Bytes32())
 				stateDB.SetState(contract, key, skey)
 
-				metaHash = merkleRootWithMinTree(val, sm.ChunksPerKv(), sstorage.CHUNK_SIZE)
+				metaHash = merkleRootWithMinTree(val, sstorage.CHUNK_SIZE)
 				meta := generateMetadata(i, uint64(len(val)), metaHash)
 				key = getSlotHash(1, skey)
 				stateDB.SetState(contract, key, meta)
@@ -335,7 +328,11 @@ func makeKVStorage(stateDB *state.StateDB, contract common.Address, shards []uin
 
 			sm.TryWrite(i, val, common.BytesToHash(metaHash[:24]))
 		}
+		if last > lastKvIdx {
+			lastKvIdx = last
+		}
 	}
+	stateDB.SetState(contract, uint256.NewInt(0).Bytes32(), uint256.NewInt(lastKvIdx).Bytes32())
 }
 
 func updateMiningInfoAndInsertNewBlock(pinfo *core.MiningInfo, chain *wrapBlockChain, engine *ethash.Ethash, db ethdb.Database) error {
@@ -355,26 +352,33 @@ func updateMiningInfoAndInsertNewBlock(pinfo *core.MiningInfo, chain *wrapBlockC
 }
 
 func verifyTaskResult(stateDB *state.StateDB, chain BlockChain, r *result) error {
+	val := stateDB.GetState(contract, uint256.NewInt(0).Bytes32())
+	lastKvIdx := new(big.Int).SetBytes(val.Bytes()).Uint64()
 	for i, proofs := range r.proofs {
-		_, meta, _ := core.GetSstorageMetadata(stateDB, contract, r.kvIdxs[i])
 		hash := common.Hash{}
-		off := sstorage.CHUNK_SIZE * r.chunkIdxs[i]
-		if meta.KVSize > off {
-			data, got, err := r.task.shardManager.TryReadChunk(r.kvIdxs[i]*r.task.shardManager.ChunksPerKv()+r.chunkIdxs[i], common.BytesToHash(meta.HashInMeta))
-			if err != nil {
-				return err
-			}
-			if !got {
-				return fmt.Errorf("fail to get data for storageContract %s vkidx %d", contract.Hex(), r.kvIdxs[i])
+		root := make([]byte, 24)
+		if lastKvIdx > r.kvIdxs[i] {
+			off := sstorage.CHUNK_SIZE * r.chunkIdxs[i]
+			_, meta, _ := core.GetSstorageMetadata(stateDB, contract, r.kvIdxs[i])
+
+			if meta.KVSize > off {
+				data, got, err := r.task.shardManager.TryReadChunk(r.kvIdxs[i]*r.task.shardManager.ChunksPerKv()+r.chunkIdxs[i], common.BytesToHash(meta.HashInMeta))
+				if err != nil {
+					return err
+				}
+				if !got {
+					return fmt.Errorf("fail to get data for storageContract %s vkidx %d", contract.Hex(), r.kvIdxs[i])
+				}
+				if meta.KVSize < off+sstorage.CHUNK_SIZE {
+					data = data[:meta.KVSize-off]
+				}
+				hash = crypto.Keccak256Hash(data)
 			}
 
-			if meta.KVSize < off+sstorage.CHUNK_SIZE {
-				data = data[:meta.KVSize-off]
-			}
-			hash = crypto.Keccak256Hash(data)
+			root = meta.HashInMeta
 		}
 
-		vr := verify(meta.HashInMeta, hash, r.chunkIdxs[i], proofs)
+		vr := verifyWithMinTree(root, hash, r.chunkIdxs[i], proofs)
 		if !vr {
 			return fmt.Errorf("verify proofs fail for index %d fail", r.kvIdxs[i])
 		}
@@ -688,6 +692,14 @@ func TestWork_ProofsCreateAndVerify(test *testing.T) {
 
 	testCases := []testCase{
 		{
+			chunkPerKVBits: uint64(0),
+			val:            contract.Bytes(),
+		},
+		{
+			chunkPerKVBits: uint64(0),
+			val:            make([]byte, 0),
+		},
+		{
 			chunkPerKVBits: uint64(1),
 			val:            contract.Bytes(),
 		},
@@ -715,18 +727,29 @@ func TestWork_ProofsCreateAndVerify(test *testing.T) {
 			chunkPerKVBits: uint64(4),
 			val:            append(make([]byte, sstorage.CHUNK_SIZE*3), contract.Bytes()...),
 		},
+		{
+			chunkPerKVBits: uint64(7),
+			val:            contract.Bytes(),
+		},
+		{
+			chunkPerKVBits: uint64(7),
+			val:            append(make([]byte, sstorage.CHUNK_SIZE), contract.Bytes()...),
+		},
 	}
 
 	for _, tc := range testCases {
 		testWork_ProofsCreateAndVerify(test, tc.val, tc.chunkPerKVBits)
 	}
+	for _, tc := range testCases {
+		testWork_ProofsCreateAndVerifyWithMinTree(test, tc.val, tc.chunkPerKVBits)
+	}
 }
 
 func testWork_ProofsCreateAndVerify(test *testing.T, val []byte, chunkPerKVBits uint64) {
 	chunkPerKV := uint64(1) << chunkPerKVBits
-	datalen := uint64(len(val))
+	dataLen := uint64(len(val))
 
-	root := merkleRootWithMinTree(val, chunkPerKV, sstorage.CHUNK_SIZE)
+	root := merkleRoot(val, chunkPerKV, sstorage.CHUNK_SIZE)
 	for i := uint64(0); i < chunkPerKV; i++ {
 		hash := common.Hash{}
 		off := i * sstorage.CHUNK_SIZE
@@ -735,14 +758,41 @@ func testWork_ProofsCreateAndVerify(test *testing.T, val []byte, chunkPerKVBits 
 		if err != nil {
 			test.Error("error:", err.Error())
 		}
-		if off < datalen {
-			size := datalen - off
+		if off < dataLen {
+			size := dataLen - off
 			if size > sstorage.CHUNK_SIZE {
 				size = sstorage.CHUNK_SIZE
 			}
 			hash = crypto.Keccak256Hash(val[off : off+size])
 		}
 		vr := verify(root.Bytes()[:24], hash, i, ps)
+		if !vr {
+			test.Error("verify proof fail, chunk ", i)
+		}
+	}
+}
+
+func testWork_ProofsCreateAndVerifyWithMinTree(test *testing.T, val []byte, chunkPerKVBits uint64) {
+	chunkPerKV := uint64(1) << chunkPerKVBits
+	dataLen := uint64(len(val))
+
+	root := merkleRootWithMinTree(val, sstorage.CHUNK_SIZE)
+	for i := uint64(0); i < chunkPerKV; i++ {
+		hash := common.Hash{}
+		off := i * sstorage.CHUNK_SIZE
+
+		ps, err := getProofWithMinTree(val, sstorage.CHUNK_SIZE, chunkPerKVBits, i)
+		if err != nil {
+			test.Error("error:", err.Error())
+		}
+		if off < dataLen {
+			size := dataLen - off
+			if size > sstorage.CHUNK_SIZE {
+				size = sstorage.CHUNK_SIZE
+			}
+			hash = crypto.Keccak256Hash(val[off : off+size])
+		}
+		vr := verifyWithMinTree(root.Bytes()[:24], hash, i, ps)
 		if !vr {
 			test.Error("verify proof fail, chunk ", i)
 		}
