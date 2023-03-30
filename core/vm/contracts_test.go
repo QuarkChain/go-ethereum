@@ -530,6 +530,7 @@ func TestToken_Run(t *testing.T) {
 	}
 
 }
+
 func TestCrossChainCallPackedData(t *testing.T) {
 	addr := common.HexToAddress("0xd9145CCE52D386f254917e481eB44e9943F39138")
 	topics := []common.Hash{
