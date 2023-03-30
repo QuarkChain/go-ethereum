@@ -21,7 +21,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"math/big"
 	"strings"
 	"time"
@@ -1685,25 +1684,6 @@ type ReceiptProofData struct {
 	ReceiptPath      hexutil.Bytes `json:"receiptPath"`
 }
 
-// rlpedData to avoid encoding a value twice by RLP
-type rlpedData []byte
-
-func (v rlpedData) EncodeRLP(w io.Writer) error {
-	_, err := w.Write(v)
-	return err
-}
-
-type receiptProofList []rlpedData
-
-func (n *receiptProofList) Put(key []byte, value []byte) error {
-	*n = append(*n, value)
-	return nil
-}
-
-func (n *receiptProofList) Delete(key []byte) error {
-	panic("not supported")
-}
-
 // GetReceiptProof returns a proof which is the receipt-tree(mpt) path for the receipt corresponding to the specified block to verify the validity of the receipt
 func (s *PublicTransactionPoolAPI) GetReceiptProof(ctx context.Context, txHash common.Hash) (*ReceiptProofData, error) {
 	_, blockHash, blockNumber, index, err := s.b.GetTransaction(ctx, txHash)
@@ -1747,8 +1727,7 @@ func (s *PublicTransactionPoolAPI) GetReceiptProof(ctx context.Context, txHash c
 	}
 
 	// 6.generate the path of proof
-	var nodes receiptProofList
-	err = tree.Prove(key, 0, &nodes)
+	nodes, err := state.GetProofByKey(tree, key)
 	if err != nil {
 		return nil, err
 	}
