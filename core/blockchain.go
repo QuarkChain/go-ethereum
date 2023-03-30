@@ -19,6 +19,7 @@ package core
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -38,6 +39,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/internal/syncx"
@@ -208,12 +210,36 @@ type BlockChain struct {
 	running       int32          // 0 if chain is running, 1 when stopped
 	procInterrupt int32          // interrupt signaler for block processing
 
-	engine     consensus.Engine
-	validator  Validator // Block and state validator interface
-	prefetcher Prefetcher
-	processor  Processor // Block transaction processor interface
-	forker     *ForkChoice
-	vmConfig   vm.Config
+	engine      consensus.Engine
+	validator   Validator // Block and state validator interface
+	prefetcher  Prefetcher
+	processor   Processor // Block transaction processor interface
+	forker      *ForkChoice
+	vmConfig    vm.Config
+	mindReading MindReadingEnv
+}
+
+type MindReadingEnv struct {
+	MRClient          vm.MindReadingClient
+	EnableBlockNumber *big.Int
+	Version           uint64
+	SupportChainId    uint64
+	MinimumConfirms   uint64
+}
+
+func (mr MindReadingEnv) GenerateVMMindReadingCtx(blockNumber *big.Int, RelayMindReadingOutput bool) *vm.MindReadingContext {
+	var enable bool
+	if mr.EnableBlockNumber != nil && blockNumber.Cmp(mr.EnableBlockNumber) >= 0 {
+		enable = true
+	}
+	return &vm.MindReadingContext{
+		MRClient:         mr.MRClient,
+		ReuseMindReading: RelayMindReadingOutput,
+		MREnable:         enable,
+		Version:          mr.Version,
+		ChainId:          mr.SupportChainId,
+		MinimumConfirms:  mr.MinimumConfirms,
+	}
 }
 
 // NewBlockChain returns a fully initialised block chain using information
@@ -257,6 +283,11 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *par
 	bc.processor = NewStateProcessor(chainConfig, bc, engine)
 
 	var err error
+	err = bc.setMindReading(chainConfig)
+	if err != nil {
+		return nil, err
+	}
+
 	bc.hc, err = NewHeaderChain(db, chainConfig, engine, bc.insertStopped)
 	if err != nil {
 		return nil, err
@@ -1614,7 +1645,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals, setHead bool)
 
 		// Process block using the parent state as reference point
 		substart := time.Now()
-		receipts, logs, usedGas, err := bc.processor.Process(block, statedb, bc.vmConfig)
+		receipts, logs, usedGas, err := bc.processor.Process(block, statedb, bc.vmConfig, true)
 		if err != nil {
 			bc.reportBlock(block, receipts, err)
 			atomic.StoreUint32(&followupInterrupt, 1)
@@ -2323,7 +2354,7 @@ func (bc *BlockChain) InsertHeaderChain(chain []*types.Header, checkFreq int) (i
 }
 
 func (bc *BlockChain) PreExecuteBlock(block *types.Block) (err error) {
-
+	// Pre-execute a block for non-proposer validator to verify the block.
 	err = bc.validator.ValidateBody(block)
 	if err != nil {
 		return
@@ -2342,7 +2373,7 @@ func (bc *BlockChain) PreExecuteBlock(block *types.Block) (err error) {
 		err = fmt.Errorf("txHash mismatch, got %s, expect %s", block.TxHash(), txHash)
 		return
 	}
-	receipts, _, usedGas, err := bc.processor.Process(block, statedb, bc.vmConfig)
+	receipts, _, usedGas, err := bc.processor.Process(block, statedb, bc.vmConfig, false)
 	if err != nil {
 		return
 	}
@@ -2418,7 +2449,7 @@ func GetSstorageMetadata(s *state.StateDB, contract common.Address, index uint64
 }
 
 // VerifyKV verify kv using SstorageMetadata
-func VerifyKV(sm *sstorage.ShardManager, idx uint64, val []byte, meta *SstorageMetadata, isEncoded bool) ([]byte, error) {
+func VerifyKV(sm *sstorage.ShardManager, idx uint64, val []byte, meta *SstorageMetadata, isEncoded bool, providerAddr common.Address) ([]byte, error) {
 	if idx != meta.KVIdx {
 		return nil, fmt.Errorf("verifyKV fail: kv Idx mismatch; idx: %d; MetaHash KVIdx: %d", idx, meta.KVIdx)
 	}
@@ -2428,7 +2459,7 @@ func VerifyKV(sm *sstorage.ShardManager, idx uint64, val []byte, meta *SstorageM
 		if sm == nil {
 			return nil, fmt.Errorf("empty sm to verify KV")
 		}
-		d, r, err := sm.DecodeKV(meta.KVIdx, val, common.BytesToHash(meta.HashInMeta))
+		d, r, err := sm.DecodeKV(meta.KVIdx, val, common.BytesToHash(meta.HashInMeta), providerAddr)
 		if !r || err != nil {
 			return nil, fmt.Errorf("unmask KV fail, err: %v", err)
 		}
@@ -2477,7 +2508,7 @@ func (bc *BlockChain) VerifyAndWriteKV(contract common.Address, data map[uint64]
 			continue
 		}
 
-		rawData, err := VerifyKV(sm, idx, val, meta, true)
+		rawData, err := VerifyKV(sm, idx, val, meta, true, providerAddr)
 		if err != nil {
 			log.Warn("processKVResponse: verify vkv fail", "error", err)
 			continue
@@ -2520,15 +2551,19 @@ func (bc *BlockChain) VerifyAndWriteKV(contract common.Address, data map[uint64]
 }
 
 // ReadEncodedKVsByIndexList Read the masked KVs by a list of KV index.
-func (bc *BlockChain) ReadEncodedKVsByIndexList(contract common.Address, indexes []uint64) ([]*KV, error) {
+func (bc *BlockChain) ReadEncodedKVsByIndexList(contract common.Address, shardId uint64, indexes []uint64) (common.Address, []*KV, error) {
 	sm := sstorage.ContractToShardManager[contract]
 	if sm == nil {
-		return nil, fmt.Errorf("shard manager for contract %s is not support", contract.Hex())
+		return common.Address{}, nil, fmt.Errorf("shard manager for contract %s is not support", contract.Hex())
 	}
 
+	miner, ok := sm.GetShardMiner(shardId)
+	if !ok {
+		return common.Address{}, nil, fmt.Errorf("shard %d do not support for contract %s", shardId, contract.Hex())
+	}
 	stateDB, err := bc.StateAt(bc.CurrentBlock().Root())
 	if err != nil {
-		return nil, err
+		return common.Address{}, nil, err
 	}
 	res := make([]*KV, 0)
 	for _, idx := range indexes {
@@ -2543,20 +2578,25 @@ func (bc *BlockChain) ReadEncodedKVsByIndexList(contract common.Address, indexes
 		}
 	}
 
-	return res, nil
+	return miner, res, nil
 }
 
 // ReadEncodedKVsByIndexRange Read masked KVs sequentially starting from origin until the index exceeds the limit or
 // the amount of data read is greater than the bytes.
-func (bc *BlockChain) ReadEncodedKVsByIndexRange(contract common.Address, origin uint64, limit uint64, bytes uint64) ([]*KV, error) {
+func (bc *BlockChain) ReadEncodedKVsByIndexRange(contract common.Address, shardId uint64, origin uint64,
+	limit uint64, bytes uint64) (common.Address, []*KV, error) {
 	sm := sstorage.ContractToShardManager[contract]
 	if sm == nil {
-		return nil, fmt.Errorf("shard manager for contract %s is not support", contract.Hex())
+		return common.Address{}, nil, fmt.Errorf("shard manager for contract %s is not support", contract.Hex())
 	}
 
+	miner, ok := sm.GetShardMiner(shardId)
+	if !ok {
+		return common.Address{}, nil, fmt.Errorf("shard %d do not support for contract %s", shardId, contract.Hex())
+	}
 	stateDB, err := bc.StateAt(bc.CurrentBlock().Root())
 	if err != nil {
-		return nil, err
+		return common.Address{}, nil, err
 	}
 	res := make([]*KV, 0)
 	read := uint64(0)
@@ -2576,7 +2616,7 @@ func (bc *BlockChain) ReadEncodedKVsByIndexRange(contract common.Address, origin
 		}
 	}
 
-	return res, nil
+	return miner, res, nil
 }
 
 // GetSstorageLastKvIdx get LastKvIdx from a sstorage contract with latest stateDB.
@@ -2589,4 +2629,45 @@ func (bc *BlockChain) GetSstorageLastKvIdx(contract common.Address) (uint64, err
 	val := stateDB.GetState(contract, uint256.NewInt(0).Bytes32())
 	log.Warn("GetSstorageLastKvIdx", "val", common.Bytes2Hex(val.Bytes()))
 	return new(big.Int).SetBytes(val.Bytes()).Uint64(), nil
+}
+
+func (bc *BlockChain) setMindReading(chainConfig *params.ChainConfig) error {
+	if chainConfig.MindReading != nil {
+		bc.mindReading.EnableBlockNumber = chainConfig.MindReading.EnableBlockNumber
+		bc.mindReading.Version = chainConfig.MindReading.Version
+		bc.mindReading.SupportChainId = chainConfig.MindReading.SupportChainId
+		bc.mindReading.MinimumConfirms = chainConfig.MindReading.MinimumConfirms
+		if chainConfig.MindReading.CallRpc != "" {
+			newClient, err := ethclient.Dial(bc.chainConfig.MindReading.CallRpc)
+			if err != nil {
+				return err
+			}
+			cid, err := newClient.ChainID(context.Background())
+			if err != nil {
+				return err
+			}
+			if cid.Uint64() != bc.mindReading.SupportChainId {
+				return fmt.Errorf("supportChainId [%d] no match with chainId [%d] connected with ethclient", bc.mindReading.SupportChainId, cid.Uint64())
+			}
+			bc.mindReading.MRClient = newClient
+		}
+		log.Warn("already configured blockchain.MindReading", " bc.mindReading", bc.mindReading)
+	}
+	return nil
+}
+
+func (bc *BlockChain) IsMindReadingEnable(headerNum *big.Int) bool {
+	enableNumber := bc.mindReading.EnableBlockNumber
+	if enableNumber == nil {
+		return false
+	}
+	if headerNum.Cmp(enableNumber) >= 0 {
+		return true
+	} else {
+		return false
+	}
+}
+
+func (bc *BlockChain) MindReading() MindReadingEnv {
+	return bc.mindReading
 }

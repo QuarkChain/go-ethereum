@@ -62,7 +62,7 @@ func (c *blockChain) CurrentBlock() *types.Block {
 	return c.block
 }
 
-func (c *blockChain) VerifyAndWriteKV(contract common.Address, data map[uint64][]byte, provderAddr common.Address) (uint64, uint64, []uint64, error) {
+func (c *blockChain) VerifyAndWriteKV(contract common.Address, data map[uint64][]byte, providerAddr common.Address) (uint64, uint64, []uint64, error) {
 	var (
 		synced      uint64
 		syncedBytes uint64
@@ -83,7 +83,7 @@ func (c *blockChain) VerifyAndWriteKV(contract common.Address, data map[uint64][
 			continue
 		}
 
-		rawData, err := core.VerifyKV(sm, idx, val, meta, true)
+		rawData, err := core.VerifyKV(sm, idx, val, meta, true, providerAddr)
 		if err != nil {
 			log.Warn("processKVResponse: verify vkv fail", "error", err)
 			continue
@@ -101,12 +101,16 @@ func (c *blockChain) VerifyAndWriteKV(contract common.Address, data map[uint64][
 	return synced, syncedBytes, inserted, nil
 }
 
-func (c *blockChain) ReadEncodedKVsByIndexList(contract common.Address, indexes []uint64) ([]*core.KV, error) {
+func (c *blockChain) ReadEncodedKVsByIndexList(contract common.Address, shardId uint64, indexes []uint64) (common.Address, []*core.KV, error) {
 	sm := sstorage.ContractToShardManager[contract]
 	if sm == nil {
-		return nil, fmt.Errorf("shard manager for contract %s is not support", contract.Hex())
+		return common.Address{}, nil, fmt.Errorf("shard manager for contract %s is not support", contract.Hex())
 	}
 
+	miner, ok := sm.GetShardMiner(shardId)
+	if !ok {
+		return common.Address{}, nil, fmt.Errorf("shard %d do not support for contract %s", shardId, contract.Hex())
+	}
 	res := make([]*core.KV, 0)
 	for _, idx := range indexes {
 		_, meta, err := core.GetSstorageMetadata(c.stateDB, contract, idx)
@@ -120,15 +124,20 @@ func (c *blockChain) ReadEncodedKVsByIndexList(contract common.Address, indexes 
 		}
 	}
 
-	return res, nil
+	return miner, res, nil
 }
 
-func (c *blockChain) ReadEncodedKVsByIndexRange(contract common.Address, origin uint64, limit uint64, bytes uint64) ([]*core.KV, error) {
+func (c *blockChain) ReadEncodedKVsByIndexRange(contract common.Address, shardId uint64, origin uint64,
+	limit uint64, bytes uint64) (common.Address, []*core.KV, error) {
 	sm := sstorage.ContractToShardManager[contract]
 	if sm == nil {
-		return nil, fmt.Errorf("shard manager for contract %s is not support", contract.Hex())
+		return common.Address{}, nil, fmt.Errorf("shard manager for contract %s is not support", contract.Hex())
 	}
 
+	miner, ok := sm.GetShardMiner(shardId)
+	if !ok {
+		return common.Address{}, nil, fmt.Errorf("shard %d do not support for contract %s", shardId, contract.Hex())
+	}
 	res := make([]*core.KV, 0)
 	read := uint64(0)
 	for idx := origin; idx <= limit; idx++ {
@@ -147,7 +156,7 @@ func (c *blockChain) ReadEncodedKVsByIndexRange(contract common.Address, origin 
 		}
 	}
 
-	return res, nil
+	return miner, res, nil
 }
 
 func (c *blockChain) GetSstorageLastKvIdx(contract common.Address) (uint64, error) {
@@ -219,10 +228,8 @@ func (t *testPeer) RequestKVRange(id uint64, contract common.Address, shardId ui
 }
 
 // RequestShardList fetches shard list support by the peer
-func (p *testPeer) RequestShardList(shards map[common.Address][]uint64) error {
-	p.logger.Trace("Fetching Shard list", "shards", shards)
-	//	p.remote
-
+func (t *testPeer) RequestShardList(shards map[common.Address][]uint64) error {
+	t.logger.Trace("Fetching Shard list", "shards", shards)
 	return nil
 }
 
@@ -238,7 +245,7 @@ func defaultKVRangeRequestHandler(t *testPeer, id uint64, contract common.Addres
 	if vals == nil {
 		t.test.Error("CreateKVRequestResponse fail: vals is nul.")
 	}
-	if err := t.remote.OnKVRange(t, id, vals); err != nil {
+	if err := t.remote.OnKVRange(t, id, common.Address{}, vals); err != nil {
 		t.test.Errorf("Remote side rejected our delivery: %v", err)
 		t.term()
 		return err
@@ -253,7 +260,7 @@ func defaultKVHealRequestHandler(t *testPeer, id uint64, contract common.Address
 	if vals == nil {
 		t.test.Error("CreateKVRequestResponse fail: vals is nul.")
 	}
-	if err := t.remote.OnKVs(t, id, vals); err != nil {
+	if err := t.remote.OnKVs(t, id, common.Address{}, vals); err != nil {
 		t.test.Errorf("Remote side rejected our delivery: %v", err)
 		t.term()
 		return err
@@ -280,7 +287,7 @@ func createKVRequestResponse(t *testPeer, id uint64, stateDB *state.StateDB, con
 			if err != nil {
 				return nil
 			}
-			bs, _, _ := sm.EncodeKV(idx, data, common.BytesToHash(meta.HashInMeta))
+			bs, _, _ := sm.EncodeKV(idx, data, common.BytesToHash(meta.HashInMeta), common.Address{})
 			if uint64(len(bs)) > meta.KVSize {
 				values = append(values, &core.KV{Idx: idx, Data: bs[:meta.KVSize]})
 			} else {
@@ -295,7 +302,7 @@ func createKVRequestResponse(t *testPeer, id uint64, stateDB *state.StateDB, con
 
 // emptyRequestKVRangeFn is a rejects AccountRangeRequests
 func emptyRequestKVRangeFn(t *testPeer, id uint64, contract common.Address, shardId uint64, kvList []uint64) error {
-	t.remote.OnKVRange(t, id, nil)
+	t.remote.OnKVRange(t, id, common.Address{}, nil)
 	return nil
 }
 

@@ -1279,25 +1279,26 @@ func (s *PublicBlockChainAPI) rpcMarshalBlock(ctx context.Context, b *types.Bloc
 
 // RPCTransaction represents a transaction that will serialize to the RPC representation of a transaction
 type RPCTransaction struct {
-	BlockHash        *common.Hash      `json:"blockHash"`
-	BlockNumber      *hexutil.Big      `json:"blockNumber"`
-	From             common.Address    `json:"from"`
-	Gas              hexutil.Uint64    `json:"gas"`
-	GasPrice         *hexutil.Big      `json:"gasPrice"`
-	GasFeeCap        *hexutil.Big      `json:"maxFeePerGas,omitempty"`
-	GasTipCap        *hexutil.Big      `json:"maxPriorityFeePerGas,omitempty"`
-	Hash             common.Hash       `json:"hash"`
-	Input            hexutil.Bytes     `json:"input"`
-	Nonce            hexutil.Uint64    `json:"nonce"`
-	To               *common.Address   `json:"to"`
-	TransactionIndex *hexutil.Uint64   `json:"transactionIndex"`
-	Value            *hexutil.Big      `json:"value"`
-	Type             hexutil.Uint64    `json:"type"`
-	Accesses         *types.AccessList `json:"accessList,omitempty"`
-	ChainID          *hexutil.Big      `json:"chainId,omitempty"`
-	V                *hexutil.Big      `json:"v"`
-	R                *hexutil.Big      `json:"r"`
-	S                *hexutil.Big      `json:"s"`
+	BlockHash         *common.Hash      `json:"blockHash"`
+	BlockNumber       *hexutil.Big      `json:"blockNumber"`
+	From              common.Address    `json:"from"`
+	Gas               hexutil.Uint64    `json:"gas"`
+	GasPrice          *hexutil.Big      `json:"gasPrice"`
+	GasFeeCap         *hexutil.Big      `json:"maxFeePerGas,omitempty"`
+	GasTipCap         *hexutil.Big      `json:"maxPriorityFeePerGas,omitempty"`
+	Hash              common.Hash       `json:"hash"`
+	Input             hexutil.Bytes     `json:"input"`
+	Nonce             hexutil.Uint64    `json:"nonce"`
+	To                *common.Address   `json:"to"`
+	TransactionIndex  *hexutil.Uint64   `json:"transactionIndex"`
+	Value             *hexutil.Big      `json:"value"`
+	Type              hexutil.Uint64    `json:"type"`
+	Accesses          *types.AccessList `json:"accessList,omitempty"`
+	ChainID           *hexutil.Big      `json:"chainId,omitempty"`
+	V                 *hexutil.Big      `json:"v"`
+	R                 *hexutil.Big      `json:"r"`
+	S                 *hexutil.Big      `json:"s"`
+	MindReadingOutput *hexutil.Bytes    `json:"mindReadingOutput"`
 }
 
 // newRPCTransaction returns a transaction that will serialize to the RPC
@@ -1627,6 +1628,10 @@ func (s *PublicTransactionPoolAPI) GetTransactionReceipt(ctx context.Context, ha
 	}
 	receipt := receipts[index]
 
+	// obtain mindReadingOutput from block.uncles
+	block, err := s.b.BlockByHash(ctx, blockHash)
+	mindReadingOutput := block.FindMindReadingOutput(tx.Hash())
+
 	// Derive the sender.
 	bigblock := new(big.Int).SetUint64(blockNumber)
 	signer := types.MakeSigner(s.b.ChainConfig(), bigblock)
@@ -1670,6 +1675,37 @@ func (s *PublicTransactionPoolAPI) GetTransactionReceipt(ctx context.Context, ha
 	if receipt.ContractAddress != (common.Address{}) {
 		fields["contractAddress"] = receipt.ContractAddress
 	}
+
+	if mindReadingOutput != nil {
+		fields["mindReadingOutput"] = hexutil.Bytes(mindReadingOutput)
+	}
+
+	return fields, nil
+}
+
+// GetMindReadingOutput returns the output after executing MindReading module
+func (s *PublicTransactionPoolAPI) GetMindReadingOutput(ctx context.Context, hash common.Hash) (map[string]interface{}, error) {
+	tx, blockHash, blockNumber, index, err := s.b.GetTransaction(ctx, hash)
+	if err != nil {
+		return nil, nil
+	}
+
+	// get external_call_result from uncles
+	block, err := s.b.BlockByHash(ctx, blockHash)
+	mindReadingOutput := block.FindMindReadingOutput(tx.Hash())
+
+	if mindReadingOutput == nil {
+		return nil, fmt.Errorf("can't find the externalCallResult for the given txhash %s", hash)
+	}
+
+	fields := map[string]interface{}{
+		"blockHash":         blockHash,
+		"blockNumber":       blockNumber,
+		"transactionHash":   hash,
+		"transactionIndex":  index,
+		"mindReadingOutput": hexutil.Bytes(mindReadingOutput),
+	}
+
 	return fields, nil
 }
 

@@ -86,11 +86,12 @@ type kvRangeRequest struct {
 
 // kvHealResponse is an already verified remote response to a kv request.
 type kvRangeResponse struct {
-	reqId    uint64            // Request ID of this response
-	task     *kvSubTask        // kvHealTask which this request is filling
-	contract common.Address    // contract
-	shardId  uint64            // shardId
-	kvs      map[uint64][]byte // kvs to store into the sharded storage
+	reqId        uint64         // Request ID of this response
+	task         *kvSubTask     // kvHealTask which this request is filling
+	contract     common.Address // contract
+	shardId      uint64         // shardId
+	providerAddr common.Address
+	kvs          map[uint64][]byte // kvs to store into the sharded storage
 }
 
 // kvHealRequest tracks a pending kv request to ensure responses are to
@@ -122,11 +123,12 @@ type kvHealRequest struct {
 
 // kvHealResponse is an already verified remote response to a kv request.
 type kvHealResponse struct {
-	reqId    uint64            // Request ID of this response
-	task     *kvHealTask       // kvHealTask which this request is filling
-	contract common.Address    // contract
-	shardId  uint64            // shardId
-	kvs      map[uint64][]byte // kvs to store into the sharded storage
+	reqId        uint64         // Request ID of this response
+	task         *kvHealTask    // kvHealTask which this request is filling
+	contract     common.Address // contract
+	shardId      uint64         // shardId
+	providerAddr common.Address
+	kvs          map[uint64][]byte // kvs to store into the sharded storage
 }
 
 // kvTask represents the sync task for a sstorage shard.
@@ -222,7 +224,7 @@ type SyncPeer interface {
 	// RequestKVs fetches a batch of kvs with a kv list
 	RequestKVs(id uint64, contract common.Address, shardId uint64, kvList []uint64) error
 
-	// RequestHealKVs fetches a batch of kvs with a kv list
+	// RequestKVRange fetches a batch of kvs with a kv list
 	RequestKVRange(id uint64, contract common.Address, shardId uint64, origin uint64, limit uint64) error
 
 	// RequestShardList fetches shard list support by the peer
@@ -245,11 +247,12 @@ type BlockChain interface {
 	VerifyAndWriteKV(contract common.Address, data map[uint64][]byte, providerAddress common.Address) (uint64, uint64, []uint64, error)
 
 	// ReadEncodedKVsByIndexList Read the masked KVs by a list of KV index.
-	ReadEncodedKVsByIndexList(contract common.Address, indexes []uint64) ([]*core.KV, error)
+	ReadEncodedKVsByIndexList(contract common.Address, shardId uint64, indexes []uint64) (common.Address, []*core.KV, error)
 
 	// ReadEncodedKVsByIndexRange Read masked KVs sequentially starting from origin until the index exceeds the limit or
 	// the amount of data read is greater than the bytes.
-	ReadEncodedKVsByIndexRange(contract common.Address, origin uint64, limit uint64, bytes uint64) ([]*core.KV, error)
+	ReadEncodedKVsByIndexRange(contract common.Address, shardId uint64, origin uint64,
+		limit uint64, bytes uint64) (common.Address, []*core.KV, error)
 
 	// GetSstorageLastKvIdx get LastKvIdx from a sstorage contract with latest stateDB.
 	GetSstorageLastKvIdx(contract common.Address) (uint64, error)
@@ -951,7 +954,7 @@ func (s *Syncer) processKVRangeResponse(res *kvRangeResponse) {
 	}
 
 	// TODO: obtain peer provider address
-	synced, syncedBytes, inserted, err := s.chain.VerifyAndWriteKV(res.contract, res.kvs, common.Address{})
+	synced, syncedBytes, inserted, err := s.chain.VerifyAndWriteKV(res.contract, res.kvs, res.providerAddr)
 	if err != nil {
 		log.Error("processKVRangeResponse fail", "err", err.Error())
 		return
@@ -1003,7 +1006,7 @@ func (s *Syncer) processKVHealResponse(res *kvHealResponse) {
 	}
 
 	// TODO: obtain peer provider address
-	synced, syncedBytes, inserted, err := s.chain.VerifyAndWriteKV(res.contract, res.kvs, common.Address{})
+	synced, syncedBytes, inserted, err := s.chain.VerifyAndWriteKV(res.contract, res.kvs, res.providerAddr)
 	if err != nil {
 		log.Error("processKVHealResponse fail", "err", err.Error())
 		return
@@ -1033,7 +1036,7 @@ func (s *Syncer) processKVHealResponse(res *kvHealResponse) {
 
 // OnKVs is a callback method to invoke when a batch of Contract
 // bytes codes are received from a remote peer.
-func (s *Syncer) OnKVs(peer SyncPeer, id uint64, kvs []*core.KV) error {
+func (s *Syncer) OnKVs(peer SyncPeer, id uint64, providerAddr common.Address, kvs []*core.KV) error {
 	var size common.StorageSize
 	for _, kv := range kvs {
 		if kv != nil {
@@ -1111,11 +1114,12 @@ func (s *Syncer) OnKVs(peer SyncPeer, id uint64, kvs []*core.KV) error {
 
 	// Response validated, send it to the scheduler for filling
 	response := &kvHealResponse{
-		task:     req.task,
-		reqId:    req.id,
-		contract: req.contract,
-		shardId:  req.shardId,
-		kvs:      kvInRange,
+		task:         req.task,
+		reqId:        req.id,
+		contract:     req.contract,
+		shardId:      req.shardId,
+		providerAddr: providerAddr,
+		kvs:          kvInRange,
 	}
 	select {
 	case req.deliver <- response:
@@ -1127,7 +1131,7 @@ func (s *Syncer) OnKVs(peer SyncPeer, id uint64, kvs []*core.KV) error {
 
 // OnKVRange is a callback method to invoke when a batch of Contract
 // bytes codes are received from a remote peer.
-func (s *Syncer) OnKVRange(peer SyncPeer, id uint64, kvs []*core.KV) error {
+func (s *Syncer) OnKVRange(peer SyncPeer, id uint64, providerAddr common.Address, kvs []*core.KV) error {
 	var size common.StorageSize
 	for _, kv := range kvs {
 		if kv != nil {
@@ -1205,11 +1209,12 @@ func (s *Syncer) OnKVRange(peer SyncPeer, id uint64, kvs []*core.KV) error {
 
 	// Response validated, send it to the scheduler for filling
 	response := &kvRangeResponse{
-		task:     req.task,
-		reqId:    req.id,
-		contract: req.contract,
-		shardId:  req.shardId,
-		kvs:      kvInRange,
+		task:         req.task,
+		reqId:        req.id,
+		contract:     req.contract,
+		shardId:      req.shardId,
+		providerAddr: providerAddr,
+		kvs:          kvInRange,
 	}
 	select {
 	case req.deliver <- response:

@@ -383,10 +383,6 @@ func (c *Tendermint) verifyHeader(chain consensus.ChainHeaderReader, header *typ
 	if header.MixDigest != (common.Hash{}) {
 		return errInvalidMixDigest
 	}
-	// Ensure that the block doesn't contain any uncles which are meaningless in PoA
-	if header.UncleHash != uncleHash {
-		return errInvalidUncleHash
-	}
 	// Ensure that the block's difficulty is meaningful (may not be correct at this point)
 	if header.Difficulty == nil || (header.Difficulty.Cmp(big.NewInt(1)) != 0) {
 		return errInvalidDifficulty
@@ -460,8 +456,14 @@ func (c *Tendermint) getEpochHeader(chain consensus.ChainHeaderReader, header *t
 // VerifyUncles implements consensus.Engine, always returning an error for any
 // uncles as this consensus mechanism doesn't permit uncles.
 func (c *Tendermint) VerifyUncles(chain consensus.ChainReader, block *types.Block) error {
-	if len(block.Uncles()) > 0 {
-		return errors.New("uncles not allowed")
+	if len(block.Uncles()) > len(block.Transactions()) {
+		return fmt.Errorf("the number of uncles exceeds the number of transactions at block")
+	}
+
+	for _, uncle := range block.Uncles() {
+		if len(uncle.Extra) > params.MaxMROutputSizeAtUncleExtra {
+			return fmt.Errorf("uncle extra size exceeds limit")
+		}
 	}
 	return nil
 }
@@ -484,7 +486,7 @@ func (c *Tendermint) Prepare(chain consensus.ChainHeaderReader, header *types.He
 func (c *Tendermint) Finalize(chain consensus.ChainHeaderReader, header *types.Header, state *state.StateDB, txs []*types.Transaction, uncles []*types.Header) {
 	// No block rewards at the moment, so the state remains as is and uncles are dropped
 	header.Root = state.IntermediateRoot(chain.Config().IsEIP158(header.Number))
-	header.UncleHash = types.CalcUncleHash(nil)
+	header.UncleHash = types.CalcUncleHash(uncles)
 }
 
 // FinalizeAndAssemble implements consensus.Engine, ensuring no uncles are set,
@@ -494,7 +496,7 @@ func (c *Tendermint) FinalizeAndAssemble(chain consensus.ChainHeaderReader, head
 	c.Finalize(chain, header, state, txs, uncles)
 
 	// Assemble and return the final block for sealing
-	return types.NewBlock(header, txs, nil, receipts, trie.NewStackTrie(nil)), nil
+	return types.NewBlock(header, txs, uncles, receipts, trie.NewStackTrie(nil)), nil
 }
 
 // Seal implements consensus.Engine, attempting to create a sealed block using

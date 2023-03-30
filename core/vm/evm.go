@@ -21,6 +21,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ethereum/go-ethereum/rlp"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/params"
@@ -93,6 +95,26 @@ type TxContext struct {
 	GasPrice *big.Int       // Provides information for GASPRICE
 }
 
+// MindReadingContext provides the execution environment of MindReading
+type MindReadingContext struct {
+	MRClient         MindReadingClient
+	ReuseMindReading bool
+	MREnable         bool
+	ChainId          uint64
+	MinimumConfirms  uint64
+	Version          uint64
+	// cCCOutputs means 'crossChainCallOutputs` will store the return value of each cross-chain call
+	// cCCOutputsIdx increases by 1 after each invoking to CrossChainCall in order to point to the corresponding CCROutput
+	cCCOutputs    []*CrossChainCallOutput
+	cCCOutputsIdx uint64
+	// cCCSystemError is an error occurred during the cross-chain-call process
+	cCCSystemError error
+}
+
+func NewMindReadingContext(MRClient MindReadingClient, relayMindReading bool, mrEnable bool, config *params.ChainConfig) *MindReadingContext {
+	return &MindReadingContext{MRClient: MRClient, ReuseMindReading: relayMindReading, MREnable: mrEnable, ChainId: config.MindReading.SupportChainId, MinimumConfirms: config.MindReading.MinimumConfirms, Version: config.MindReading.Version}
+}
+
 // EVM is the Ethereum Virtual Machine base object and provides
 // the necessary tools to run a contract on the given state with
 // the provided context. It should be noted that any error
@@ -106,6 +128,7 @@ type EVM struct {
 	// Context provides auxiliary blockchain related information
 	Context BlockContext
 	TxContext
+	MRContext *MindReadingContext
 	// StateDB gives access to the underlying state
 	StateDB StateDB
 	// Depth is the current call stack
@@ -145,11 +168,116 @@ func NewEVM(blockCtx BlockContext, txCtx TxContext, statedb StateDB, chainConfig
 	return evm
 }
 
+// NewEVMWithMRC returns a new EVM with a configured MindReadingContext. The returned EVM is not thread safe and should
+// only ever be used *once*.
+func NewEVMWithMRC(blockCtx BlockContext, txCtx TxContext, mRCtx *MindReadingContext, statedb StateDB, chainConfig *params.ChainConfig, config Config) *EVM {
+	evm := &EVM{
+		Context:     blockCtx,
+		TxContext:   txCtx,
+		MRContext:   mRCtx,
+		StateDB:     statedb,
+		Config:      config,
+		chainConfig: chainConfig,
+		chainRules:  chainConfig.Rules(blockCtx.BlockNumber, blockCtx.Random != nil),
+	}
+	evm.interpreter = NewEVMInterpreter(evm, config)
+	return evm
+}
+
+// setCCCSystemError records error that occur during cross-chain-call and aborts the EVM execution.
+// Triggering the error means the Tx (and the block) is invalid.
+func (evm *EVM) setCCCSystemError(err error) {
+	if evm.MRContext.cCCSystemError == nil {
+		evm.MRContext.cCCSystemError = err
+	}
+	evm.Cancel()
+}
+
+// CCCSystemError return error that occur during cross-chain-call
+func (evm *EVM) CCCSystemError() error {
+	if evm.IsMindReadingEnabled() {
+		return evm.MRContext.cCCSystemError
+	} else {
+		return nil
+	}
+}
+
+// MindReadingClient returns the external-call-client
+func (evm *EVM) MindReadingClient() MindReadingClient {
+	return evm.MRContext.MRClient
+}
+
+// IsMindReadingEnabled returns true if the MindReading module is active, otherwise returns false
+func (evm *EVM) IsMindReadingEnabled() bool {
+	if evm.MRContext == nil {
+		return false
+	} else {
+		return evm.MRContext.MREnable
+	}
+}
+
+// PresetCCCOutputs pre-sets the result of the cross-chain-call and is used when verifying the correctness of the transaction
+func (evm *EVM) PresetCCCOutputs(versionedResult []byte) error {
+	if versionedResult == nil || len(versionedResult) == 0 {
+		return nil
+	}
+	if evm.IsMindReadingEnabled() && evm.MRContext.ReuseMindReading {
+		return evm.setCCCOutputs(versionedResult)
+	}
+	return nil
+}
+
+func (evm *EVM) GetCCCOutputs() []*CrossChainCallOutput {
+	if evm.IsMindReadingEnabled() {
+		return evm.MRContext.cCCOutputs
+	} else {
+		return nil
+	}
+}
+
+func (evm *EVM) setCCCOutputs(versionedResult []byte) error {
+	outputsWithVersion := &CrossChainCallOutputsWithVersion{}
+	err := rlp.DecodeBytes(versionedResult, outputsWithVersion)
+	if err != nil {
+		return err
+	}
+	if evm.MRContext.Version != outputsWithVersion.Version {
+		return ErrVersionNomatch
+	}
+	evm.MRContext.cCCOutputs = outputsWithVersion.Outputs
+	return nil
+}
+
+func (evm *EVM) GetNextReplayableCCCOutput() *CrossChainCallOutput {
+	return evm.getNextReplayableCCCOutput()
+}
+
+func (evm *EVM) getNextReplayableCCCOutput() *CrossChainCallOutput {
+	if evm.MRContext.cCCOutputsIdx >= uint64(len(evm.MRContext.cCCOutputs)) {
+		return nil
+	}
+	evm.MRContext.cCCOutputsIdx++
+	return evm.MRContext.cCCOutputs[evm.MRContext.cCCOutputsIdx-1]
+}
+
+func (evm *EVM) appendCCCOutput(trace *CrossChainCallOutput) []*CrossChainCallOutput {
+	evm.MRContext.cCCOutputs = append(evm.MRContext.cCCOutputs, trace)
+	return evm.MRContext.cCCOutputs
+}
+
+func (evm *EVM) resetCCCOutputs() {
+	if evm.IsMindReadingEnabled() {
+		evm.MRContext.cCCOutputs = nil
+		evm.MRContext.cCCOutputsIdx = 0
+	}
+}
+
 // Reset resets the EVM with a new transaction context.Reset
 // This is not threadsafe and should only be done very cautiously.
 func (evm *EVM) Reset(txCtx TxContext, statedb StateDB) {
 	evm.TxContext = txCtx
 	evm.StateDB = statedb
+	evm.resetCCCOutputs()
 }
 
 // Cancel cancels any running EVM operation. This may be called concurrently and
