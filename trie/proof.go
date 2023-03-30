@@ -338,12 +338,12 @@ findFork:
 // - The given path is existent in the trie, unset the associated nodes with the
 //   specific direction
 // - The given path is non-existent in the trie
-// - the fork point is a fullnode, the corresponding child pointed by path
-//   is nil, return
-// - the fork point is a shortnode, the shortnode is included in the range,
-//   keep the entire branch and return.
-// - the fork point is a shortnode, the shortnode is excluded in the range,
-//   unset the entire branch.
+//   - the fork point is a fullnode, the corresponding child pointed by path
+//     is nil, return
+//   - the fork point is a shortnode, the shortnode is included in the range,
+//     keep the entire branch and return.
+//   - the fork point is a shortnode, the shortnode is excluded in the range,
+//     unset the entire branch.
 func unset(parent node, child node, key []byte, pos int, removeLeft bool) error {
 	switch cld := child.(type) {
 	case *fullNode:
