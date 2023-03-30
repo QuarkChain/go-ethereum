@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"math/big"
 	"strings"
 	"time"
@@ -1673,8 +1674,38 @@ func (s *PublicTransactionPoolAPI) GetTransactionReceipt(ctx context.Context, ha
 	return fields, nil
 }
 
+type ReceiptProofData struct {
+	BlockHash        common.Hash   `json:"blockHash"`
+	BlockNumber      uint64        `json:"blockNumber"`
+	TransactionHash  common.Hash   `json:"TransactionHash"`
+	TransactionIndex uint64        `json:"transactionIndex"`
+	ReceiptRoot      common.Hash   `json:"receiptRoot"`
+	ReceiptValue     hexutil.Bytes `json:"receiptValue"`
+	ReceiptKey       hexutil.Bytes `json:"receiptKey"`
+	ReceiptPath      hexutil.Bytes `json:"receiptPath"`
+}
+
+// rlpedData to avoid encoding a value twice by RLP
+type rlpedData []byte
+
+func (v rlpedData) EncodeRLP(w io.Writer) error {
+	_, err := w.Write(v)
+	return err
+}
+
+type receiptProofList []rlpedData
+
+func (n *receiptProofList) Put(key []byte, value []byte) error {
+	*n = append(*n, value)
+	return nil
+}
+
+func (n *receiptProofList) Delete(key []byte) error {
+	panic("not supported")
+}
+
 // GetReceiptProof returns a proof which is the receipt-tree(mpt) path for the receipt corresponding to the specified block to verify the validity of the receipt
-func (s *PublicTransactionPoolAPI) GetReceiptProof(ctx context.Context, txHash common.Hash) (map[string]interface{}, error) {
+func (s *PublicTransactionPoolAPI) GetReceiptProof(ctx context.Context, txHash common.Hash) (*ReceiptProofData, error) {
 	_, blockHash, blockNumber, index, err := s.b.GetTransaction(ctx, txHash)
 	if err != nil {
 		return nil, err
@@ -1687,35 +1718,37 @@ func (s *PublicTransactionPoolAPI) GetReceiptProof(ctx context.Context, txHash c
 		return nil, fmt.Errorf("index invalid")
 	}
 	receipt := receipts[index]
-	//1. rlp encode receipt value
+	// 1. rlp encode receipt value
 	receiptBuf := new(bytes.Buffer)
 	receipts.EncodeIndex(int(index), receiptBuf)
-	//2. get receipt root
+	// 2. get receipt root
 	head, err := s.b.HeaderByHash(ctx, blockHash)
 	if err != nil {
 		return nil, err
 	}
 	receiptTrieRoot := head.ReceiptHash
-	//3. generate receipt key
+	// 3. generate receipt key
 	var key []byte
 	key = rlp.AppendUint64(key[:0], uint64(receipt.TransactionIndex))
 	if err != nil {
 		return nil, err
 	}
-	//4. create the receipt tree
-	tree, err := trie.New(common.Hash{}, trie.NewDatabase(memorydb.New()))
+	// 4. create the receipt tree
+	tdb := trie.NewDatabase(memorydb.New())
+	tree, err := trie.New(common.Hash{}, tdb)
 	if err != nil {
 		return nil, err
 	}
 	hash := types.DeriveSha(receipts, tree)
 
-	//5.verify the receiptTreeRoot
+	// 5.verify the receiptTreeRoot
 	if hash != receiptTrieRoot {
 		return nil, fmt.Errorf("receipt tree root no match:\ngenerating receipt tree root: %s,\nreceipt tree root at block: %s,\n", hash, head.ReceiptHash.Hex())
 	}
 
-	//6.generate the path of proof
-	nodes, err := tree.GetReceiptProofList(key)
+	// 6.generate the path of proof
+	var nodes receiptProofList
+	err = tree.Prove(key, 0, &nodes)
 	if err != nil {
 		return nil, err
 	}
@@ -1728,18 +1761,18 @@ func (s *PublicTransactionPoolAPI) GetReceiptProof(ctx context.Context, txHash c
 
 	hpkey := trie.HexToCompact(trie.KeyBytesToHex(key))
 
-	fields := map[string]interface{}{
-		"blockHash":        blockHash,
-		"blockNumber":      blockNumber,
-		"transactionHash":  txHash,
-		"transactionIndex": index,
-		"receiptRoot":      hash,
-		"receiptValue":     hexutil.Bytes(receiptBuf.Bytes()),
-		"receiptKey":       hexutil.Bytes(hpkey),
-		"receiptPath":      hexutil.Bytes(buf.Bytes()),
+	proof := &ReceiptProofData{
+		BlockHash:        blockHash,
+		BlockNumber:      blockNumber,
+		TransactionHash:  txHash,
+		TransactionIndex: index,
+		ReceiptRoot:      hash,
+		ReceiptValue:     hexutil.Bytes(receiptBuf.Bytes()),
+		ReceiptKey:       hexutil.Bytes(hpkey),
+		ReceiptPath:      hexutil.Bytes(buf.Bytes()),
 	}
 
-	return fields, nil
+	return proof, nil
 }
 
 // sign is a helper function that signs a transaction with the private key of the given address.
