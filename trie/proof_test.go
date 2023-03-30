@@ -20,6 +20,7 @@ import (
 	"bytes"
 	crand "crypto/rand"
 	"encoding/binary"
+	"io"
 	mrand "math/rand"
 	"sort"
 	"testing"
@@ -190,6 +191,25 @@ func TestRangeProof(t *testing.T) {
 	}
 }
 
+// rlpedData to avoid encoding a value twice by RLP
+type rlpedData []byte
+
+func (v rlpedData) EncodeRLP(w io.Writer) error {
+	_, err := w.Write(v)
+	return err
+}
+
+type receiptProofList []rlpedData
+
+func (n *receiptProofList) Put(key []byte, value []byte) error {
+	*n = append(*n, value)
+	return nil
+}
+
+func (n *receiptProofList) Delete(key []byte) error {
+	panic("not supported")
+}
+
 func TestGenerateProof(t *testing.T) {
 	trie := newEmpty()
 
@@ -229,7 +249,8 @@ func TestGenerateProof(t *testing.T) {
 	t.Log("encoded    key3:", encodedKey3, " hex:", common.Bytes2Hex(encodedKey3))
 	t.Log("hp encoded key3:", hp_encodedKey3, "hex:", common.Bytes2Hex(hp_encodedKey3))
 
-	nodes, err := trie.GetReceiptProofList(testKey)
+	var nodes receiptProofList
+	err = trie.Prove(testKey, 0, &nodes)
 	if err != nil {
 		t.Error(err)
 	}
