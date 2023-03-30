@@ -570,9 +570,9 @@ var (
 		Name:  "sstorage.mine",
 		Usage: "Enable sstorage mining",
 	}
-	SstorageNodeKeyFlag = cli.StringFlag{
-		Name:  "sstorage.nodekey",
-		Usage: "Sstorage miner node key file",
+	SstorageTXSignerFlag = cli.StringFlag{
+		Name:  "sstorage.txsigner",
+		Usage: "Account used to sign tx submit to sstorage miner contract",
 	}
 	SstorageMinerContractFlag = cli.StringFlag{
 		Name:  "sstorage.minercontract",
@@ -1140,8 +1140,8 @@ func setSstorage(ctx *cli.Context, cfg *ethconfig.Config) {
 	if ctx.GlobalIsSet(SstorageMineFlag.Name) {
 		cfg.SstorageMine = ctx.GlobalBool(SstorageMineFlag.Name)
 	}
-	if ctx.GlobalIsSet(SstorageNodeKeyFlag.Name) {
-		cfg.SstorageNodeKey = ctx.GlobalString(SstorageNodeKeyFlag.Name)
+	if ctx.GlobalIsSet(SstorageTXSignerFlag.Name) {
+		cfg.SstorageTXSigner = ctx.GlobalString(SstorageTXSignerFlag.Name)
 	}
 	if ctx.GlobalIsSet(SstorageMinerContractFlag.Name) {
 		cfg.SstorageMinerContract = ctx.GlobalString(SstorageMinerContractFlag.Name)

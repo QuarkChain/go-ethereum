@@ -17,9 +17,7 @@
 package sstorminer
 
 import (
-	"crypto/ecdsa"
 	"fmt"
-	"github.com/ethereum/go-ethereum/core/state"
 	"math/big"
 	"math/rand"
 	"sort"
@@ -28,10 +26,12 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/core"
+	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
@@ -85,6 +85,13 @@ type BlockChain interface {
 	SubscribeChainHeadEvent(ch chan<- core.ChainHeadEvent) event.Subscription
 
 	State() (*state.StateDB, error)
+}
+
+type SignTxFn func(account accounts.Account, tx *types.Transaction, chainID *big.Int) (*types.Transaction, error)
+
+type TXSigner struct {
+	Account accounts.Account // Ethereum address of the signing key
+	SignFn  SignTxFn         // Signer function to sign tx
 }
 
 // task contains all information for consensus engine sealing and result submitting.
@@ -249,8 +256,7 @@ type worker struct {
 	chainHeadCh  chan core.ChainHeadEvent
 	chainHeadSub event.Subscription
 	client       *ethclient.Client
-	signer       types.Signer
-	privKey      *ecdsa.PrivateKey
+	signer       *TXSigner
 
 	// Channels
 	newWorkCh          chan *newWorkReq
@@ -272,7 +278,7 @@ type worker struct {
 	newResultHook func(*result)
 }
 
-func newWorker(config *Config, chainConfig *params.ChainConfig, eth Backend, chain BlockChain, mux *event.TypeMux, privKey *ecdsa.PrivateKey,
+func newWorker(config *Config, chainConfig *params.ChainConfig, eth Backend, chain BlockChain, mux *event.TypeMux, txSigner *TXSigner,
 	minerContract common.Address, init bool) *worker {
 	worker := &worker{
 		config:             config,
@@ -283,15 +289,14 @@ func newWorker(config *Config, chainConfig *params.ChainConfig, eth Backend, cha
 		tasks:              make([]*task, 0),
 		chainHeadCh:        make(chan core.ChainHeadEvent, chainHeadChanSize),
 		newWorkCh:          make(chan *newWorkReq),
-		taskCh:             make(chan *task, len(sstor.Shards())),
+		taskCh:             make(chan *task),
 		resultCh:           make(chan *result, resultQueueSize),
 		exitCh:             make(chan struct{}),
 		startCh:            make(chan struct{}, 1),
 		resubmitIntervalCh: make(chan time.Duration),
 		taskDoneCh:         make(chan struct{}),
 		taskStartCh:        make(chan struct{}),
-		signer:             types.NewEIP2930Signer(chainConfig.ChainID),
-		privKey:            privKey,
+		signer:             txSigner,
 	}
 	for addr, sm := range sstor.ContractToShardManager {
 		for idx, shard := range sm.ShardMap() {
@@ -711,7 +716,7 @@ func (w *worker) submitMinedResult(result *result) error {
 		Data:      data,
 	}
 
-	signedTx, err := types.SignTx(types.NewTx(baseTx), w.signer, w.privKey)
+	signedTx, err := w.signer.SignFn(w.signer.Account, types.NewTx(baseTx), w.chainConfig.ChainID)
 	if err != nil {
 		return err
 	}

@@ -235,7 +235,7 @@ type Config struct {
 	SstorageFiles         []string `toml:",omitempty"`
 	SstorageShards        []string `toml:",omitempty"`
 	SstorageMine          bool
-	SstorageNodeKey       string
+	SstorageTXSigner      string
 	SstorageMinerContract string
 }
 

@@ -18,7 +18,6 @@
 package sstorminer
 
 import (
-	"crypto/ecdsa"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/eth/downloader"
@@ -59,13 +58,13 @@ type Miner struct {
 	wg sync.WaitGroup
 }
 
-func New(eth Backend, config *Config, chainConfig *params.ChainConfig, mux *event.TypeMux, privKey *ecdsa.PrivateKey, minerContract common.Address) *Miner {
+func New(eth Backend, config *Config, chainConfig *params.ChainConfig, mux *event.TypeMux, txSigner *TXSigner, minerContract common.Address) *Miner {
 	miner := &Miner{
 		mux:     mux,
 		exitCh:  make(chan struct{}),
 		startCh: make(chan struct{}),
 		stopCh:  make(chan struct{}),
-		worker:  newWorker(config, chainConfig, eth, eth.BlockChain(), mux, privKey, minerContract, true),
+		worker:  newWorker(config, chainConfig, eth, eth.BlockChain(), mux, txSigner, minerContract, true),
 	}
 	miner.wg.Add(1)
 	go miner.update()

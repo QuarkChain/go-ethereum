@@ -26,6 +26,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/consensus/ethash"
@@ -224,7 +225,13 @@ func newTestWorker(t *testing.T, chainConfig *params.ChainConfig, engine consens
 	infos := wchain.initMiningInfos(shardIdxList, diff, blockMined)
 	makeKVStorage(stateDB, contract, shardIdxList, 1<<kvEntriesBits, shardIsFull)
 
-	w := newWorker(defaultConfig, chainConfig, backend, &wchain, new(event.TypeMux), testBankKey, minerContract, false)
+	signer := &TXSigner{
+		Account: accounts.Account{Address: testBankAddress},
+		SignFn: func(account accounts.Account, tx *types.Transaction, chainID *big.Int) (*types.Transaction, error) {
+			return types.SignTx(tx, types.NewEIP2930Signer(chainConfig.ChainID), testBankKey)
+		},
+	}
+	w := newWorker(defaultConfig, chainConfig, backend, &wchain, new(event.TypeMux), signer, minerContract, false)
 	return w, infos, files, backend
 }
 

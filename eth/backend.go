@@ -39,7 +39,6 @@ import (
 	"github.com/ethereum/go-ethereum/core/state/pruner"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
-	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/eth/downloader"
 	"github.com/ethereum/go-ethereum/eth/ethconfig"
 	"github.com/ethereum/go-ethereum/eth/filters"
@@ -277,10 +276,6 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	eth.miner.SetExtra(makeExtraData(config.Miner.ExtraData))
 
 	if config.SstorageMine {
-		privKey, err := crypto.LoadECDSA(config.SstorageNodeKey)
-		if err != nil {
-			return nil, err
-		}
 		if len(sstorage.Shards()) == 0 {
 			return nil, fmt.Errorf("no shards is exist")
 		}
@@ -288,7 +283,17 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			return nil, fmt.Errorf("miner contract is needed when the sstorage mine is enabled.")
 		}
 		minerContract := common.HexToAddress(config.SstorageMinerContract)
-		eth.sstorMiner = sstorminer.New(eth, &config.SStorMiner, chainConfig, eth.EventMux(), privKey, minerContract)
+		if config.SstorageTXSigner == "" {
+			return nil, fmt.Errorf("TX signer is needed when the sstorage mine is enabled.")
+		}
+		signer := accounts.Account{Address: common.HexToAddress(config.SstorageTXSigner)}
+		wallet, err := eth.accountManager.Find(signer)
+		if wallet == nil || err != nil {
+			log.Error("sstorage tx signer account unavailable locally", "err", err)
+			return nil, fmt.Errorf("signer missing: %v", err)
+		}
+
+		eth.sstorMiner = sstorminer.New(eth, &config.SStorMiner, chainConfig, eth.EventMux(), &sstorminer.TXSigner{signer, wallet.SignTx}, minerContract)
 	}
 
 	eth.APIBackend = &EthAPIBackend{stack.Config().ExtRPCEnabled(), stack.Config().AllowUnprotectedTxs, eth, nil}
