@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/ethereum/go-ethereum/internal/ethapi"
 	"math/big"
 
 	"github.com/ethereum/go-ethereum"
@@ -284,6 +285,18 @@ func (ec *Client) TransactionReceipt(ctx context.Context, txHash common.Hash) (*
 		}
 	}
 	return r, err
+}
+
+// ReceiptProof generates a proof which is the receipt-tree(mpt) path for the receipt corresponding to the specified block to verify the validity of the receipt
+func (ec *Client) ReceiptProof(ctx context.Context, txHash common.Hash) (*ethapi.ReceiptProofData, error) {
+	var proof *ethapi.ReceiptProofData
+	err := ec.c.CallContext(ctx, &proof, "eth_getReceiptProof", txHash)
+	if err == nil {
+		if proof == nil {
+			return nil, ethereum.NotFound
+		}
+	}
+	return proof, err
 }
 
 type MindReadingOutput struct {
