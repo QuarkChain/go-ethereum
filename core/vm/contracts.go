@@ -1434,7 +1434,7 @@ type crossChainCall struct {
 }
 
 const CrossChainCallInputLength = 160
-const MaxDataLenLimitation = 100000
+const MaxDataLenLimitation = 1024
 
 // RequiredGas is the maximum gas consumption that will calculate the cross_chain_call
 func (c *crossChainCall) RequiredGas(input []byte) uint64 {
@@ -1501,17 +1501,25 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractCallEnv, input []byte, 
 	if len(input) != CrossChainCallInputLength {
 		return nil, 0, ErrInvalidCrossChainCallInputLength
 	}
-
 	if !env.evm.IsMindReadingEnabled() {
 		return nil, 0, ErrCrossChainCallNoEnabled
 	}
 
-	ctx := context.Background()
-	var crossChainCallOutput *CrossChainCallOutput
+	maxDataLen := new(big.Int).SetBytes(getData(input, 96, 32)).Uint64()
+	confirms := new(big.Int).SetBytes(getData(input, 128, 32)).Uint64()
 
-	if env.evm.MRContext.ReplayMindReading {
+	if maxDataLen > MaxDataLenLimitation {
+		return nil, 0, ErrMaxDataLenOutOfLimit
+	}
+
+	// Ensure that the number of confirmations meets the minimum requirement which is defined by chainConfig
+	if confirms < env.evm.MRContext.MinimumConfirms {
+		return nil, 0, ErrUserDefinedConfirmsTooSmall
+	}
+
+	if env.evm.MRContext.ReuseMindReading {
 		// we are replaying the cross chain calls with the majority votes of the validators (and trust them).
-		crossChainCallOutput = env.evm.getNextReplayableCCCOutput()
+		crossChainCallOutput := env.evm.getNextReplayableCCCOutput()
 		if crossChainCallOutput == nil {
 			// we are out of call outputs, are the validators broken (or the local node is broken)?
 			log.Error("Index out of CrossChainCall Outputs")
@@ -1532,12 +1540,33 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractCallEnv, input []byte, 
 		}
 	}
 
+	output, gasUsed, err, fatal := c.mindReadFromExternalClient(env, input, prepaidGas)
+	if fatal != nil {
+		env.evm.setCCCSystemError(fatal)
+		return nil, 0, fatal
+	}
+
+	crossChainCallOutput := &CrossChainCallOutput{
+		Output:  output,
+		Success: err == nil,
+		GasUsed: gasUsed,
+	}
+	env.evm.appendCCCOutput(crossChainCallOutput)
+
+	// make sure return the same expect-err if occurred in the case of 'replay' and 'self-play'
+	if err != nil {
+		err = ErrCrossChainCallFailed
+	}
+	return output, gasUsed, err
+}
+
+func (c *crossChainCall) mindReadFromExternalClient(env *PrecompiledContractCallEnv, input []byte, prepaidGas uint64) ([]byte, uint64, error, error) {
+	ctx := context.Background()
 	// The flag of ReplayMindReading is false means that the node will produce the cross-chain-call output by itself
 	// Reaching here means the node is a validator in consensus mode or a node in JSON-RPC eth_call.
 	if env.evm.MRContext.MRClient == nil {
 		log.Error("No active MindReading client")
-		env.evm.setCCCSystemError(ErrNoActiveClient)
-		return nil, 0, ErrNoActiveClient
+		return nil, 0, nil, ErrNoActiveClient
 	}
 
 	chainId := new(big.Int).SetBytes(getData(input, 0, 32)).Uint64()
@@ -1546,48 +1575,28 @@ func (c *crossChainCall) RunWith(env *PrecompiledContractCallEnv, input []byte, 
 	maxDataLen := new(big.Int).SetBytes(getData(input, 96, 32)).Uint64()
 	confirms := new(big.Int).SetBytes(getData(input, 128, 32)).Uint64()
 
-	if maxDataLen > MaxDataLenLimitation {
-		return nil, 0, ErrMaxDataLenOutOfLimit
-	}
-
-	// Ensure that the number of confirmations meets the minimum requirement which is defined by chainConfig
-	if confirms < env.evm.MRContext.MinimumConfirms {
-		return nil, 0, ErrUserDefinedConfirmsTooSmall
-	}
-
 	logData, expErr, unexpErr := GetExternalLog(ctx, env, chainId, txHash, logIdx, maxDataLen, confirms)
 
 	if unexpErr != nil {
 		log.Error("MindReading client unexpected error", "error", unexpErr)
-		env.evm.setCCCSystemError(unexpErr)
-		return nil, 0, unexpErr
-	} else if expErr != nil {
-		return nil, 0, expErr
-	} else {
-		// calculate actual cost of gas
-		actualGasUsed := logData.GasCost(params.CrossChainCallDataPerByteGas)
-		actualGasUsed += params.OnceCrossChainCallGas
-
-		packedLogData, err := logData.ABIPack()
-		// TODO: will the error happen?
-		if err != nil {
-			env.evm.setCCCSystemError(err)
-			return nil, 0, err
-		}
-		crossChainCallOutput = &CrossChainCallOutput{
-			Output:  packedLogData,
-			Success: true,
-			GasUsed: actualGasUsed,
-		}
-		env.evm.appendCCCOutput(crossChainCallOutput)
+		return nil, 0, nil, unexpErr
 	}
 
-	if crossChainCallOutput.GasUsed > prepaidGas {
-		log.Error("CrossChainCall actual gas > prepaid Gas", "actual", crossChainCallOutput.GasUsed, "prepaid", prepaidGas)
-		env.evm.setCCCSystemError(ErrActualGasExceedChargedGas)
-		return crossChainCallOutput.Output, crossChainCallOutput.GasUsed, ErrActualGasExceedChargedGas
+	if expErr != nil {
+		return nil, 0, expErr, nil
+	}
+
+	// calculate actual cost of gas
+	actualGasUsed := logData.GasCost(params.CrossChainCallDataPerByteGas)
+	actualGasUsed += params.OnceCrossChainCallGas
+
+	packedLogData, _ := logData.ABIPack()
+
+	if actualGasUsed > prepaidGas {
+		log.Error("CrossChainCall actual gas > prepaid Gas", "actual", actualGasUsed, "prepaid", prepaidGas)
+		return packedLogData, actualGasUsed, nil, ErrActualGasExceedChargedGas
 	} else {
-		return crossChainCallOutput.Output, crossChainCallOutput.GasUsed, nil
+		return packedLogData, actualGasUsed, nil, nil
 	}
 }
 
@@ -1639,7 +1648,6 @@ func GetExternalLog(ctx context.Context, env *PrecompiledContractCallEnv, chainI
 		copy(data, log.Data)
 	}
 
-	// TODO: the error should never happen?
 	logData := NewGetLogByTxHash(log.Address, log.Topics, data)
 	if err != nil {
 		return nil, nil, err
@@ -1724,11 +1732,11 @@ func VerifyCrossChainCall(client MindReadingClient, externalCallInput string) ([
 	chainCfg := &params.ChainConfig{MindReading: &params.MindReadingConfig{EnableBlockNumber: big.NewInt(0), SupportChainId: supportChainID, Version: 1}}
 
 	mrctx := &MindReadingContext{
-		MRClient:          client,
-		MREnable:          true,
-		ReplayMindReading: false,
-		ChainId:           chainId.Uint64(),
-		MinimumConfirms:   10,
+		MRClient:         client,
+		MREnable:         true,
+		ReuseMindReading: false,
+		ChainId:          chainId.Uint64(),
+		MinimumConfirms:  10,
 	}
 	evm := NewEVMWithMRC(BlockContext{BlockNumber: big.NewInt(0)}, TxContext{}, mrctx, nil, chainCfg, evmConfig)
 	//evmInterpreter := NewEVMInterpreter(evm, evm.Config)
@@ -1739,5 +1747,4 @@ func VerifyCrossChainCall(client MindReadingClient, externalCallInput string) ([
 	} else {
 		return res, nil
 	}
-
 }

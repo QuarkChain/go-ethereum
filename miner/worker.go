@@ -95,6 +95,7 @@ type environment struct {
 	txs      []*types.Transaction
 	receipts []*types.Receipt
 	uncles   map[common.Hash]*types.Header
+	mrUncles []common.Hash // optional uncles storing MR outputs with the same order of txs
 }
 
 // copy creates a deep copy of environment.
@@ -122,14 +123,31 @@ func (env *environment) copy() *environment {
 	for hash, uncle := range env.uncles {
 		cpy.uncles[hash] = uncle
 	}
+	cpy.mrUncles = make([]common.Hash, len(env.mrUncles))
+	copy(cpy.mrUncles, env.mrUncles)
 	return cpy
+}
+
+// commitUncleDirectly is used when submitting cross_chain_call_output
+func (w *worker) commitUncleDirectly(env *environment, uncle *types.Header) error {
+	hash := uncle.Hash()
+	if _, exist := env.uncles[hash]; exist {
+		return errors.New("uncle not unique")
+	}
+	env.uncles[hash] = uncle
+	if env.mrUncles == nil {
+		env.mrUncles = make([]common.Hash, 0)
+	}
+	env.mrUncles = append(env.mrUncles, hash)
+	return nil
 }
 
 // unclelist returns the contained uncles as the list format.
 func (env *environment) unclelist() []*types.Header {
+	// we only returns MR uncles as in BFT mode, we should not have other uncles.
 	var uncles []*types.Header
-	for _, uncle := range env.uncles {
-		uncles = append(uncles, uncle)
+	for _, uncle := range env.mrUncles {
+		uncles = append(uncles, env.uncles[uncle])
 	}
 	return uncles
 }
@@ -848,10 +866,22 @@ func (w *worker) updateSnapshot(env *environment) {
 func (w *worker) commitTransaction(env *environment, tx *types.Transaction) ([]*types.Log, error) {
 	snap := env.state.Snapshot()
 
-	receipt, err := core.ApplyTransaction(w.chainConfig, w.chain, &env.coinbase, env.gasPool, env.state, env.header, tx, &env.header.GasUsed, *w.chain.GetVMConfig())
+	receipt, mindReadingOutput, err := core.ApplyTransaction(w.chainConfig, w.chain, &env.coinbase, env.gasPool, env.state, env.header, tx, &env.header.GasUsed, *w.chain.GetVMConfig())
 	if err != nil {
 		env.state.RevertToSnapshot(snap)
 		return nil, err
+	}
+	if len(mindReadingOutput) != 0 {
+		uncle := &types.Header{
+			Number: big.NewInt(int64(len(env.txs))),
+			TxHash: tx.Hash(),
+			Extra:  mindReadingOutput,
+		}
+		err = w.commitUncleDirectly(env, uncle)
+		if err != nil {
+			return nil, err
+		}
+		log.Debug("worker: transaction with cross_chain_call_result", "txIndex", len(env.txs), "txHash", tx.Hash().Hex(), "cross_chain_result", common.Bytes2Hex(mindReadingOutput))
 	}
 	env.txs = append(env.txs, tx)
 	env.receipts = append(env.receipts, receipt)

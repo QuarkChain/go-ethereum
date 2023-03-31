@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/ethereum/go-ethereum/internal/ethapi"
 	"math/big"
 
 	"github.com/ethereum/go-ethereum"
@@ -278,6 +279,38 @@ func (ec *Client) TransactionInBlock(ctx context.Context, blockHash common.Hash,
 func (ec *Client) TransactionReceipt(ctx context.Context, txHash common.Hash) (*types.Receipt, error) {
 	var r *types.Receipt
 	err := ec.c.CallContext(ctx, &r, "eth_getTransactionReceipt", txHash)
+	if err == nil {
+		if r == nil {
+			return nil, ethereum.NotFound
+		}
+	}
+	return r, err
+}
+
+// ReceiptProof generates a proof which is the receipt-tree(mpt) path for the receipt corresponding to the specified block to verify the validity of the receipt
+func (ec *Client) ReceiptProof(ctx context.Context, txHash common.Hash) (*ethapi.ReceiptProofData, error) {
+	var proof *ethapi.ReceiptProofData
+	err := ec.c.CallContext(ctx, &proof, "eth_getReceiptProof", txHash)
+	if err == nil {
+		if proof == nil {
+			return nil, ethereum.NotFound
+		}
+	}
+	return proof, err
+}
+
+type MindReadingOutput struct {
+	BlockHash          common.Hash `json:"blockHash"`
+	BlockNumber        uint64      `json:"blockNumber"`
+	TxHash             common.Hash `json:"transactionHash"`
+	TxIndex            uint64      `json:"transactionIndex"`
+	ExternalCallResult []byte      `json:"externalCallResult"`
+}
+
+// MindReadingOutput returns the MindReadingOutput for the given transaction hash
+func (ec *Client) MindReadingOutput(ctx context.Context, txHash common.Hash) (*MindReadingOutput, error) {
+	var r *MindReadingOutput
+	err := ec.c.CallContext(ctx, &r, "eth_getMindReadingOutput", txHash)
 	if err == nil {
 		if r == nil {
 			return nil, ethereum.NotFound

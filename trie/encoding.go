@@ -34,6 +34,10 @@ package trie
 // in the case of an odd number. All remaining nibbles (now an even number) fit properly
 // into the remaining bytes. Compact encoding is used for nodes stored on disk.
 
+func HexToCompact(hex []byte) []byte {
+	return hexToCompact(hex)
+}
+
 func hexToCompact(hex []byte) []byte {
 	terminator := byte(0)
 	if hasTerm(hex) {
@@ -92,6 +96,10 @@ func compactToHex(compact []byte) []byte {
 	// apply odd flag
 	chop := 2 - base[0]&1
 	return base[chop:]
+}
+
+func KeyBytesToHex(str []byte) []byte {
+	return keybytesToHex(str)
 }
 
 func keybytesToHex(str []byte) []byte {

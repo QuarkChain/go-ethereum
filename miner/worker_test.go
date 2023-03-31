@@ -207,6 +207,57 @@ func newTestWorker(t *testing.T, chainConfig *params.ChainConfig, engine consens
 	return w, backend
 }
 
+func TestCommitUncles(t *testing.T) {
+	env := &environment{
+		uncles: make(map[common.Hash]*types.Header, 0),
+	}
+	w := &worker{}
+	uncles := []*types.Header{
+		&types.Header{
+			Number: big.NewInt(int64(0)),
+			TxHash: common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000001"),
+			Extra:  []byte{0, 1},
+		},
+		&types.Header{
+			Number: big.NewInt(int64(1)),
+			TxHash: common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000002"),
+			Extra:  []byte{0, 1},
+		},
+		&types.Header{
+			Number: big.NewInt(int64(2)),
+			TxHash: common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000003"),
+			Extra:  []byte{0, 1},
+		},
+		&types.Header{
+			Number: big.NewInt(int64(5)),
+			TxHash: common.HexToHash("0x000000000000000000000000000000000000000000000000000000000000007"),
+			Extra:  []byte{0, 1},
+		},
+		&types.Header{
+			Number: big.NewInt(int64(10)),
+			TxHash: common.HexToHash("0x000000000000000000000000000000000000000000000000000000000000207"),
+			Extra:  []byte{0, 1},
+		},
+		&types.Header{
+			Number: big.NewInt(int64(100)),
+			TxHash: common.HexToHash("0x022000000000000000000000000000000000000000000000000000000000207"),
+			Extra:  []byte{0, 1},
+		},
+	}
+	for i, u := range uncles {
+		err := w.commitUncleDirectly(env, u)
+		if err != nil {
+			t.Errorf("commit %d uncle with error: %s", i, err.Error())
+		}
+	}
+
+	actualUncles := env.unclelist()
+	if len(actualUncles) != len(uncles) {
+		t.Error("uncleList generated with invalid length")
+	}
+
+}
+
 func TestGenerateBlockAndImportEthash(t *testing.T) {
 	testGenerateBlockAndImport(t, false)
 }

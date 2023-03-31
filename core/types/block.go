@@ -173,6 +173,41 @@ func (h *Header) EmptyReceipts() bool {
 	return h.ReceiptHash == EmptyRootHash
 }
 
+// GetMindReadingOutput return the MindReadingOutput when the txHash matches between h.txHash and tx.Hash()
+func (h *Header) GetMindReadingOutput(txhash common.Hash) []byte {
+	if h.TxHash == txhash {
+		return h.Extra
+	}
+	return nil
+}
+
+type MindReadingOutputIterator struct {
+	uncles []*Header
+	index  int
+}
+
+func NewMindReadingOutputIterator(b *Block) *MindReadingOutputIterator {
+	return &MindReadingOutputIterator{
+		uncles: b.uncles,
+		index:  0,
+	}
+}
+
+func (it *MindReadingOutputIterator) GetNextMindReadingOutput(tx *Transaction) []byte {
+	if it.index >= len(it.uncles) {
+		return nil
+	}
+	output := it.uncles[it.index].GetMindReadingOutput(tx.Hash())
+	if output != nil {
+		it.index++
+	}
+	return output
+}
+
+func (it *MindReadingOutputIterator) GetIndex() int {
+	return it.index
+}
+
 // Body is a simple (mutable, non-safe) data container for storing and moving
 // a block's data contents (transactions and uncles) together.
 type Body struct {
@@ -244,6 +279,17 @@ func NewBlock(header *Header, txs []*Transaction, uncles []*Header, receipts []*
 	}
 
 	return b
+}
+
+// FindMindReadingOutput find the mrOutput corresponding to the input-tx if exists
+func (b *Block) FindMindReadingOutput(txhash common.Hash) []byte {
+	for i := 0; i < len(b.uncles); i++ {
+		output := b.uncles[i].GetMindReadingOutput(txhash)
+		if output != nil {
+			return output
+		}
+	}
+	return nil
 }
 
 // NewBlockWithHeader creates a block with the given header data. The

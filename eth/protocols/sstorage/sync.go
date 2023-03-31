@@ -268,7 +268,12 @@ type BlockChain interface {
 
 	// ReadEncodedKVsByIndexRange Read masked KVs sequentially starting from origin until the index exceeds the limit or
 	// the amount of data read is greater than the bytes.
+<<<<<<< HEAD
 	ReadEncodedKVsByIndexRange(contract common.Address, shardId uint64, origin uint64, limit uint64, bytes uint64) (common.Address, []*core.KV, error)
+=======
+	ReadEncodedKVsByIndexRange(contract common.Address, shardId uint64, origin uint64,
+		limit uint64, bytes uint64) (common.Address, []*core.KV, error)
+>>>>>>> 7db82a8f2cb14d1cfade453b6d07d00ce9d9aaba
 
 	// GetSstorageLastKvIdx get LastKvIdx from a sstorage contract with latest stateDB.
 	GetSstorageLastKvIdx(contract common.Address) (uint64, error)

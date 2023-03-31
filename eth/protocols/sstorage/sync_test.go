@@ -136,6 +136,7 @@ func (c *blockChain) ReadEncodedKVsByIndexList(contract common.Address, shardId 
 	if !ok {
 		return common.Address{}, nil, fmt.Errorf("shard %d do not support for contract %s", shardId, contract.Hex())
 	}
+
 	res := make([]*core.KV, 0)
 	for _, idx := range indexes {
 		_, meta, err := core.GetSstorageMetadata(c.stateDB, contract, idx)
@@ -162,6 +163,7 @@ func (c *blockChain) ReadEncodedKVsByIndexRange(contract common.Address, shardId
 	if !ok {
 		return common.Address{}, nil, fmt.Errorf("shard %d do not support for contract %s", shardId, contract.Hex())
 	}
+
 	res := make([]*core.KV, 0)
 	read := uint64(0)
 	for idx := origin; idx <= limit; idx++ {

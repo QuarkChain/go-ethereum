@@ -170,9 +170,11 @@ const (
 	BaseMaxCalldataPerBlockEIP4488 = 1048576 // BASE_MAX_CALLDATA_PER_BLOCK in EIP-4488
 	CalldataPerTxStipendEIP4488    = 300     // CALLDATA_PER_TX_STIPEND in EIP-4488
 
-	BurnTokenGasCost             = 10500  // Charge half of `TxGas(21000)` is because the BurnTokenGasCost only updates one leaf of state tree relative to 'transfer' updates two leaf of state tree
 	CrossChainCallDataPerByteGas = 3      // Gas needed for per byte data produced by CrossChainCall
 	OnceCrossChainCallGas        = 100000 // Gas needed for every invoke to CrossChainCall, i.e., 50M allows 500 calls.
+
+	MaxMROutputSizeAtUncleExtra = 2048  // Size limitation for packing mindreading-output into block.uncles[i].extra
+	BurnTokenGasCost            = 10500 // Charge half of `TxGas(21000)` is because the BurnTokenGasCost only updates one leaf of state tree relative to 'transfer' updates two leaf of state tree
 
 )
 

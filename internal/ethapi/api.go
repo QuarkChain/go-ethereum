@@ -17,6 +17,7 @@
 package ethapi
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -41,11 +42,13 @@ import (
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/eth/tracers/logger"
+	"github.com/ethereum/go-ethereum/ethdb/memorydb"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/p2p"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/rpc"
+	"github.com/ethereum/go-ethereum/trie"
 	"github.com/tyler-smith/go-bip39"
 )
 
@@ -738,10 +741,10 @@ func (s *PublicBlockChainAPI) GetHeaderByHash(ctx context.Context, hash common.H
 }
 
 // GetBlockByNumber returns the requested canonical block.
-// * When blockNr is -1 the chain head is returned.
-// * When blockNr is -2 the pending chain head is returned.
-// * When fullTx is true all transactions in the block are returned, otherwise
-//   only the transaction hash is returned.
+//   - When blockNr is -1 the chain head is returned.
+//   - When blockNr is -2 the pending chain head is returned.
+//   - When fullTx is true all transactions in the block are returned, otherwise
+//     only the transaction hash is returned.
 func (s *PublicBlockChainAPI) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber, fullTx bool) (map[string]interface{}, error) {
 	block, err := s.b.BlockByNumber(ctx, number)
 	if block != nil && err == nil {
@@ -1276,25 +1279,26 @@ func (s *PublicBlockChainAPI) rpcMarshalBlock(ctx context.Context, b *types.Bloc
 
 // RPCTransaction represents a transaction that will serialize to the RPC representation of a transaction
 type RPCTransaction struct {
-	BlockHash        *common.Hash      `json:"blockHash"`
-	BlockNumber      *hexutil.Big      `json:"blockNumber"`
-	From             common.Address    `json:"from"`
-	Gas              hexutil.Uint64    `json:"gas"`
-	GasPrice         *hexutil.Big      `json:"gasPrice"`
-	GasFeeCap        *hexutil.Big      `json:"maxFeePerGas,omitempty"`
-	GasTipCap        *hexutil.Big      `json:"maxPriorityFeePerGas,omitempty"`
-	Hash             common.Hash       `json:"hash"`
-	Input            hexutil.Bytes     `json:"input"`
-	Nonce            hexutil.Uint64    `json:"nonce"`
-	To               *common.Address   `json:"to"`
-	TransactionIndex *hexutil.Uint64   `json:"transactionIndex"`
-	Value            *hexutil.Big      `json:"value"`
-	Type             hexutil.Uint64    `json:"type"`
-	Accesses         *types.AccessList `json:"accessList,omitempty"`
-	ChainID          *hexutil.Big      `json:"chainId,omitempty"`
-	V                *hexutil.Big      `json:"v"`
-	R                *hexutil.Big      `json:"r"`
-	S                *hexutil.Big      `json:"s"`
+	BlockHash         *common.Hash      `json:"blockHash"`
+	BlockNumber       *hexutil.Big      `json:"blockNumber"`
+	From              common.Address    `json:"from"`
+	Gas               hexutil.Uint64    `json:"gas"`
+	GasPrice          *hexutil.Big      `json:"gasPrice"`
+	GasFeeCap         *hexutil.Big      `json:"maxFeePerGas,omitempty"`
+	GasTipCap         *hexutil.Big      `json:"maxPriorityFeePerGas,omitempty"`
+	Hash              common.Hash       `json:"hash"`
+	Input             hexutil.Bytes     `json:"input"`
+	Nonce             hexutil.Uint64    `json:"nonce"`
+	To                *common.Address   `json:"to"`
+	TransactionIndex  *hexutil.Uint64   `json:"transactionIndex"`
+	Value             *hexutil.Big      `json:"value"`
+	Type              hexutil.Uint64    `json:"type"`
+	Accesses          *types.AccessList `json:"accessList,omitempty"`
+	ChainID           *hexutil.Big      `json:"chainId,omitempty"`
+	V                 *hexutil.Big      `json:"v"`
+	R                 *hexutil.Big      `json:"r"`
+	S                 *hexutil.Big      `json:"s"`
+	MindReadingOutput *hexutil.Bytes    `json:"mindReadingOutput"`
 }
 
 // newRPCTransaction returns a transaction that will serialize to the RPC
@@ -1624,6 +1628,10 @@ func (s *PublicTransactionPoolAPI) GetTransactionReceipt(ctx context.Context, ha
 	}
 	receipt := receipts[index]
 
+	// obtain mindReadingOutput from block.uncles
+	block, err := s.b.BlockByHash(ctx, blockHash)
+	mindReadingOutput := block.FindMindReadingOutput(tx.Hash())
+
 	// Derive the sender.
 	bigblock := new(big.Int).SetUint64(blockNumber)
 	signer := types.MakeSigner(s.b.ChainConfig(), bigblock)
@@ -1667,7 +1675,119 @@ func (s *PublicTransactionPoolAPI) GetTransactionReceipt(ctx context.Context, ha
 	if receipt.ContractAddress != (common.Address{}) {
 		fields["contractAddress"] = receipt.ContractAddress
 	}
+
+	if mindReadingOutput != nil {
+		fields["mindReadingOutput"] = hexutil.Bytes(mindReadingOutput)
+	}
+
 	return fields, nil
+}
+
+// GetMindReadingOutput returns the output after executing MindReading module
+func (s *PublicTransactionPoolAPI) GetMindReadingOutput(ctx context.Context, hash common.Hash) (map[string]interface{}, error) {
+	tx, blockHash, blockNumber, index, err := s.b.GetTransaction(ctx, hash)
+	if err != nil {
+		return nil, nil
+	}
+
+	// get external_call_result from uncles
+	block, err := s.b.BlockByHash(ctx, blockHash)
+	mindReadingOutput := block.FindMindReadingOutput(tx.Hash())
+
+	if mindReadingOutput == nil {
+		return nil, fmt.Errorf("can't find the externalCallResult for the given txhash %s", hash)
+	}
+
+	fields := map[string]interface{}{
+		"blockHash":         blockHash,
+		"blockNumber":       blockNumber,
+		"transactionHash":   hash,
+		"transactionIndex":  index,
+		"mindReadingOutput": hexutil.Bytes(mindReadingOutput),
+	}
+
+	return fields, nil
+}
+
+type ReceiptProofData struct {
+	BlockHash        common.Hash   `json:"blockHash"`
+	BlockNumber      uint64        `json:"blockNumber"`
+	TransactionHash  common.Hash   `json:"TransactionHash"`
+	TransactionIndex uint64        `json:"transactionIndex"`
+	ReceiptRoot      common.Hash   `json:"receiptRoot"`
+	ReceiptValue     hexutil.Bytes `json:"receiptValue"`
+	ReceiptKey       hexutil.Bytes `json:"receiptKey"`
+	ReceiptPath      hexutil.Bytes `json:"receiptPath"`
+}
+
+// GetReceiptProof returns a proof which is the receipt-tree(mpt) path for the receipt corresponding to the specified block to verify the validity of the receipt
+func (s *PublicTransactionPoolAPI) GetReceiptProof(ctx context.Context, txHash common.Hash) (*ReceiptProofData, error) {
+	_, blockHash, blockNumber, index, err := s.b.GetTransaction(ctx, txHash)
+	if err != nil {
+		return nil, err
+	}
+	receipts, err := s.b.GetReceipts(ctx, blockHash)
+	if err != nil {
+		return nil, err
+	}
+	if len(receipts) <= int(index) {
+		return nil, fmt.Errorf("index invalid")
+	}
+	receipt := receipts[index]
+	// 1. rlp encode receipt value
+	receiptBuf := new(bytes.Buffer)
+	receipts.EncodeIndex(int(index), receiptBuf)
+	// 2. get receipt root
+	head, err := s.b.HeaderByHash(ctx, blockHash)
+	if err != nil {
+		return nil, err
+	}
+	receiptTrieRoot := head.ReceiptHash
+	// 3. generate receipt key
+	var key []byte
+	key = rlp.AppendUint64(key[:0], uint64(receipt.TransactionIndex))
+	if err != nil {
+		return nil, err
+	}
+	// 4. create the receipt tree
+	tdb := trie.NewDatabase(memorydb.New())
+	tree, err := trie.New(common.Hash{}, tdb)
+	if err != nil {
+		return nil, err
+	}
+	hash := types.DeriveSha(receipts, tree)
+
+	// 5.verify the receiptTreeRoot
+	if hash != receiptTrieRoot {
+		return nil, fmt.Errorf("receipt tree root no match:\ngenerating receipt tree root: %s,\nreceipt tree root at block: %s,\n", hash, head.ReceiptHash.Hex())
+	}
+
+	// 6.generate the path of proof
+	nodes, err := state.GetProofByKey(tree, key)
+	if err != nil {
+		return nil, err
+	}
+
+	buf := bytes.Buffer{}
+	err = rlp.Encode(&buf, nodes)
+	if err != nil {
+		return nil, err
+	}
+	// KeyBytesToHex() is used for nibble encoding and HexToCompact() converts nibbles to hex-prefix encoding
+	hpkey := trie.HexToCompact(trie.KeyBytesToHex(key))
+
+	proof := &ReceiptProofData{
+		BlockHash:        blockHash,
+		BlockNumber:      blockNumber,
+		TransactionHash:  txHash,
+		TransactionIndex: index,
+		ReceiptRoot:      hash,
+		ReceiptValue:     hexutil.Bytes(receiptBuf.Bytes()),
+		ReceiptKey:       hexutil.Bytes(hpkey),
+		ReceiptPath:      hexutil.Bytes(buf.Bytes()),
+	}
+
+	return proof, nil
 }
 
 // sign is a helper function that signs a transaction with the private key of the given address.
