@@ -198,7 +198,7 @@ var (
 		Name:  "validator.rpc",
 		Usage: "rpc for Validator to update validator set",
 	}
-	MindReadingEnableBlockNumberFlag = cli.StringFlag{
+	MindReadingEnableBlockNumberFlag = cli.Uint64Flag{
 		Name:  "mindreading.enableblocknumber",
 		Usage: "define in which blockNumber the MindReading is supported",
 	}
@@ -1513,7 +1513,7 @@ func setMindReading(ctx *cli.Context, cfg *ethconfig.Config) {
 	}
 
 	if ctx.GlobalIsSet(MindReadingEnableBlockNumberFlag.Name) {
-		cfg.MindReadingEnableBlockNumber.SetString(ctx.GlobalString(MindReadingEnableBlockNumberFlag.Name), 10)
+		cfg.MindReadingEnableBlockNumber.SetUint64(ctx.GlobalUint64(MindReadingEnableBlockNumberFlag.Name))
 	}
 
 	if ctx.GlobalIsSet(MindReadingCallRpcFlag.Name) {

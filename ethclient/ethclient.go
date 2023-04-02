@@ -286,6 +286,29 @@ func (ec *Client) TransactionReceipt(ctx context.Context, txHash common.Hash) (*
 	return r, err
 }
 
+type ReceiptProofData struct {
+	BlockHash        common.Hash   `json:"blockHash"`
+	BlockNumber      uint64        `json:"blockNumber"`
+	TransactionHash  common.Hash   `json:"TransactionHash"`
+	TransactionIndex uint64        `json:"transactionIndex"`
+	ReceiptRoot      common.Hash   `json:"receiptRoot"`
+	ReceiptValue     hexutil.Bytes `json:"receiptValue"`
+	ReceiptKey       hexutil.Bytes `json:"receiptKey"`
+	ReceiptPath      hexutil.Bytes `json:"receiptPath"`
+}
+
+// ReceiptProof generates a proof which is the receipt-tree(mpt) path for the receipt corresponding to the specified block to verify the validity of the receipt
+func (ec *Client) ReceiptProof(ctx context.Context, txHash common.Hash) (*ReceiptProofData, error) {
+	var proof *ReceiptProofData
+	err := ec.c.CallContext(ctx, &proof, "eth_getReceiptProof", txHash)
+	if err == nil {
+		if proof == nil {
+			return nil, ethereum.NotFound
+		}
+	}
+	return proof, err
+}
+
 type MindReadingOutput struct {
 	BlockHash          common.Hash `json:"blockHash"`
 	BlockNumber        uint64      `json:"blockNumber"`

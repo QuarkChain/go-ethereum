@@ -21,6 +21,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"math/big"
 	"sort"
 	"time"
@@ -45,6 +46,25 @@ var (
 	// emptyRoot is the known root hash of an empty trie.
 	emptyRoot = common.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
 )
+
+// rlpedData to avoid encoding a value twice by RLP
+type rlpedData []byte
+
+func (v rlpedData) EncodeRLP(w io.Writer) error {
+	_, err := w.Write(v)
+	return err
+}
+
+type rlpedProofList []rlpedData
+
+func (n *rlpedProofList) Put(key []byte, value []byte) error {
+	*n = append(*n, value)
+	return nil
+}
+
+func (n *rlpedProofList) Delete(key []byte) error {
+	panic("not supported")
+}
 
 type proofList [][]byte
 
@@ -370,6 +390,13 @@ func (s *StateDB) GetProofByHash(addrHash common.Hash) ([][]byte, error) {
 	return proof, err
 }
 
+// GetProofByKey returns the merkle proof for a given account and this proof can protect from rlpEncode twice error
+func GetProofByKey(tree *trie.Trie, key []byte) (rlpedProofList, error) {
+	var proof rlpedProofList
+	err := tree.Prove(key, 0, &proof)
+	return proof, err
+}
+
 // GetStorageProof returns the Merkle proof for given storage slot.
 func (s *StateDB) GetStorageProof(a common.Address, key common.Hash) ([][]byte, error) {
 	var proof proofList
@@ -646,8 +673,8 @@ func (s *StateDB) createObject(addr common.Address) (newobj, prev *stateObject) 
 // CreateAccount is called during the EVM CREATE operation. The situation might arise that
 // a contract does the following:
 //
-//   1. sends funds to sha(account ++ (nonce + 1))
-//   2. tx_create(sha(account ++ nonce)) (note that this gets the address of 1)
+//  1. sends funds to sha(account ++ (nonce + 1))
+//  2. tx_create(sha(account ++ nonce)) (note that this gets the address of 1)
 //
 // Carrying over the balance ensures that Ether doesn't disappear.
 func (s *StateDB) CreateAccount(addr common.Address) {

@@ -78,22 +78,28 @@ func (sm *ShardManager) TryRead(kvIdx uint64, readLen int, commit common.Hash) (
 	}
 }
 
+func (sm *ShardManager) GetShardMiner(shardIdx uint64) (common.Address, bool) {
+	if ds, ok := sm.shardMap[shardIdx]; ok {
+		return ds.Miner(), true
+	}
+	return common.Address{}, false
+}
+
 // Decode the encoded KV data.
-func (sm *ShardManager) DecodeKV(kvIdx uint64, b []byte, hash common.Hash) ([]byte, bool, error) {
-	return sm.DecodeOrEncodeKV(kvIdx, b, hash, false)
+func (sm *ShardManager) DecodeKV(kvIdx uint64, b []byte, hash common.Hash, providerAddr common.Address) ([]byte, bool, error) {
+	return sm.DecodeOrEncodeKV(kvIdx, b, hash, providerAddr, false)
 }
 
 // Encode the raw KV data.
-func (sm *ShardManager) EncodeKV(kvIdx uint64, b []byte, hash common.Hash) ([]byte, bool, error) {
-	return sm.DecodeOrEncodeKV(kvIdx, b, hash, true)
+func (sm *ShardManager) EncodeKV(kvIdx uint64, b []byte, hash common.Hash, providerAddr common.Address) ([]byte, bool, error) {
+	return sm.DecodeOrEncodeKV(kvIdx, b, hash, providerAddr, true)
 }
 
-func (sm *ShardManager) DecodeOrEncodeKV(kvIdx uint64, b []byte, hash common.Hash, encode bool) ([]byte, bool, error) {
+func (sm *ShardManager) DecodeOrEncodeKV(kvIdx uint64, b []byte, hash common.Hash, providerAddr common.Address, encode bool) ([]byte, bool, error) {
 	shardIdx := kvIdx / sm.kvEntries
 	var data []byte
 	if ds, ok := sm.shardMap[shardIdx]; ok {
 		datalen := len(b)
-		miner := ds.Miner()
 		for i := uint64(0); i < ds.chunksPerKv; i++ {
 			if datalen == 0 {
 				break
@@ -106,7 +112,7 @@ func (sm *ShardManager) DecodeOrEncodeKV(kvIdx uint64, b []byte, hash common.Has
 			datalen = datalen - chunkReadLen
 
 			chunkIdx := kvIdx*ds.chunksPerKv + i
-			encodeKey := calcEncodeKey(hash, chunkIdx, miner)
+			encodeKey := calcEncodeKey(hash, chunkIdx, providerAddr)
 			var cdata []byte
 			if encode {
 				cdata = encodeChunk(b[i*CHUNK_SIZE:i*CHUNK_SIZE+uint64(chunkReadLen)], ds.EncodeType(), encodeKey)

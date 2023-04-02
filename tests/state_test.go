@@ -720,7 +720,6 @@ func NewWrapTx(tx *types.Transaction, args *CrossChainCallArgument) *WrapTx {
 }
 
 func (wt *WrapTx) VerifyCallResult(crossCallResult []byte, happenedError error, txIndex int, t *testing.T) {
-
 	// verify system err whether match with the preseted expect-syserr
 	if wt.expectSysErr != nil {
 		if happenedError == nil {
@@ -1410,7 +1409,6 @@ func TestApplyTransaction(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-
 		stx.VerifyCallResult(execResult.CCCOutputs, execResult.Err, txIndex, t)
 
 		// compare gas use

@@ -213,11 +213,12 @@ type BlockChain interface {
 	VerifyAndWriteKV(contract common.Address, data map[uint64][]byte, provderAddr common.Address) (uint64, uint64, []uint64, error)
 
 	// ReadEncodedKVsByIndexList Read the encoded KVs by a list of KV index.
-	ReadEncodedKVsByIndexList(contract common.Address, indexes []uint64) ([]*core.KV, error)
+	ReadEncodedKVsByIndexList(contract common.Address, shardId uint64, indexes []uint64) (common.Address, []*core.KV, error)
 
 	// ReadEncodedKVsByIndexRange Read encoded KVs sequentially starting from origin until the index exceeds the limit or
 	// the amount of data read is greater than the bytes.
-	ReadEncodedKVsByIndexRange(contract common.Address, origin uint64, limit uint64, bytes uint64) ([]*core.KV, error)
+	ReadEncodedKVsByIndexRange(contract common.Address, shardId uint64, origin uint64,
+		limit uint64, bytes uint64) (common.Address, []*core.KV, error)
 
 	// GetSstorageLastKvIdx get LastKvIdx from a sstorage contract with latest stateDB.
 	GetSstorageLastKvIdx(contract common.Address) (uint64, error)
@@ -689,9 +690,11 @@ func (d *Downloader) fetchHead(p *peerConnection) (head *types.Header, pivot *ty
 // calculateRequestSpan calculates what headers to request from a peer when trying to determine the
 // common ancestor.
 // It returns parameters to be used for peer.RequestHeadersByNumber:
-//  from - starting block number
-//  count - number of headers to request
-//  skip - number of headers to skip
+//
+//	from - starting block number
+//	count - number of headers to request
+//	skip - number of headers to skip
+//
 // and also returns 'max', the last block which is expected to be returned by the remote peers,
 // given the (from,count,skip)
 func calculateRequestSpan(remoteHeight, localHeight uint64) (int64, int, int, uint64) {
@@ -1655,9 +1658,9 @@ func (d *Downloader) DeliverSnapPacket(peer *snap.Peer, packet snap.Packet) erro
 func (d *Downloader) DeliverSstoragePacket(peer *sstorage.Peer, packet sstorage.Packet) error {
 	switch packet := packet.(type) {
 	case *sstorage.KVsPacket:
-		return d.SstorSyncer.OnKVs(peer, packet.ID, packet.KVs)
+		return d.SstorSyncer.OnKVs(peer, packet.ID, packet.ProviderAddr, packet.KVs)
 	case *sstorage.KVRangePacket:
-		return d.SstorSyncer.OnKVRange(peer, packet.ID, packet.KVs)
+		return d.SstorSyncer.OnKVRange(peer, packet.ID, packet.ProviderAddr, packet.KVs)
 	default:
 		return fmt.Errorf("unexpected snap packet type: %T", packet)
 	}
