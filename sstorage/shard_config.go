@@ -12,19 +12,19 @@ import (
 var ContractToShardManager = make(map[common.Address]*ShardManager)
 
 type ShardInfo struct {
-	Contract  common.Address
-	KVSize    uint64
-	KVEntries uint64
+	Contract     common.Address
+	KVSizeBits   uint64
+	KVEntrieBits uint64
 }
 
 // TODO: move to chain specific config?
 var ShardInfos = []*ShardInfo{
-	{common.HexToAddress("0x0000000000000000000000000000000003330001"), 4 * 1024, 256 * 1024},
+	{common.HexToAddress("0x0000000000000000000000000000000003330001"), 12, 18},
 }
 
 func InitializeConfig() {
 	for _, sinfo := range ShardInfos {
-		ContractToShardManager[sinfo.Contract] = NewShardManager(sinfo.Contract, sinfo.KVSize, sinfo.KVEntries)
+		ContractToShardManager[sinfo.Contract] = NewShardManager(sinfo.Contract, sinfo.KVSizeBits, sinfo.KVEntrieBits)
 	}
 }
 
