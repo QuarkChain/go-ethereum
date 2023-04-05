@@ -737,13 +737,14 @@ func (l *sstoragePisaPutRaw) Run(input []byte) ([]byte, error) {
 func (l *sstoragePisaPutRaw) RunWith(env *PrecompiledContractCallEnv, input []byte) ([]byte, error) {
 
 	// The solidity code to generate input as follows:
-	// function putRaw(uint256 kvIdx, bytes memory data) internal {
+	// function putRaw(address dkvAddr, uint256 kvIdx, bytes memory data) internal {
 	//     (bool success, ) = address(sstoragePisaPutRaw).call(
 	//         abi.encode(kvIdx, data)
 	//      );
 	//  }
 	//
 	// The generated input data format is as follows:
+	// 0000000000000000000000000000000000000000000000000000000003330003 (dkvAddr)
 	// 0000000000000000000000000000000000000000000000000000000000000001 (kvIdx)
 	// 0000000000000000000000000000000000000000000000000000000000000040 (data offset)
 	// 0000000000000000000000000000000000000000000000000000000000000020 (data length)
@@ -753,9 +754,9 @@ func (l *sstoragePisaPutRaw) RunWith(env *PrecompiledContractCallEnv, input []by
 	if evm.interpreter.readOnly {
 		return nil, ErrWriteProtection
 	}
-	kvIdx := new(big.Int).SetBytes(getData(input, 0, 32)).Uint64()
-	dataPtr := new(big.Int).SetBytes(getData(input, 32, 32)).Uint64()
-	dkvAddr := common.BytesToAddress(getData(input, 64, 32))
+	dkvAddr := common.BytesToAddress(getData(input, 0, 32))
+	kvIdx := new(big.Int).SetBytes(getData(input, 32, 32)).Uint64()
+	dataPtr := new(big.Int).SetBytes(getData(input, 64, 32)).Uint64()
 
 	maxKVSize := evm.StateDB.SstorageMaxKVSize(dkvAddr)
 	if maxKVSize == 0 {
@@ -793,14 +794,15 @@ func (l *sstoragePisaGetRaw) RunWith(env *PrecompiledContractCallEnv, input []by
 		return nil, errors.New("getRaw() must be called in JSON RPC")
 	}
 	// TODO: check hash correctness
-	hash := common.BytesToHash(getData(input, 0, 32))
-	kvIdx := new(big.Int).SetBytes(getData(input, 32, 32)).Uint64()
-	kvOff := new(big.Int).SetBytes(getData(input, 64, 32)).Uint64()
-	kvLen := new(big.Int).SetBytes(getData(input, 96, 32)).Uint64()
-	dkvAddr := common.BytesToAddress(getData(input, 128, 32))
+	dkvAddr := common.BytesToAddress(getData(input, 0, 32))
+	hash := common.BytesToHash(getData(input, 32, 32))
+	kvIdx := new(big.Int).SetBytes(getData(input, 64, 32)).Uint64()
+	kvOff := new(big.Int).SetBytes(getData(input, 96, 32)).Uint64()
+	kvLen := new(big.Int).SetBytes(getData(input, 128, 32)).Uint64()
+
 	maxKVSize := evm.StateDB.SstorageMaxKVSize(dkvAddr)
 	if maxKVSize == 0 {
-		return nil, errors.New("invalid caller")
+		return nil, errors.New("invalid dkvAddr")
 	}
 
 	fb, ok, err := evm.StateDB.SstorageRead(dkvAddr, kvIdx, int(kvLen+kvOff), hash)
@@ -830,7 +832,8 @@ func (l *sstoragePisaUnmaskDaggerData) Run(input []byte) ([]byte, error) {
 
 func (l *sstoragePisaUnmaskDaggerData) RunWith(env *PrecompiledContractCallEnv, input []byte) ([]byte, error) {
 
-	// solidity input format = abi.encode(uint64 encodeType,uint64 chunkIdx,bytes32 kvHash,address miner,bytes memory maskedData )
+	// solidity input format = abi.encode(address dkvAddr, uint64 encodeType,uint64 chunkIdx,bytes32 kvHash,address miner,bytes memory maskedData )
+	// 0000000000000000000000000000000000000000000000000000000003330003 (dkvAddr)
 	// 0000000000000000000000000000000000000000000000000000000000000001
 	// 0000000000000000000000000000000000000000000000000000000000000002
 	// 0000000000000000000000000000000000000000000000000000000000000000
