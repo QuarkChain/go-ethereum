@@ -446,7 +446,7 @@ func DefaultWeb3QTestnetGenesisBlock() *Genesis {
 			common.HexToAddress("0x977cfc676bb06daed7ddfa7711bcfe8d50c93081"),
 			common.HexToAddress("0xcd21538af6e33ff6fcf1e2ca20f771413004cfd3"),
 		},
-		NextValidatorPowers: []uint64{1, 1, 1, 1},
+		NextValidatorPowers: []uint64{11, 11, 11, 11},
 	}
 }
 
