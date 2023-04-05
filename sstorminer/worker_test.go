@@ -406,7 +406,7 @@ func TestWork_SingleShard(test *testing.T) {
 		engine       = ethash.NewFaker()
 	)
 
-	w, infos, files, _ := newTestWorker(test, ethashChainConfig, engine, rawdb.NewMemoryDatabase(), shardIdxList, 0, true)
+	w, infos, files, _ := newTestWorker(test, ethashChainConfig, engine, rawdb.NewMemoryDatabase(), shardIdxList, 5, true)
 
 	defer w.close()
 	defer engine.Close()
@@ -460,7 +460,7 @@ func TestWork_MultiShards(test *testing.T) {
 		engine       = ethash.NewFaker()
 	)
 
-	w, _, files, _ := newTestWorker(test, ethashChainConfig, engine, rawdb.NewMemoryDatabase(), shardIdxList, 0, true)
+	w, _, files, _ := newTestWorker(test, ethashChainConfig, engine, rawdb.NewMemoryDatabase(), shardIdxList, 5, true)
 
 	defer w.close()
 	defer engine.Close()
@@ -507,7 +507,7 @@ func TestWork_TriggerByNewBlock(test *testing.T) {
 		db           = rawdb.NewMemoryDatabase()
 	)
 
-	w, _, files, _ := newTestWorker(test, ethashChainConfig, engine, db, shardIdxList, 0, true)
+	w, _, files, _ := newTestWorker(test, ethashChainConfig, engine, db, shardIdxList, 5, true)
 
 	defer w.close()
 	defer engine.Close()
@@ -558,7 +558,7 @@ func TestWork_ShardIsNotFull(test *testing.T) {
 		db           = rawdb.NewMemoryDatabase()
 	)
 
-	w, _, files, _ := newTestWorker(test, ethashChainConfig, engine, db, shardIdxList, 0, false)
+	w, _, files, _ := newTestWorker(test, ethashChainConfig, engine, db, shardIdxList, 5, false)
 
 	defer w.close()
 	defer engine.Close()
@@ -594,7 +594,7 @@ func TestWork_StartAndStopTask(test *testing.T) {
 		engine       = ethash.NewFaker()
 	)
 
-	w, _, files, _ := newTestWorker(test, ethashChainConfig, engine, rawdb.NewMemoryDatabase(), shardIdxList, 0, true)
+	w, _, files, _ := newTestWorker(test, ethashChainConfig, engine, rawdb.NewMemoryDatabase(), shardIdxList, 5, true)
 
 	defer w.close()
 	defer engine.Close()
@@ -649,14 +649,14 @@ func TestWork_StartAndStopTask(test *testing.T) {
 	}
 }
 
-func TestWork_LargeKV(test *testing.T) {
+func TestWork_SmallKV(test *testing.T) {
 	var (
 		shardIdxList = []uint64{0}
 		engine       = ethash.NewFaker()
 		db           = rawdb.NewMemoryDatabase()
 	)
 
-	w, _, files, _ := newTestWorker(test, ethashChainConfig, engine, db, shardIdxList, 2, true)
+	w, _, files, _ := newTestWorker(test, ethashChainConfig, engine, db, shardIdxList, 0, true)
 
 	defer w.close()
 	defer engine.Close()
