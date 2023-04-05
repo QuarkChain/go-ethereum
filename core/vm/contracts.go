@@ -673,6 +673,8 @@ func (c *blake2F) Run(input []byte) ([]byte, error) {
 var (
 	tokenManager    = common.HexToAddress("0x0000000000000000000000000000000003330002")
 	systemContracts = map[common.Address][]byte{
+		// Get the url of PrecompileManager: https://github.com/ethstorage/storage-contracts/blob/developing/contracts/DecentralizedKVDaggerHashimoto.sol
+		// contract at 0x0000000000000000000000000000000003330001 is complied DecentralizedKVDaggerHashimoto() + 0.8.16 solc (enable optimized)
 		common.HexToAddress("0x0000000000000000000000000000000003330001"): common.Hex2Bytes(""),
 		// Get the url of PrecompileManager: https://github.com/ethstorage/storage-contracts/blob/developing/contracts/PrecompileManager.sol
 		// contract at 0x0000000000000000000000000000000003330003 is complied PrecompileManager() + 0.8.16 solc (enable optimized)
@@ -839,18 +841,18 @@ func (l *sstoragePisaUnmaskDaggerData) RunWith(env *PrecompiledContractCallEnv, 
 
 	evm := env.evm
 
-	encodeType := new(big.Int).SetBytes(getData(input, 0, 32)).Uint64()
-	chunkIdx := new(big.Int).SetBytes(getData(input, 32, 32)).Uint64()
-	kvHash := common.BytesToHash(getData(input, 64, 32))
-	miner := common.BytesToAddress(getData(input, 96, 32))
-	dataptr := new(big.Int).SetBytes(getData(input, 128, 32)).Uint64()
-	datalen := new(big.Int).SetBytes(getData(input, 160, 32)).Uint64()
+	dkvAddr := common.BytesToAddress(getData(input, 0, 32))
+	encodeType := new(big.Int).SetBytes(getData(input, 32, 32)).Uint64()
+	chunkIdx := new(big.Int).SetBytes(getData(input, 64, 32)).Uint64()
+	kvHash := common.BytesToHash(getData(input, 96, 32))
+	miner := common.BytesToAddress(getData(input, 128, 32))
+	dataptr := new(big.Int).SetBytes(getData(input, 160, 32)).Uint64()
+	datalen := new(big.Int).SetBytes(getData(input, 192, 32)).Uint64()
 	maskedChunkData := getData(input, dataptr+32, datalen)
-	dkvAddr := common.BytesToAddress(getData(input, dataptr+32+datalen, 32))
 
 	maxKVSize := evm.StateDB.SstorageMaxKVSize(dkvAddr)
 	if maxKVSize == 0 {
-		return nil, errors.New("invalid caller")
+		return nil, errors.New("invalid dkvAddr")
 	}
 
 	if uint64(len(maskedChunkData)) != sstorage.CHUNK_SIZE || datalen != sstorage.CHUNK_SIZE {
