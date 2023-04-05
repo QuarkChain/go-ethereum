@@ -21,6 +21,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/ethereum/go-ethereum/accounts/abi"
+	"github.com/ethereum/go-ethereum/sstorage"
 	"io/ioutil"
 	"math/big"
 	"testing"
@@ -30,7 +32,6 @@ import (
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/params"
-	"github.com/ethereum/go-ethereum/sstorage"
 )
 
 // precompiledTest defines the input/output pairs for precompiled contract tests.
@@ -308,29 +309,75 @@ func benchJson(name, addr string, b *testing.B) {
 	}
 }
 
+var (
+	unmaskDaggerDataInputAbi, unmaskDaggerDataOutputAbi abi.Arguments
+)
+
+type unmaskDaggerDataInput struct {
+	EncodeType  uint64
+	ChunkIdx    uint64
+	KvHash      common.Hash
+	Miner       common.Address
+	MaskedChunk []byte
+	DkvAddr     common.Address
+}
+
+func initArgs() {
+	BytesTy, err := abi.NewType("bytes", "", nil)
+	if err != nil {
+		panic(err)
+	}
+	Bytes32Ty, err := abi.NewType("bytes32", "", nil)
+	if err != nil {
+		panic(err)
+	}
+	Uint64Ty, err := abi.NewType("uint64", "", nil)
+	AddrTy, err := abi.NewType("address", "", nil)
+	if err != nil {
+		panic(err)
+	}
+
+	unmaskDaggerDataInputAbi = abi.Arguments{
+		{Type: AddrTy, Name: "dkvAddr"},
+		{Type: Uint64Ty, Name: "encodeType"},
+		{Type: Uint64Ty, Name: "chunkIdx"},
+		{Type: Bytes32Ty, Name: "kvHash"},
+		{Type: AddrTy, Name: "miner"},
+		{Type: BytesTy, Name: "maskedChunk"},
+	}
+
+	unmaskDaggerDataOutputAbi = abi.Arguments{
+		{Type: BytesTy, Name: "unmaskedChunk"},
+	}
+}
 func TestUnmaskDaggerData(t *testing.T) {
+	initArgs()
+	var Miner common.Address = common.HexToAddress("0x5B38Da6a701c568545dCfcB03FcB875f56beddC4")
+	var EncodeType uint64 = sstorage.ENCODE_ETHASH
+	var ChunkIdx uint64 = 0
+	var KvHash common.Hash = common.Hash{}
+	var DkvAddr common.Address = sstorage.ShardInfos[0].Contract
+	UnmaskedChunk := [4 * 1024]byte{0x01, 0x2}
+	encodedKey := sstorage.CalcEncodeKey(KvHash, ChunkIdx, Miner)
+	maskedChunk := sstorage.EncodeChunk(UnmaskedChunk[:], sstorage.ENCODE_ETHASH, encodedKey)
+
 	sstorage.InitializeConfig()
 	p := &sstoragePisaUnmaskDaggerData{}
 
-	hash := common.Hash{0x01, 0x2}
-	epoch := big.NewInt(1)
-	maskedChunk := [4 * 1024]byte{0x03, 0x4}
-	input := unmaskDaggerDataInput{Epoch: epoch, Hash: hash, MaskedChunk: maskedChunk[:]}
-	packed, err := unmaskDaggerDataInputAbi.Pack(epoch, hash, maskedChunk[:])
+	packed, err := unmaskDaggerDataInputAbi.Pack(DkvAddr, EncodeType, ChunkIdx, KvHash, Miner, maskedChunk[:])
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	caller := sstorage.ShardInfos[0].Contract
-	expected, err := unmaskDaggerDataImpl(caller, input)
+	expOutput, err := unmaskDaggerDataOutputAbi.Pack(UnmaskedChunk[:])
 	if err != nil {
 		t.Fatal(err)
 	}
-
 	test := precompiledTest{
 		Name:     "TestUnmaskDaggerData",
 		Input:    hex.EncodeToString(packed),
-		Expected: hex.EncodeToString(expected),
+		Expected: hex.EncodeToString(expOutput),
 	}
 	in := common.Hex2Bytes(test.Input)
 	gas := p.RequiredGas(in)
@@ -353,7 +400,7 @@ func TestUnmaskDaggerData(t *testing.T) {
 		if res, _, err := RunPrecompiledContract(env, p, in, gas); err != nil {
 			t.Error(err)
 		} else if common.Bytes2Hex(res) != test.Expected {
-			t.Errorf("Expected %v, got %v", test.Expected, common.Bytes2Hex(res))
+			t.Errorf("\nexp %v \ngot %v", test.Expected, common.Bytes2Hex(res))
 		}
 		if expGas := test.Gas; expGas != gas {
 			t.Errorf("%v: gas wrong, expected %d, got %d", test.Name, expGas, gas)
@@ -364,37 +411,6 @@ func TestUnmaskDaggerData(t *testing.T) {
 			t.Errorf("Precompiled modified input data: %d vs %d", len(in), len(exp))
 		}
 	})
-}
-
-func TestUnmaskDaggerDataArgs(t *testing.T) {
-	hash := common.Hash{0x01, 0x2}
-	epoch := big.NewInt(1)
-	maskedChunk := [4 * 1024]byte{0x03, 0x4}
-	packed, err := unmaskDaggerDataInputAbi.Pack(epoch, hash, maskedChunk[:])
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	values, err := unmaskDaggerDataInputAbi.Unpack(packed)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var decoded unmaskDaggerDataInput
-	err = unmaskDaggerDataInputAbi.Copy(&decoded, values)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if decoded.Epoch.Cmp(epoch) != 0 {
-		t.Fatal("height mismatch")
-	}
-
-	if decoded.Hash != hash {
-		t.Fatal("hash mismatch")
-	}
-	if !bytes.Equal(decoded.MaskedChunk, maskedChunk[:]) {
-		t.Fatal("maskedChunk mismatch")
-	}
 }
 
 func TestPrecompiledBLS12381G1Add(t *testing.T)      { testJson("blsG1Add", "0a", t) }
