@@ -671,7 +671,9 @@ func (c *blake2F) Run(input []byte) ([]byte, error) {
 }
 
 var (
-	tokenManager    = common.HexToAddress("0x0000000000000000000000000000000003330002")
+	tokenManager = common.HexToAddress("0x0000000000000000000000000000000003330002")
+	// Get the url of PrecompileManager: https://github.com/ethstorage/storage-contracts/blob/developing/contracts/PrecompileManager.sol
+	// contract at 0x0000000000000000000000000000000003330001 is complied PrecompileManager() + 0.8.16 solc (enable optimized)
 	systemContracts = map[common.Address][]byte{
 		// Get the url of PrecompileManager: https://github.com/ethstorage/storage-contracts/blob/developing/contracts/DecentralizedKVDaggerHashimoto.sol
 		// contract at 0x0000000000000000000000000000000003330001 is complied DecentralizedKVDaggerHashimoto() + 0.8.16 solc (enable optimized)
@@ -744,24 +746,24 @@ func (l *sstoragePisaPutRaw) RunWith(env *PrecompiledContractCallEnv, input []by
 	//  }
 	//
 	// The generated input data format is as follows:
-	// 0000000000000000000000000000000000000000000000000000000003330003 (dkvAddr)
 	// 0000000000000000000000000000000000000000000000000000000000000001 (kvIdx)
 	// 0000000000000000000000000000000000000000000000000000000000000040 (data offset)
 	// 0000000000000000000000000000000000000000000000000000000000000020 (data length)
 	// 6161616161616161616161616161616161616161616161616161616161616161 (0..32 data)
 
 	evm := env.evm
-	if evm.interpreter.readOnly {
-		return nil, ErrWriteProtection
-	}
-	dkvAddr := common.BytesToAddress(getData(input, 0, 32))
-	kvIdx := new(big.Int).SetBytes(getData(input, 32, 32)).Uint64()
-	dataPtr := new(big.Int).SetBytes(getData(input, 64, 32)).Uint64()
-
-	maxKVSize := evm.StateDB.SstorageMaxKVSize(dkvAddr)
+	caller := env.caller.Address()
+	maxKVSize := evm.StateDB.SstorageMaxKVSize(caller)
 	if maxKVSize == 0 {
 		return nil, errors.New("invalid caller")
 	}
+
+	if evm.interpreter.readOnly {
+		return nil, ErrWriteProtection
+	}
+
+	kvIdx := new(big.Int).SetBytes(getData(input, 0, 32)).Uint64()
+	dataPtr := new(big.Int).SetBytes(getData(input, 32, 32)).Uint64()
 
 	if dataPtr > uint64(len(input)) {
 		return nil, errors.New("dataptr too large")
@@ -771,7 +773,7 @@ func (l *sstoragePisaPutRaw) RunWith(env *PrecompiledContractCallEnv, input []by
 	if putLen > maxKVSize {
 		return nil, errors.New("put len too large")
 	}
-	evm.StateDB.SstorageWrite(dkvAddr, kvIdx, getData(input, dataPtr+32, putLen))
+	evm.StateDB.SstorageWrite(caller, kvIdx, getData(input, dataPtr+32, putLen))
 	return nil, nil
 
 }
@@ -833,7 +835,6 @@ func (l *sstoragePisaUnmaskDaggerData) Run(input []byte) ([]byte, error) {
 func (l *sstoragePisaUnmaskDaggerData) RunWith(env *PrecompiledContractCallEnv, input []byte) ([]byte, error) {
 
 	// solidity input format = abi.encode(address dkvAddr, uint64 encodeType,uint64 chunkIdx,bytes32 kvHash,address miner,bytes memory maskedData )
-	// 0000000000000000000000000000000000000000000000000000000003330003 (dkvAddr)
 	// 0000000000000000000000000000000000000000000000000000000000000001
 	// 0000000000000000000000000000000000000000000000000000000000000002
 	// 0000000000000000000000000000000000000000000000000000000000000000
@@ -842,20 +843,16 @@ func (l *sstoragePisaUnmaskDaggerData) RunWith(env *PrecompiledContractCallEnv, 
 	// 0000000000000000000000000000000000000000000000000000000000000002
 	// aaaa000000000000000000000000000000000000000000000000000000000000
 
-	evm := env.evm
-
-	dkvAddr := common.BytesToAddress(getData(input, 0, 32))
-	encodeType := new(big.Int).SetBytes(getData(input, 32, 32)).Uint64()
-	chunkIdx := new(big.Int).SetBytes(getData(input, 64, 32)).Uint64()
-	kvHash := common.BytesToHash(getData(input, 96, 32))
-	miner := common.BytesToAddress(getData(input, 128, 32))
-	dataptr := new(big.Int).SetBytes(getData(input, 160, 32)).Uint64()
-	datalen := new(big.Int).SetBytes(getData(input, 192, 32)).Uint64()
+	encodeType := new(big.Int).SetBytes(getData(input, 0, 32)).Uint64()
+	chunkIdx := new(big.Int).SetBytes(getData(input, 32, 32)).Uint64()
+	kvHash := common.BytesToHash(getData(input, 64, 32))
+	miner := common.BytesToAddress(getData(input, 96, 32))
+	dataptr := new(big.Int).SetBytes(getData(input, 128, 32)).Uint64()
+	datalen := new(big.Int).SetBytes(getData(input, 160, 32)).Uint64()
 	maskedChunkData := getData(input, dataptr+32, datalen)
 
-	maxKVSize := evm.StateDB.SstorageMaxKVSize(dkvAddr)
-	if maxKVSize == 0 {
-		return nil, errors.New("invalid dkvAddr")
+	if dataptr > uint64(len(input)) {
+		return nil, errors.New("dataptr too large")
 	}
 
 	if uint64(len(maskedChunkData)) != sstorage.CHUNK_SIZE || datalen != sstorage.CHUNK_SIZE {
