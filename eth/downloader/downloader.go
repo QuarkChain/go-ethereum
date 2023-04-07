@@ -244,7 +244,7 @@ func New(checkpoint uint64, stateDb ethdb.Database, mux *event.TypeMux, chain Bl
 		headerProcCh:   make(chan *headerTask, 1),
 		quitCh:         make(chan struct{}),
 		SnapSyncer:     snap.NewSyncer(stateDb),
-		SstorSyncer:    sstorage.NewSyncer(stateDb, chain, sstor.Shards()),
+		SstorSyncer:    sstorage.NewSyncer(stateDb, chain, mux, sstor.Shards()),
 		stateSyncStart: make(chan *stateSync),
 		sstorSyncStart: make(chan *sstorSync),
 	}

@@ -28,7 +28,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
-	"github.com/ethereum/go-ethereum/eth/downloader"
+	"github.com/ethereum/go-ethereum/eth/protocols/sstorage"
 	"github.com/ethereum/go-ethereum/ethdb/memorydb"
 	"github.com/ethereum/go-ethereum/event"
 	"github.com/ethereum/go-ethereum/trie"
@@ -81,74 +81,22 @@ func (bc *testBlockChain) SubscribeChainHeadEvent(ch chan<- core.ChainHeadEvent)
 func TestMiner(t *testing.T) {
 	miner, mux, cleanup := createMiner(t)
 	defer cleanup(false)
-	miner.Start()
-	waitForMiningState(t, miner, true)
-	// Start the downloader
-	mux.Post(downloader.StartEvent{})
 	waitForMiningState(t, miner, false)
-	// Stop the downloader and wait for the update loop to run
-	mux.Post(downloader.DoneEvent{})
-	waitForMiningState(t, miner, true)
-
-	// Subsequent downloader events after a successful DoneEvent should not cause the
-	// miner to start or stop. This prevents a security vulnerability
-	// that would allow entities to present fake high blocks that would
-	// stop mining operations by causing a downloader sync
-	// until it was discovered they were invalid, whereon mining would resume.
-	mux.Post(downloader.StartEvent{})
-	waitForMiningState(t, miner, true)
-
-	mux.Post(downloader.FailedEvent{})
+	// start miner, but the
+	miner.Start()
+	waitForMiningState(t, miner, false)
+	// Start the downloader
+	mux.Post(sstorage.SstorSyncDone{})
 	waitForMiningState(t, miner, true)
 }
 
-// TestMinerDownloaderFirstFails tests that mining is only
-// permitted to run indefinitely once the downloader sees a DoneEvent (success).
-// An initial FailedEvent should allow mining to stop on a subsequent
-// downloader StartEvent.
-func TestMinerDownloaderFirstFails(t *testing.T) {
+func TestMinerStartStopAfterSyncDoneEvents(t *testing.T) {
 	miner, mux, cleanup := createMiner(t)
 	defer cleanup(false)
 	miner.Start()
-	waitForMiningState(t, miner, true)
+	waitForMiningState(t, miner, false)
 	// Start the downloader
-	mux.Post(downloader.StartEvent{})
-	waitForMiningState(t, miner, false)
-
-	// Stop the downloader and wait for the update loop to run
-	mux.Post(downloader.FailedEvent{})
-	waitForMiningState(t, miner, true)
-
-	// Since the downloader hasn't yet emitted a successful DoneEvent,
-	// we expect the miner to stop on next StartEvent.
-	mux.Post(downloader.StartEvent{})
-	waitForMiningState(t, miner, false)
-
-	// Downloader finally succeeds.
-	mux.Post(downloader.DoneEvent{})
-	waitForMiningState(t, miner, true)
-
-	// Downloader starts again.
-	// Since it has achieved a DoneEvent once, we expect miner
-	// state to be unchanged.
-	mux.Post(downloader.StartEvent{})
-	waitForMiningState(t, miner, true)
-
-	mux.Post(downloader.FailedEvent{})
-	waitForMiningState(t, miner, true)
-}
-
-func TestMinerStartStopAfterDownloaderEvents(t *testing.T) {
-	miner, mux, cleanup := createMiner(t)
-	defer cleanup(false)
-	miner.Start()
-	waitForMiningState(t, miner, true)
-	// Start the downloader
-	mux.Post(downloader.StartEvent{})
-	waitForMiningState(t, miner, false)
-
-	// Downloader finally succeeds.
-	mux.Post(downloader.DoneEvent{})
+	mux.Post(sstorage.SstorSyncDone{})
 	waitForMiningState(t, miner, true)
 
 	miner.Stop()
@@ -161,24 +109,23 @@ func TestMinerStartStopAfterDownloaderEvents(t *testing.T) {
 	waitForMiningState(t, miner, false)
 }
 
-func TestStartWhileDownload(t *testing.T) {
+func TestStartAfterDownload(t *testing.T) {
 	miner, mux, cleanup := createMiner(t)
 	defer cleanup(false)
 	waitForMiningState(t, miner, false)
-	miner.Start()
-	waitForMiningState(t, miner, true)
 	// Stop the downloader and wait for the update loop to run
-	mux.Post(downloader.StartEvent{})
+	mux.Post(sstorage.SstorSyncDone{})
 	waitForMiningState(t, miner, false)
 	// Starting the miner after the downloader should not work
 	miner.Start()
-	waitForMiningState(t, miner, false)
+	waitForMiningState(t, miner, true)
 }
 
 func TestStartStopMiner(t *testing.T) {
-	miner, _, cleanup := createMiner(t)
+	miner, mux, cleanup := createMiner(t)
 	defer cleanup(false)
 	waitForMiningState(t, miner, false)
+	mux.Post(sstorage.SstorSyncDone{})
 	miner.Start()
 	waitForMiningState(t, miner, true)
 	miner.Stop()
@@ -186,9 +133,10 @@ func TestStartStopMiner(t *testing.T) {
 }
 
 func TestCloseMiner(t *testing.T) {
-	miner, _, cleanup := createMiner(t)
+	miner, mux, cleanup := createMiner(t)
 	defer cleanup(true)
 	waitForMiningState(t, miner, false)
+	mux.Post(sstorage.SstorSyncDone{})
 	miner.Start()
 	waitForMiningState(t, miner, true)
 	// Terminate the miner and wait for the update loop to run
