@@ -34,6 +34,7 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/sstorage"
+
 	//lint:ignore SA1019 Needed for precompile
 	"golang.org/x/crypto/ripemd160"
 )
@@ -739,7 +740,7 @@ func (l *sstoragePisaPutRaw) Run(input []byte) ([]byte, error) {
 func (l *sstoragePisaPutRaw) RunWith(env *PrecompiledContractCallEnv, input []byte) ([]byte, error) {
 
 	// The solidity code to generate input as follows:
-	// function putRaw(address dkvAddr, uint256 kvIdx, bytes memory data) internal {
+	// function putRaw(uint256 kvIdx, bytes memory data) internal {
 	//     (bool success, ) = address(sstoragePisaPutRaw).call(
 	//         abi.encode(kvIdx, data)
 	//      );
@@ -754,6 +755,7 @@ func (l *sstoragePisaPutRaw) RunWith(env *PrecompiledContractCallEnv, input []by
 	evm := env.evm
 	caller := env.caller.Address()
 	maxKVSize := evm.StateDB.SstorageMaxKVSize(caller)
+
 	if maxKVSize == 0 {
 		return nil, errors.New("invalid caller")
 	}
@@ -849,6 +851,7 @@ func (l *sstoragePisaUnmaskDaggerData) RunWith(env *PrecompiledContractCallEnv, 
 	miner := common.BytesToAddress(getData(input, 96, 32))
 	dataptr := new(big.Int).SetBytes(getData(input, 128, 32)).Uint64()
 	datalen := new(big.Int).SetBytes(getData(input, 160, 32)).Uint64()
+
 	maskedChunkData := getData(input, dataptr+32, datalen)
 
 	if dataptr > uint64(len(input)) {
