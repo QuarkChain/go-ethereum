@@ -34,6 +34,7 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/sstorage"
+
 	//lint:ignore SA1019 Needed for precompile
 	"golang.org/x/crypto/ripemd160"
 )
@@ -754,6 +755,7 @@ func (l *sstoragePisaPutRaw) RunWith(env *PrecompiledContractCallEnv, input []by
 	if evm.interpreter.readOnly {
 		return nil, ErrWriteProtection
 	}
+	// TODO: caller check
 	dkvAddr := common.BytesToAddress(getData(input, 0, 32))
 	kvIdx := new(big.Int).SetBytes(getData(input, 32, 32)).Uint64()
 	dataPtr := new(big.Int).SetBytes(getData(input, 64, 32)).Uint64()
@@ -849,6 +851,7 @@ func (l *sstoragePisaUnmaskDaggerData) RunWith(env *PrecompiledContractCallEnv, 
 	chunkIdx := new(big.Int).SetBytes(getData(input, 64, 32)).Uint64()
 	kvHash := common.BytesToHash(getData(input, 96, 32))
 	miner := common.BytesToAddress(getData(input, 128, 32))
+	// TODO: dataptr boundry check
 	dataptr := new(big.Int).SetBytes(getData(input, 160, 32)).Uint64()
 	datalen := new(big.Int).SetBytes(getData(input, 192, 32)).Uint64()
 	maskedChunkData := getData(input, dataptr+32, datalen)
