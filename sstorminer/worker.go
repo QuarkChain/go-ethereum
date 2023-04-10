@@ -96,6 +96,7 @@ type TXSigner struct {
 
 // task contains all information for consensus engine sealing and result submitting.
 type task struct {
+	worker          *worker
 	storageContract common.Address
 	minerContract   common.Address
 	shardIdx        uint64
@@ -109,6 +110,11 @@ type task struct {
 	startMiningTime uint64
 	state           uint64
 	mu              sync.RWMutex // The lock used to protect the state
+}
+
+func (t *task) expectedDiff(minedTime uint64) *big.Int {
+	return expectedDiff(t.info.LastMineTime, t.info.Difficulty, minedTime, t.worker.config.TargetIntervalSec,
+		t.worker.config.Cutoff, t.worker.config.DiffAdjDivisor, t.worker.config.MinimumDiff)
 }
 
 func (t *task) getState() uint64 {
@@ -144,9 +150,12 @@ func (t *task) isRunning() bool {
 
 type tasks []*task
 
-func (t tasks) Len() int           { return len(t) }
-func (t tasks) Less(i, j int) bool { return t[i].info.LastMineTime < t[j].info.LastMineTime }
-func (t tasks) Swap(i, j int)      { t[i], t[j] = t[j], t[i] }
+func (t tasks) Len() int { return len(t) }
+func (t tasks) Less(i, j int) bool {
+	minedTs := uint64(time.Now().Unix())
+	return t[i].expectedDiff(minedTs).Cmp(t[j].expectedDiff(minedTs)) < 0
+}
+func (t tasks) Swap(i, j int) { t[i], t[j] = t[j], t[i] }
 
 type result struct {
 	task         *task
@@ -301,6 +310,7 @@ func newWorker(config *Config, chainConfig *params.ChainConfig, eth Backend, cha
 	for addr, sm := range sstor.ContractToShardManager {
 		for idx, shard := range sm.ShardMap() {
 			task := task{
+				worker:          worker,
 				storageContract: addr,
 				minerContract:   minerContract,
 				shardIdx:        idx,
@@ -518,6 +528,7 @@ func (w *worker) resultLoop() {
 				w.newResultHook(result)
 			}
 
+			// todo refer to the current layer 2 to process submissions
 			w.submitMinedResult(result)
 
 		case <-w.exitCh:
@@ -562,7 +573,7 @@ func (w *worker) commitWork(stopCh chan struct{}) {
 	if !w.isRunning() {
 		return
 	}
-	// sort and find the oldest task to mine
+	// sort and find the task with smallest diff to mine
 	sort.Sort(w.tasks)
 	go func() {
 		for _, t := range w.tasks {
@@ -581,31 +592,30 @@ func (w *worker) commitWork(stopCh chan struct{}) {
 	}()
 }
 
-func (w *worker) calculateDiffAndInitHash(info *core.MiningInfo, startShardId, shardLen, minedTs uint64) (diff *big.Int, diffs []*big.Int, hash0 common.Hash, err error) {
+func (w *worker) calculateDiffAndInitHash(t *task, shardLen, minedTs uint64) (diff *big.Int, diffs []*big.Int, hash0 common.Hash, err error) {
 	diffs = make([]*big.Int, shardLen)
 	diff = new(big.Int).SetUint64(0)
 	hash0 = common.Hash{}
 	for i := uint64(0); i < shardLen; i++ {
-		shardId := startShardId + i
-		if minedTs < info.LastMineTime {
+		shardId := t.shardIdx + i
+		if minedTs < t.info.LastMineTime {
 			err = fmt.Errorf("minedTs too small")
 		}
-		diffs[i] = expectedDiff(info.LastMineTime, info.Difficulty, minedTs,
-			w.config.TargetIntervalSec, w.config.Cutoff, w.config.DiffAdjDivisor, w.config.MinimumDiff)
+		diffs[i] = t.expectedDiff(minedTs)
 		diff = new(big.Int).Add(diff, diffs[i])
-		hash0 = crypto.Keccak256Hash(hash0.Bytes(), uint64ToByte32(shardId), info.MiningHash.Bytes())
+		hash0 = crypto.Keccak256Hash(hash0.Bytes(), uint64ToByte32(shardId), t.info.MiningHash.Bytes())
 	}
 
 	return diff, diffs, hash0, nil
 }
 
-func (w *worker) hashimoto(t *task, startShardId, shardLenBits uint64, hash0 common.Hash) (common.Hash, [][]byte, []uint64, []uint64, error) {
+func (w *worker) hashimoto(t *task, shardLenBits uint64, hash0 common.Hash) (common.Hash, [][]byte, []uint64, []uint64, error) {
 	hash0Bytes := hash0.Bytes()
 	dataSet := make([][]byte, w.config.RandomChecks)
 	kvIdxs, chunkIdxs := make([]uint64, w.config.RandomChecks), make([]uint64, w.config.RandomChecks)
 	rowBits := t.kvEntriesBits + t.chunkSizeBits + shardLenBits
 	for i := 0; i < w.config.RandomChecks; i++ {
-		chunkIdx := new(big.Int).SetBytes(hash0Bytes).Uint64()%(uint64(1)<<rowBits) + startShardId<<t.kvEntriesBits + t.chunkSizeBits
+		chunkIdx := new(big.Int).SetBytes(hash0Bytes).Uint64()%(uint64(1)<<rowBits) + t.shardIdx<<t.kvEntriesBits + t.chunkSizeBits
 		data, exist, err := t.shardManager.TryReadChunkEncoded(chunkIdx)
 		if exist && err == nil {
 			dataSet[i] = data
@@ -639,7 +649,7 @@ func (w *worker) mineTask(t *task) (bool, error) {
 	)
 
 	// todo shard len can be not 1 later
-	diff, _, hash0, err := w.calculateDiffAndInitHash(t.info, t.shardIdx, uint64(1)<<shardLenBits, minedTs)
+	diff, _, hash0, err := w.calculateDiffAndInitHash(t, uint64(1)<<shardLenBits, minedTs)
 	if err != nil {
 		return false, err
 	}
@@ -651,7 +661,7 @@ func (w *worker) mineTask(t *task) (bool, error) {
 	// TaskStateNoStart (mean miningInfo has been change, so the diff need to )
 	for w.isRunning() && t.isRunning() && t.getState() == uint64(TaskStateMining) && minedTs+mineTimeOut > uint64(time.Now().Unix()) {
 		hash0 = crypto.Keccak256Hash(hash0.Bytes(), addressToByte32(t.miner), uint64ToByte32(minedTs), uint64ToByte32(nonce))
-		hash0, dataSet, kvIdxs, chunkIdxs, err = w.hashimoto(t, t.shardIdx, shardLenBits, hash0)
+		hash0, dataSet, kvIdxs, chunkIdxs, err = w.hashimoto(t, shardLenBits, hash0)
 
 		// Check if the data matches the hash in metadata.
 		if requiredDiff.Cmp(new(big.Int).SetBytes(hash0.Bytes())) < 0 {

@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"runtime"
 	"sort"
 	"sync"
 	"time"
@@ -52,6 +53,7 @@ const (
 var ErrCancelled = errors.New("sync cancelled")
 
 var (
+	maxEmptyTaskTreads          int
 	empty                       = make([]byte, 0)
 	requestTimeoutInMillisecond = 1000 * time.Millisecond // Millisecond
 )
@@ -286,6 +288,7 @@ type BlockChain interface {
 type Syncer struct {
 	db    ethdb.KeyValueStore // Database to store the sync state
 	chain BlockChain
+	mux   *event.TypeMux // Event multiplexer to announce sync operation events
 	tasks []*kvTask
 
 	sstorageInfo map[common.Address][]uint64 // Map for Contract address to support shardIds
@@ -319,10 +322,14 @@ type Syncer struct {
 }
 
 // NewSyncer creates a new sstorage syncer to download the sharded storage content over the sstorage protocol.
-func NewSyncer(db ethdb.KeyValueStore, chain BlockChain, sstorageInfo map[common.Address][]uint64) *Syncer {
+func NewSyncer(db ethdb.KeyValueStore, chain BlockChain, mux *event.TypeMux, sstorageInfo map[common.Address][]uint64) *Syncer {
+	maxEmptyTaskTreads = runtime.NumCPU() - 2
+	if maxEmptyTaskTreads < 1 {
+		maxEmptyTaskTreads = 1
+	}
 	return &Syncer{
-		db: db,
-
+		db:           db,
+		mux:          mux,
 		tasks:        make([]*kvTask, 0),
 		sstorageInfo: sstorageInfo,
 		chain:        chain,
@@ -580,7 +587,7 @@ func (s *Syncer) loadSyncStatus() {
 
 			subEmptyTasks := make([]*kvSubEmptyTask, 0)
 			if limitForEmpty > 0 {
-				maxEmptyTaskSize := (limitForEmpty - firstEmpty + maxConcurrency) / maxConcurrency
+				maxEmptyTaskSize := (limitForEmpty - firstEmpty + uint64(maxEmptyTaskTreads)) / uint64(maxEmptyTaskTreads)
 				if maxEmptyTaskSize < minSubTaskSize {
 					maxEmptyTaskSize = minSubTaskSize
 				}
@@ -616,8 +623,15 @@ func (s *Syncer) loadSyncStatus() {
 		}
 	}
 	if allDone {
-		s.syncDone = true
+		s.setSyncDone()
 	}
+}
+
+type SstorSyncDone struct{}
+
+func (s *Syncer) setSyncDone() {
+	s.syncDone = true
+	s.mux.Post(SstorSyncDone{})
 }
 
 // saveSyncStatus marshals the remaining sync tasks into leveldb.
@@ -676,7 +690,7 @@ func (s *Syncer) cleanKVTasks() {
 	// If everything was just finalized, generate the account trie and start heal
 	if allDone {
 		s.lock.Lock()
-		s.syncDone = true
+		s.setSyncDone()
 		s.lock.Unlock()
 		log.Info("Sstorage sync done", "task count", len(s.tasks))
 
@@ -895,7 +909,7 @@ func (s *Syncer) assignKVEmptyTasks() {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
-	if s.runningEmptyTaskTreads >= maxConcurrency {
+	if s.runningEmptyTaskTreads >= maxEmptyTaskTreads {
 		return
 	}
 	s.runningEmptyTaskTreads++

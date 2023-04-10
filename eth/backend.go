@@ -314,6 +314,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		}
 
 		eth.sstorMiner = sstorminer.New(eth, &config.SStorMiner, chainConfig, eth.EventMux(), &sstorminer.TXSigner{signer, wallet.SignTx}, minerContract)
+		eth.sstorMiner.Start()
 	}
 
 	eth.APIBackend = &EthAPIBackend{stack.Config().ExtRPCEnabled(), stack.Config().AllowUnprotectedTxs, eth, nil}

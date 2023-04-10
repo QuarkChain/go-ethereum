@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"github.com/ethereum/go-ethereum/event"
 	"math/rand"
 	"os"
 	"sync"
@@ -342,7 +343,7 @@ func setupSyncer(shards map[common.Address][]uint64, stateDB *state.StateDB, las
 	rlp.DecodeBytes(blockEnc, &block)
 	chain := blockChain{block: &block, stateDB: stateDB}
 	chain.lastKvIdx = lastKvIdx
-	syncer := NewSyncer(db, &chain, shards)
+	syncer := NewSyncer(db, &chain, new(event.TypeMux), shards)
 	for _, peer := range peers {
 		syncer.Register(peer)
 		peer.remote = syncer

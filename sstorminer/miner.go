@@ -18,15 +18,15 @@
 package sstorminer
 
 import (
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core"
-	"github.com/ethereum/go-ethereum/eth/downloader"
-	"github.com/ethereum/go-ethereum/event"
-	"github.com/ethereum/go-ethereum/log"
-	"github.com/ethereum/go-ethereum/params"
 	"math/big"
 	"sync"
 	"time"
+
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core"
+	"github.com/ethereum/go-ethereum/eth/protocols/sstorage"
+	"github.com/ethereum/go-ethereum/event"
+	"github.com/ethereum/go-ethereum/params"
 )
 
 // Backend wraps all methods required for mining. Only full node is capable
@@ -78,8 +78,8 @@ func New(eth Backend, config *Config, chainConfig *params.ChainConfig, mux *even
 func (miner *Miner) update() {
 	defer miner.wg.Done()
 
-	// todo Add sstorage evnet
-	events := miner.mux.Subscribe(downloader.StartEvent{}, downloader.DoneEvent{}, downloader.FailedEvent{})
+	// Subscribe sstorage SstorSyncDone evnet
+	events := miner.mux.Subscribe(sstorage.SstorSyncDone{})
 	defer func() {
 		if !events.Closed() {
 			events.Unsubscribe()
@@ -87,7 +87,7 @@ func (miner *Miner) update() {
 	}()
 
 	shouldStart := false
-	canStart := true
+	canStart := false
 	dlEventCh := events.Chan()
 	for {
 		select {
@@ -98,21 +98,7 @@ func (miner *Miner) update() {
 				continue
 			}
 			switch ev.Data.(type) {
-			case downloader.StartEvent:
-				wasMining := miner.Mining()
-				miner.worker.stop()
-				canStart = false
-				if wasMining {
-					// Resume mining after sync was finished
-					shouldStart = true
-					log.Info("Mining aborted due to sync")
-				}
-			case downloader.FailedEvent:
-				canStart = true
-				if shouldStart {
-					miner.worker.start()
-				}
-			case downloader.DoneEvent:
+			case sstorage.SstorSyncDone:
 				canStart = true
 				if shouldStart {
 					miner.worker.start()

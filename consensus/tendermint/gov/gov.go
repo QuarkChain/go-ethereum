@@ -101,7 +101,7 @@ func (g *Governance) NextValidatorsAndPowersForProposal() ([]common.Address, []u
 		return nil, nil, 0, common.Hash{}, err
 	}
 
-	validators, powers, err := g.getValidatorsAndPowersFromContract(header.Hash())
+	validators, powers, err := g.getValidatorsAndPowersFromContract(header.Number())
 	if err != nil {
 		return nil, nil, 0, common.Hash{}, err
 	}
@@ -131,7 +131,7 @@ func (g *Governance) NextValidatorsAndPowersAt(remoteChainNumber uint64, hash co
 		fmt.Errorf("block hash mismatch", "remoteChainNumber hash", header.Hash(), "hash", hash)
 	}
 
-	validators, powers, err := g.getValidatorsAndPowersFromContract(hash)
+	validators, powers, err := g.getValidatorsAndPowersFromContract(header.Number())
 	if err != nil {
 		return nil, nil, err
 	}
@@ -141,7 +141,7 @@ func (g *Governance) NextValidatorsAndPowersAt(remoteChainNumber uint64, hash co
 }
 
 // getValidatorsAndPowersFromContract get next validators from contract
-func (g *Governance) getValidatorsAndPowersFromContract(blockHash common.Hash) ([]common.Address, []uint64, error) {
+func (g *Governance) getValidatorsAndPowersFromContract(blockNumber *big.Int) ([]common.Address, []uint64, error) {
 	data, err := g.validatorSetABI.Pack(contractFunc_GetValidator)
 	if err != nil {
 		return nil, nil, err
@@ -154,7 +154,7 @@ func (g *Governance) getValidatorsAndPowersFromContract(blockHash common.Hash) (
 		Gas:  gas,
 		Data: msgData,
 	}
-	result, err := g.client.CallContractAtHash(g.ctx, msg, blockHash)
+	result, err := g.client.CallContract(g.ctx, msg, blockNumber)
 	if err != nil {
 		return nil, nil, err
 	}
