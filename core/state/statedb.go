@@ -163,7 +163,7 @@ func (s *StateDB) SstorageMaxKVSize(addr common.Address) uint64 {
 	return s.db.TrieDB().SstorageMaxKVSize(addr)
 }
 
-func (s *StateDB) SstorageWrite(addr common.Address, kvIdx uint64, data []byte) error {
+func (s *StateDB) SstorageWrite(addr common.Address, kvIdx uint64, kvHash common.Hash, data []byte) error {
 	if len(data) > int(s.SstorageMaxKVSize(addr)) {
 		return fmt.Errorf("put too large")
 	}
@@ -178,21 +178,27 @@ func (s *StateDB) SstorageWrite(addr common.Address, kvIdx uint64, data []byte) 
 		kvIdx:     kvIdx,
 	})
 	// Assume data is immutable
-	s.shardedStorage[addr][kvIdx] = data
+	s.shardedStorage[addr][kvIdx] = append(kvHash[:], data...)
+	log.Warn("StateDB::SstorageWrite:: Write into datafile", "kvIdx", kvIdx, "kvHash", kvHash.Bytes(), "data", common.Bytes2Hex(data))
+	log.Warn("StateDB::SstorageWrite:: ShardStorageInfo", "ShardStorage", s.shardedStorage)
 	return nil
 }
+
+const KvHashLen = 32
 
 func (s *StateDB) SstorageRead(addr common.Address, kvIdx uint64, readLen int, hash common.Hash) ([]byte, bool, error) {
 	if readLen > int(s.SstorageMaxKVSize(addr)) {
 		return nil, false, fmt.Errorf("readLen too large")
 	}
 
+	log.Warn("StateDB::SstorageRead:: reading", "ShardStorage", s.shardedStorage)
 	if m, ok0 := s.shardedStorage[addr]; ok0 {
 		if b, ok1 := m[kvIdx]; ok1 {
-			if readLen > len(b) {
-				return append(b, bytes.Repeat([]byte{0}, readLen-len(b))...), true, nil
+			actualDataLen := len(b) - KvHashLen
+			if readLen > actualDataLen {
+				return append(b[KvHashLen:], bytes.Repeat([]byte{0}, readLen-actualDataLen)...), true, nil
 			}
-			return b[0:readLen], true, nil
+			return b[KvHashLen:readLen], true, nil
 		}
 	}
 
@@ -646,8 +652,8 @@ func (s *StateDB) createObject(addr common.Address) (newobj, prev *stateObject) 
 // CreateAccount is called during the EVM CREATE operation. The situation might arise that
 // a contract does the following:
 //
-//   1. sends funds to sha(account ++ (nonce + 1))
-//   2. tx_create(sha(account ++ nonce)) (note that this gets the address of 1)
+//  1. sends funds to sha(account ++ (nonce + 1))
+//  2. tx_create(sha(account ++ nonce)) (note that this gets the address of 1)
 //
 // Carrying over the balance ensures that Ether doesn't disappear.
 func (s *StateDB) CreateAccount(addr common.Address) {
@@ -784,10 +790,13 @@ func (s *StateDB) Copy() *StateDB {
 			state.snapStorage[k] = temp
 		}
 	}
+
+	log.Warn("StateDB::Copy", "shardedStorage", s.shardedStorage)
 	for addr, m := range s.shardedStorage {
 		state.shardedStorage[addr] = make(map[uint64][]byte)
 		for k, v := range m {
-			state.shardedStorage[addr][k] = v
+			newdata := common.CopyBytes(v)
+			state.shardedStorage[addr][k] = newdata
 		}
 	}
 	return state
@@ -1036,6 +1045,7 @@ func (s *StateDB) Commit(deleteEmptyObjects bool) (common.Hash, error) {
 	// Write the sharded storage changes to the underlying trie db
 	// This assumes no fork (with instant finality consensus)
 	triedb := s.db.TrieDB()
+	log.Warn("StateDB::Commit:: Write into database", "shardedStorage", s.shardedStorage)
 	for addr, m := range s.shardedStorage {
 		for k, v := range m {
 			err := triedb.SstorageWrite(addr, k, v)
