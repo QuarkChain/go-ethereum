@@ -118,27 +118,35 @@ func (s *Database) SstorageWrite(addr common.Address, kvIdx uint64, data []byte)
 	}
 	// Assume data is immutable.
 	s.shardedStorage[addr][kvIdx] = data
+
+	log.Warn("Database::SstorageWrite:: Write End", "shardedStorage", s.shardedStorage)
 	return nil
 }
+
+const KvHashLen = 32
 
 func (s *Database) SstorageRead(addr common.Address, kvIdx uint64, readLen int, commit common.Hash) ([]byte, bool, error) {
 	s.lock.RLock()
 	defer s.lock.RUnlock()
 
+	log.Warn("Database::Read Kv ")
 	if readLen > int(s.SstorageMaxKVSize(addr)) {
 		return nil, false, fmt.Errorf("readLen too large")
 	}
 
+	log.Warn("Database::SstorageRead:: reading", "ShardStorage", s.shardedStorage)
 	if m, ok0 := s.shardedStorage[addr]; ok0 {
 		if b, ok1 := m[kvIdx]; ok1 {
-			if readLen > len(b) {
-				return append(b, bytes.Repeat([]byte{0}, readLen-len(b))...), true, nil
+			actualDataLen := len(b) - KvHashLen
+			if readLen > actualDataLen {
+				return append(b[KvHashLen:], bytes.Repeat([]byte{0}, readLen-actualDataLen)...), true, nil
 			}
-			return b[0:readLen], true, nil
+			return b[KvHashLen:readLen], true, nil
 		}
 	}
 
 	if s, ok0 := s.contractToShardManager[addr]; ok0 {
+		log.Warn("Database::SstorageRead:: Read from datafile", "kvIdx", kvIdx, "commit", commit)
 		return s.TryRead(kvIdx, readLen, commit)
 	}
 	return nil, false, nil
@@ -786,10 +794,12 @@ func (db *Database) Commit(node common.Hash, report bool, callback func(common.H
 	batch.Replay(uncacher)
 	batch.Reset()
 
+	log.Warn("Database::Commit:: commiting ", "shardedStorage", db.shardedStorage)
 	for addr, m := range db.shardedStorage {
 		sm := db.contractToShardManager[addr]
 		for kvIdx, b := range m {
-			_, err := sm.TryWrite(kvIdx, b, common.Hash{})
+			log.Warn("Database::Commit:: Write into datafile", "kvIdx", kvIdx, "kvHash", b[:KvHashLen], "data", common.Bytes2Hex(b[KvHashLen:]))
+			_, err := sm.TryWrite(kvIdx, b[KvHashLen:], common.BytesToHash(b[:KvHashLen]))
 			if err != nil {
 				log.Error("Failed to write sstorage", "kvIdx", kvIdx, "err", err)
 			}
