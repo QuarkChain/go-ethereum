@@ -779,7 +779,10 @@ func (l *sstoragePisaPutRaw) RunWith(env *PrecompiledContractCallEnv, input []by
 	if putLen > maxKVSize {
 		return nil, errors.New("put len too large")
 	}
-	evm.StateDB.SstorageWrite(caller, kvIdx, kvHash, getData(input, dataPtr+32, putLen))
+	err := evm.StateDB.SstorageWrite(caller, kvIdx, kvHash, getData(input, dataPtr+32, putLen))
+	if err != nil {
+		log.Error("SstorageWrite Error", "err", err)
+	}
 	log.Info("put ending", "caller", caller, "kvidx", kvIdx, "dataPtr", dataPtr, "maxKVSize", maxKVSize)
 
 	return nil, nil
