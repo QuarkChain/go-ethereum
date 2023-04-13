@@ -827,7 +827,7 @@ func (l *sstoragePisaGetRaw) RunWith(env *PrecompiledContractCallEnv, input []by
 	pb := make([]byte, 64)
 	binary.BigEndian.PutUint64(pb[32-8:32], 32)
 	binary.BigEndian.PutUint64(pb[64-8:64], uint64(len(b)))
-	log.Warn("get ending", "dkv", dkvAddr, "hash", hash, "kvidx", kvIdx, "kvOff", kvOff, "kvLen", kvLen)
+	log.Debug("get ending", "dkv", dkvAddr, "hash", hash, "kvidx", kvIdx, "kvOff", kvOff, "kvLen", kvLen)
 	return append(pb, b...), nil
 }
 
@@ -860,8 +860,6 @@ func (l *sstoragePisaUnmaskDaggerData) RunWith(env *PrecompiledContractCallEnv, 
 	dataptr := new(big.Int).SetBytes(getData(input, 128, 32)).Uint64()
 	datalen := new(big.Int).SetBytes(getData(input, 160, 32)).Uint64()
 
-	log.Info("unmask info", "encodeType", encodeType, "chunkIdx", chunkIdx, "kvHash", kvHash, "miner", miner, "datalen", datalen)
-
 	if dataptr > uint64(len(input)) {
 		return nil, errors.New("dataptr too large")
 	}
@@ -882,7 +880,7 @@ func (l *sstoragePisaUnmaskDaggerData) RunWith(env *PrecompiledContractCallEnv, 
 	pb := make([]byte, 64)
 	binary.BigEndian.PutUint64(pb[32-8:32], 32)
 	binary.BigEndian.PutUint64(pb[64-8:64], uint64(len(unmaskedChunk)))
-	log.Warn("unmask info", "encodeType", encodeType, "chunkIdx", chunkIdx, "kvHash", kvHash, "miner", miner, "datalen", datalen)
+	log.Debug("sstoragePisaUnmaskDaggerData:: unmask info", "encodeType", encodeType, "chunkIdx", chunkIdx, "kvHash", kvHash, "miner", miner, "datalen", datalen)
 	return append(pb, unmaskedChunk...), nil
 }
 
