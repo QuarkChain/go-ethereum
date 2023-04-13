@@ -198,7 +198,7 @@ func (s *StateDB) SstorageRead(addr common.Address, kvIdx uint64, readLen int, h
 			if readLen > actualDataLen {
 				return append(b[KvHashLen:], bytes.Repeat([]byte{0}, readLen-actualDataLen)...), true, nil
 			}
-			return b[KvHashLen:readLen], true, nil
+			return b[KvHashLen : KvHashLen+readLen], true, nil
 		}
 	}
 
