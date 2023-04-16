@@ -21,17 +21,17 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"github.com/ethereum/go-ethereum/accounts/abi"
-	"github.com/ethereum/go-ethereum/sstorage"
 	"io/ioutil"
 	"math/big"
 	"testing"
 	"time"
 
+	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/ethereum/go-ethereum/sstorage"
 )
 
 // precompiledTest defines the input/output pairs for precompiled contract tests.
@@ -186,7 +186,7 @@ func benchmarkPrecompiled(addr string, test precompiledTest, bench *testing.B) {
 		// Keep it as uint64, multiply 100 to get two digit float later
 		mgasps := (100 * 1000 * gasUsed) / elapsed
 		bench.ReportMetric(float64(mgasps)/100, "mgas/s")
-		//Check if it is correct
+		// Check if it is correct
 		if err != nil {
 			bench.Error(err)
 			return
@@ -338,7 +338,6 @@ func initArgs() {
 	}
 
 	unmaskDaggerDataInputAbi = abi.Arguments{
-		{Type: AddrTy, Name: "dkvAddr"},
 		{Type: Uint64Ty, Name: "encodeType"},
 		{Type: Uint64Ty, Name: "chunkIdx"},
 		{Type: Bytes32Ty, Name: "kvHash"},
@@ -356,7 +355,6 @@ func TestUnmaskDaggerData(t *testing.T) {
 	var EncodeType uint64 = sstorage.ENCODE_ETHASH
 	var ChunkIdx uint64 = 0
 	var KvHash common.Hash = common.Hash{}
-	var DkvAddr common.Address = sstorage.ShardInfos[0].Contract
 	UnmaskedChunk := [4 * 1024]byte{0x01, 0x2}
 	encodedKey := sstorage.CalcEncodeKey(KvHash, ChunkIdx, Miner)
 	maskedChunk := sstorage.EncodeChunk(UnmaskedChunk[:], sstorage.ENCODE_ETHASH, encodedKey)
@@ -364,7 +362,7 @@ func TestUnmaskDaggerData(t *testing.T) {
 	sstorage.InitializeConfig()
 	p := &sstoragePisaUnmaskDaggerData{}
 
-	packed, err := unmaskDaggerDataInputAbi.Pack(DkvAddr, EncodeType, ChunkIdx, KvHash, Miner, maskedChunk[:])
+	packed, err := unmaskDaggerDataInputAbi.Pack(EncodeType, ChunkIdx, KvHash, Miner, maskedChunk[:])
 	if err != nil {
 		t.Fatal(err)
 	}

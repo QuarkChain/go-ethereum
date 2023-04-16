@@ -42,9 +42,9 @@ import (
 )
 
 const (
-	ABI      = "[{\"inputs\":[{\"internalType\":\"uint256\",\"name\":\"startShardId\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"shardLenBits\",\"type\":\"uint256\"},{\"internalType\":\"address\",\"name\":\"miner\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"minedTs\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"nonce\",\"type\":\"uint256\"},{\"internalType\":\"bytes[]\",\"name\":\"maskedData\",\"type\":\"bytes[]\"}],\"name\":\"mine\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"}]"
+	ABI      = "[{\"inputs\":[{\"internalType\":\"uint256\",\"name\":\"startShardId\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"shardLenBits\",\"type\":\"uint256\"},{\"internalType\":\"address\",\"name\":\"miner\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"minedTs\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"nonce\",\"type\":\"uint256\"},{\"internalType\":\"bytes32[][]\",\"name\":\"proofsDim2\",\"type\":\"bytes32[][]\"},{\"internalType\":\"bytes[]\",\"name\":\"maskedData\",\"type\":\"bytes[]\"}],\"name\":\"mine\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"}]"
 	MineFunc = "mine"
-	gas      = uint64(1000000)
+	gas      = uint64(3000000)
 )
 
 const (
@@ -110,6 +110,29 @@ type task struct {
 	startMiningTime uint64
 	state           uint64
 	mu              sync.RWMutex // The lock used to protect the state
+}
+
+func expectedDiff(lastMineTime uint64, difficulty *big.Int, minedTime uint64, targetIntervalSec, cutoff, diffAdjDivisor, minDiff *big.Int) *big.Int {
+	interval := new(big.Int).SetUint64(minedTime - lastMineTime)
+	diff := difficulty
+	if interval.Cmp(targetIntervalSec) < 0 {
+		// diff = diff + (diff-interval*diff/cutoff)/diffAdjDivisor
+		diff = new(big.Int).Add(diff, new(big.Int).Div(
+			new(big.Int).Sub(diff, new(big.Int).Div(new(big.Int).Mul(interval, diff), cutoff)), diffAdjDivisor))
+		if diff.Cmp(minDiff) < 0 {
+			diff = minDiff
+		}
+	} else {
+		// dec := (interval*diff/cutoff - diff) / diffAdjDivisor
+		dec := new(big.Int).Div(new(big.Int).Sub(new(big.Int).Div(new(big.Int).Mul(interval, diff), cutoff), diff), diffAdjDivisor)
+		if new(big.Int).Add(dec, minDiff).Cmp(diff) > 0 {
+			diff = minDiff
+		} else {
+			diff = new(big.Int).Sub(diff, dec)
+		}
+	}
+
+	return diff
 }
 
 func (t *task) expectedDiff(minedTime uint64) *big.Int {
@@ -542,11 +565,15 @@ func (w *worker) updateTaskInfo(root common.Hash, timestamp int64) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
+	if !w.isRunning() {
+		return
+	}
 	updated := false
 	for _, task := range w.tasks {
 		info, err := w.chain.GetSstorageMiningInfo(root, task.minerContract, task.shardIdx)
 		if err != nil {
 			log.Warn("failed to get sstorage mining info", "error", err.Error())
+			continue
 		}
 		if task.info == nil || !info.Equal(task.info) {
 			task.info = info
@@ -615,7 +642,7 @@ func (w *worker) hashimoto(t *task, shardLenBits uint64, hash0 common.Hash) (com
 	kvIdxs, chunkIdxs := make([]uint64, w.config.RandomChecks), make([]uint64, w.config.RandomChecks)
 	rowBits := t.kvEntriesBits + t.chunkSizeBits + shardLenBits
 	for i := 0; i < w.config.RandomChecks; i++ {
-		chunkIdx := new(big.Int).SetBytes(hash0Bytes).Uint64()%(uint64(1)<<rowBits) + t.shardIdx<<t.kvEntriesBits + t.chunkSizeBits
+		chunkIdx := new(big.Int).SetBytes(hash0Bytes).Uint64()%(uint64(1)<<rowBits) + t.shardIdx<<(t.kvEntriesBits+t.chunkSizeBits)
 		data, exist, err := t.shardManager.TryReadChunkEncoded(chunkIdx)
 		if exist && err == nil {
 			dataSet[i] = data
@@ -640,7 +667,7 @@ func (w *worker) mineTask(t *task) (bool, error) {
 	minedTs := uint64(time.Now().Unix())
 	// using random nonce, so we can run multi mine with threads
 	rand.Seed(int64(minedTs))
-	nonce := rand.Uint64()
+	nonce := rand.Uint64() % 1000000
 	var (
 		dataSet      [][]byte
 		kvIdxs       []uint64
@@ -650,6 +677,8 @@ func (w *worker) mineTask(t *task) (bool, error) {
 
 	// todo shard len can be not 1 later
 	diff, _, hash0, err := w.calculateDiffAndInitHash(t, uint64(1)<<shardLenBits, minedTs)
+	log.Warn("calculateDiffAndInitHash", "diff", diff, "hash0", hash0.Hex(), "minedTs", minedTs,
+		"MiningHash", t.info.MiningHash, "LastMineTime", t.info.LastMineTime)
 	if err != nil {
 		return false, err
 	}
@@ -660,11 +689,12 @@ func (w *worker) mineTask(t *task) (bool, error) {
 	// if the worker has stoped or task has been stoped or task state has change to
 	// TaskStateNoStart (mean miningInfo has been change, so the diff need to )
 	for w.isRunning() && t.isRunning() && t.getState() == uint64(TaskStateMining) && minedTs+mineTimeOut > uint64(time.Now().Unix()) {
-		hash0 = crypto.Keccak256Hash(hash0.Bytes(), addressToByte32(t.miner), uint64ToByte32(minedTs), uint64ToByte32(nonce))
-		hash0, dataSet, kvIdxs, chunkIdxs, err = w.hashimoto(t, shardLenBits, hash0)
+		hash1 := crypto.Keccak256Hash(hash0.Bytes(), addressToByte32(t.miner), uint64ToByte32(minedTs), uint64ToByte32(nonce))
+		hash1, dataSet, kvIdxs, chunkIdxs, err = w.hashimoto(t, shardLenBits, hash1)
 
-		// Check if the data matches the hash in metadata.
-		if requiredDiff.Cmp(new(big.Int).SetBytes(hash0.Bytes())) < 0 {
+		if requiredDiff.Cmp(new(big.Int).SetBytes(hash1.Bytes())) >= 0 {
+			log.Warn("calculateDiffAndInitHash", "diff", diff, "hash1", hash1.Hex(), "minedTs", minedTs,
+				"MiningHash", t.info.MiningHash, "LastMineTime", t.info.LastMineTime, "nonce", nonce, "miner", t.miner.Hex())
 			proofs := make([][]common.Hash, len(kvIdxs))
 			kvs, err := w.chain.ReadKVsByIndexList(t.storageContract, kvIdxs, true)
 			if err != nil {
@@ -676,7 +706,7 @@ func (w *worker) mineTask(t *task) (bool, error) {
 
 			for i := 0; i < len(dataSet); i++ {
 				if kvs[i].Idx == kvIdxs[i] {
-					ps, err := getProofWithMinTree(kvs[i].Data, sstor.CHUNK_SIZE, t.chunkSizeBits, chunkIdxs[i])
+					ps, err := sstor.GetProofWithMinTree(kvs[i].Data, t.chunkSizeBits, chunkIdxs[i])
 					if err != nil {
 						return false, err
 					}
@@ -706,8 +736,8 @@ func (w *worker) mineTask(t *task) (bool, error) {
 }
 
 func (w *worker) submitMinedResult(result *result) error {
-	data, err := vABI.Pack(MineFunc, result.task.shardIdx, 0, result.task.miner, result.minedTs,
-		result.nonce, result.proofs, result.encodedData)
+	data, err := vABI.Pack(MineFunc, new(big.Int).SetUint64(result.task.shardIdx), new(big.Int).SetUint64(0), result.task.miner,
+		new(big.Int).SetUint64(result.minedTs), new(big.Int).SetUint64(result.nonce), result.proofs, result.encodedData)
 	if err != nil {
 		return err
 	}
@@ -728,9 +758,12 @@ func (w *worker) submitMinedResult(result *result) error {
 
 	signedTx, err := w.signer.SignFn(w.signer.Account, types.NewTx(baseTx), w.chainConfig.ChainID)
 	if err != nil {
+		w.resultCh <- result
 		return err
 	}
 
+	log.Warn("submitMinedResult", "shard idx", result.task.shardIdx, "tx hash", signedTx.Hash(),
+		"kv idx list", result.kvIdxs, "chunk idx list", result.chunkIdxs)
 	return w.eth.TxPool().AddLocal(signedTx)
 }
 

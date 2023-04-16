@@ -64,7 +64,7 @@ func New(eth Backend, config *Config, chainConfig *params.ChainConfig, mux *even
 		exitCh:  make(chan struct{}),
 		startCh: make(chan struct{}),
 		stopCh:  make(chan struct{}),
-		worker:  newWorker(config, chainConfig, eth, eth.BlockChain(), mux, txSigner, minerContract, true),
+		worker:  newWorker(config, chainConfig, eth, eth.BlockChain(), mux, txSigner, minerContract, false),
 	}
 	miner.wg.Add(1)
 	go miner.update()

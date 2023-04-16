@@ -183,7 +183,7 @@ func (s *StateDB) SstorageMaxKVSize(addr common.Address) uint64 {
 	return s.db.TrieDB().SstorageMaxKVSize(addr)
 }
 
-func (s *StateDB) SstorageWrite(addr common.Address, kvIdx uint64, data []byte) error {
+func (s *StateDB) SstorageWrite(addr common.Address, kvIdx uint64, kvHash common.Hash, data []byte) error {
 	if len(data) > int(s.SstorageMaxKVSize(addr)) {
 		return fmt.Errorf("put too large")
 	}
@@ -198,9 +198,11 @@ func (s *StateDB) SstorageWrite(addr common.Address, kvIdx uint64, data []byte) 
 		kvIdx:     kvIdx,
 	})
 	// Assume data is immutable
-	s.shardedStorage[addr][kvIdx] = data
+	s.shardedStorage[addr][kvIdx] = append(kvHash[:], data...)
 	return nil
 }
+
+const KvHashLen = 32
 
 func (s *StateDB) SstorageRead(addr common.Address, kvIdx uint64, readLen int, hash common.Hash) ([]byte, bool, error) {
 	if readLen > int(s.SstorageMaxKVSize(addr)) {
@@ -209,10 +211,11 @@ func (s *StateDB) SstorageRead(addr common.Address, kvIdx uint64, readLen int, h
 
 	if m, ok0 := s.shardedStorage[addr]; ok0 {
 		if b, ok1 := m[kvIdx]; ok1 {
-			if readLen > len(b) {
-				return append(b, bytes.Repeat([]byte{0}, readLen-len(b))...), true, nil
+			actualDataLen := len(b) - KvHashLen
+			if readLen > actualDataLen {
+				return append(b[KvHashLen:], bytes.Repeat([]byte{0}, readLen-actualDataLen)...), true, nil
 			}
-			return b[0:readLen], true, nil
+			return b[KvHashLen : KvHashLen+readLen], true, nil
 		}
 	}
 

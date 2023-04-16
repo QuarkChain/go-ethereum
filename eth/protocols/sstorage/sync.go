@@ -45,7 +45,7 @@ const (
 
 	maxConcurrency = 16
 
-	minSubTaskSize = 512
+	minSubTaskSize = 16
 )
 
 // ErrCancelled is returned from sstorage syncing if the operation was prematurely
@@ -187,7 +187,7 @@ type kvHealTask struct {
 func (h *kvHealTask) hasIndexInRange(first, last uint64) (bool, uint64) {
 	min, exist := last, false
 	for idx, _ := range h.Indexes {
-		if idx <= last && idx >= first {
+		if idx < last && idx >= first {
 			exist = true
 			if min > idx {
 				min = idx
@@ -222,8 +222,10 @@ type SyncProgress struct {
 	Tasks []*kvTask // The suspended kv tasks
 
 	// Status report during syncing phase
-	KVSynced uint64             // Number of kvs downloaded
-	KVBytes  common.StorageSize // Number of kv bytes downloaded
+	KVSynced      uint64             // Number of kvs downloaded
+	KVBytes       common.StorageSize // Number of kv bytes downloaded
+	EmptyKVToFill uint64
+	EmptyKVFilled uint64
 }
 
 // SyncPeer abstracts out the methods required for a peer to be synced against
@@ -312,6 +314,9 @@ type Syncer struct {
 	kvSynced  uint64             // Number of kvs downloaded
 	kvBytes   common.StorageSize // Number of kv bytes downloaded
 	kvSyncing uint64             // Number of kvs downloading
+
+	emptyKVToFill uint64
+	emptyKVFilled uint64
 
 	startTime time.Time // Time instance when sstorage sync started
 	logTime   time.Time // Time instance when status was Last reported
@@ -493,6 +498,7 @@ func (s *Syncer) Sync(cancel chan struct{}) error {
 func (s *Syncer) loadSyncStatus() {
 	// Start a fresh sync for retrieval.
 	s.kvSynced, s.kvBytes = 0, 0
+	s.emptyKVToFill, s.emptyKVFilled = 0, 0
 	var progress SyncProgress
 
 	if status := rawdb.ReadSstorageSyncStatus(s.db); status != nil {
@@ -510,9 +516,11 @@ func (s *Syncer) loadSyncStatus() {
 				for _, kvSubEmptyTask := range task.KvSubEmptyTasks {
 					kvSubEmptyTask.kvTask = task
 					kvSubEmptyTask.next = kvSubEmptyTask.First
+					s.emptyKVToFill += (kvSubEmptyTask.Last - kvSubEmptyTask.First)
 				}
 			}
 			s.kvSynced, s.kvBytes = progress.KVSynced, progress.KVBytes
+			s.emptyKVFilled = progress.EmptyKVFilled
 		}
 	}
 
@@ -549,15 +557,14 @@ func (s *Syncer) loadSyncStatus() {
 				Indexes: make(map[uint64]int64),
 			}
 
-			first, limit := sm.KvEntries()*sid, sm.KvEntries()*(sid+1)-1
+			first, limit := sm.KvEntries()*sid, sm.KvEntries()*(sid+1)
 			firstEmpty, limitForEmpty := uint64(0), uint64(0)
-			if lastKvIndex > 0 && first >= lastKvIndex {
+			if first >= lastKvIndex {
 				firstEmpty, limitForEmpty = first, limit
-				limit = first - 1
-			}
-			if lastKvIndex > 0 && limit >= lastKvIndex {
+				limit = first
+			} else if limit >= lastKvIndex {
 				firstEmpty, limitForEmpty = lastKvIndex, limit
-				limit = lastKvIndex - 1
+				limit = lastKvIndex
 			}
 
 			subTasks := make([]*kvSubTask, 0)
@@ -568,7 +575,7 @@ func (s *Syncer) loadSyncStatus() {
 				maxTaskSize = minSubTaskSize
 			}
 
-			for first <= limit {
+			for first < limit {
 				last := first + maxTaskSize
 				if last > limit {
 					last = limit
@@ -582,17 +589,18 @@ func (s *Syncer) loadSyncStatus() {
 				}
 
 				subTasks = append(subTasks, &subTask)
-				first = last + 1
+				first = last
 			}
 
 			subEmptyTasks := make([]*kvSubEmptyTask, 0)
 			if limitForEmpty > 0 {
+				s.emptyKVToFill += limitForEmpty - firstEmpty
 				maxEmptyTaskSize := (limitForEmpty - firstEmpty + uint64(maxEmptyTaskTreads)) / uint64(maxEmptyTaskTreads)
 				if maxEmptyTaskSize < minSubTaskSize {
 					maxEmptyTaskSize = minSubTaskSize
 				}
 
-				for firstEmpty <= limitForEmpty {
+				for firstEmpty < limitForEmpty {
 					last := firstEmpty + maxEmptyTaskSize
 					if last > limitForEmpty {
 						last = limitForEmpty
@@ -606,7 +614,7 @@ func (s *Syncer) loadSyncStatus() {
 					}
 
 					subEmptyTasks = append(subEmptyTasks, &subTask)
-					firstEmpty = last + 1
+					firstEmpty = last
 				}
 			}
 
@@ -638,9 +646,11 @@ func (s *Syncer) setSyncDone() {
 func (s *Syncer) saveSyncStatus() {
 	// Store the actual progress markers
 	progress := &SyncProgress{
-		Tasks:    s.tasks,
-		KVSynced: s.kvSynced,
-		KVBytes:  s.kvBytes,
+		Tasks:         s.tasks,
+		KVSynced:      s.kvSynced,
+		KVBytes:       s.kvBytes,
+		EmptyKVToFill: s.emptyKVToFill,
+		EmptyKVFilled: s.emptyKVFilled,
 	}
 	status, err := json.Marshal(progress)
 	if err != nil {
@@ -655,8 +665,10 @@ func (s *Syncer) Progress() (*SyncProgress, uint64) {
 	defer s.lock.Unlock()
 
 	progress := &SyncProgress{
-		KVSynced: s.kvSynced,
-		KVBytes:  s.kvBytes,
+		KVSynced:      s.kvSynced,
+		KVBytes:       s.kvBytes,
+		EmptyKVFilled: s.emptyKVFilled,
+		EmptyKVToFill: s.emptyKVToFill,
 	}
 	return progress, s.kvSyncing
 }
@@ -766,7 +778,7 @@ func (s *Syncer) assignKVRangeTasks(success chan *kvRangeResponse, fail chan *kv
 				contract: task.Contract,
 				shardId:  task.ShardId,
 				origin:   subTask.next,
-				limit:    subTask.Last,
+				limit:    subTask.Last - 1,
 				time:     time.Now(),
 				deliver:  success,
 				revert:   fail,
@@ -909,35 +921,41 @@ func (s *Syncer) assignKVEmptyTasks() {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 
-	if s.runningEmptyTaskTreads >= maxEmptyTaskTreads {
-		return
-	}
-	s.runningEmptyTaskTreads++
-
 	// Iterate over all the tasks and try to find a pending one
 	for _, task := range s.tasks {
 		for _, subEmptyTask := range task.KvSubEmptyTasks {
+			if s.runningEmptyTaskTreads >= maxEmptyTaskTreads {
+				return
+			}
+			s.runningEmptyTaskTreads++
 			if subEmptyTask.isRunning {
 				continue
 			}
 			subTask := subEmptyTask
 			subTask.isRunning = true
-			start, limit := subTask.next, subTask.Last
-			if limit >= start+minSubTaskSize {
-				limit = start + minSubTaskSize
+			start, last := subTask.next, subTask.Last
+			if last > start+minSubTaskSize {
+				last = start + minSubTaskSize
 			}
 			go func(eTask *kvSubEmptyTask, contract common.Address, start, limit uint64) {
+				t := time.Now()
 				next, err := s.chain.FillSstorWithEmptyKV(contract, start, limit)
 				if err != nil {
 					log.Warn("fill in empty fail", "err", err.Error())
 				}
+				log.Warn("FillSstorWithEmptyKV", "time", time.Now().Sub(t).Seconds())
 				eTask.next = next
-				if eTask.next > eTask.Last {
+				filled := next - start
+				s.emptyKVFilled += filled
+				if s.emptyKVToFill > filled {
+					s.emptyKVToFill -= filled
+				}
+				if eTask.next >= eTask.Last {
 					eTask.done = true
 				}
 				eTask.isRunning = false
 				s.runningEmptyTaskTreads--
-			}(subTask, task.Contract, start, limit)
+			}(subTask, task.Contract, start, last-1)
 		}
 	}
 }
@@ -1095,7 +1113,7 @@ func (s *Syncer) processKVRangeResponse(res *kvRangeResponse) {
 			res.task.kvTask.HealTask.Indexes[n] = 0
 		}
 	}
-	if max == res.task.Last {
+	if max == res.task.Last-1 {
 		res.task.done = true
 	} else {
 		res.task.next = max + 1
@@ -1193,7 +1211,7 @@ func (s *Syncer) OnKVs(peer SyncPeer, id uint64, providerAddr common.Address, kv
 	// get id range and check range
 	sm := sstorage.ContractToShardManager[req.contract]
 	if sm == nil {
-		logger.Debug("Peer rejected kv request")
+		logger.Debug("Peer rejected kv request", "len", len(req.task.kvTask.HealTask.Indexes))
 		req.task.kvTask.statelessPeers[peer.ID()] = struct{}{}
 		s.lock.Unlock()
 
@@ -1288,7 +1306,7 @@ func (s *Syncer) OnKVRange(peer SyncPeer, id uint64, providerAddr common.Address
 	// get id range and check range
 	sm := sstorage.ContractToShardManager[req.contract]
 	if sm == nil {
-		logger.Debug("Peer rejected kv request")
+		logger.Debug("Peer rejected kv request", "origin", req.origin, "limit", req.limit)
 		req.task.kvTask.statelessPeers[peer.ID()] = struct{}{}
 		s.lock.Unlock()
 
@@ -1364,6 +1382,7 @@ func (s *Syncer) report(force bool) {
 		progress = fmt.Sprintf("%.2f%%", float64(synced)*100/float64(kvsToSync+synced))
 		kv       = fmt.Sprintf("%v@%v", log.FormatLogfmtUint64(s.kvSynced), s.kvBytes.TerminalString())
 	)
-	log.Info("State sync in progress", "synced", progress, "state", synced, "kvsToSync", kvsToSync,
-		"sub task remain", subTaskRemain, "kv", kv, "eta", common.PrettyDuration(estTime-elapsed))
+	log.Info("Sstorage sync in progress", "synced", progress, "state", synced, "kvsToSync", kvsToSync,
+		"sub task remain", subTaskRemain, "kv", kv, "eta", common.PrettyDuration(estTime-elapsed),
+		"empty KV filled", s.emptyKVFilled, "empty KV to fill", s.emptyKVToFill)
 }

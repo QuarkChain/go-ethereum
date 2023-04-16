@@ -17,6 +17,7 @@
 package sstorminer
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -327,7 +328,7 @@ func makeKVStorage(stateDB *state.StateDB, contract common.Address, shards []uin
 				key := getSlotHash(2, uint256.NewInt(i).Bytes32())
 				stateDB.SetState(contract, key, skey)
 
-				metaHash = merkleRootWithMinTree(val, sstorage.CHUNK_SIZE)
+				metaHash = sstorage.MerkleRootWithMinTree(val)
 				meta := generateMetadata(i, uint64(len(val)), metaHash)
 				key = getSlotHash(1, skey)
 				stateDB.SetState(contract, key, meta)
@@ -356,6 +357,28 @@ func updateMiningInfoAndInsertNewBlock(pinfo *core.MiningInfo, chain *wrapBlockC
 		return fmt.Errorf("failed to insert origin chain: %v", err)
 	}
 	return nil
+}
+
+func verify(root []byte, dataHash common.Hash, chunkIdx uint64, proofs []common.Hash) bool {
+	r, err := sstorage.CalculateRootWithProof(dataHash, chunkIdx, proofs)
+	if err != nil {
+		return false
+	}
+
+	return bytes.Compare(root[:24], r.Bytes()[:24]) == 0
+}
+
+func verifyWithMinTree(root []byte, dataHash common.Hash, chunkIdx uint64, proofs []common.Hash) bool {
+	nMinChunkBits := uint64(len(proofs))
+	if chunkIdx >= uint64(1)<<nMinChunkBits {
+		return bytes.Compare(dataHash.Bytes(), make([]byte, 32)) == 0
+	}
+	r, err := sstorage.CalculateRootWithProof(dataHash, chunkIdx, proofs)
+	if err != nil {
+		return false
+	}
+
+	return bytes.Compare(root[:24], r.Bytes()[:24]) == 0
 }
 
 func verifyTaskResult(stateDB *state.StateDB, chain BlockChain, r *result) error {
@@ -538,7 +561,9 @@ func TestWork_TriggerByNewBlock(test *testing.T) {
 			if err := verifyTaskResult(stateDB, w.chain, r); err != nil {
 				test.Error("verify mined result failed", err.Error())
 			}
-			updateMiningInfoAndInsertNewBlock(r.task.info, w.chain.(*wrapBlockChain), engine, db)
+			if i < 1 {
+				updateMiningInfoAndInsertNewBlock(r.task.info, w.chain.(*wrapBlockChain), engine, db)
+			}
 		case <-time.NewTimer(3 * time.Second).C:
 			test.Error("new task timeout")
 		}
@@ -756,12 +781,12 @@ func testWork_ProofsCreateAndVerify(test *testing.T, val []byte, chunkPerKVBits 
 	chunkPerKV := uint64(1) << chunkPerKVBits
 	dataLen := uint64(len(val))
 
-	root := merkleRoot(val, chunkPerKV, sstorage.CHUNK_SIZE)
+	root := sstorage.MerkleRoot(val, chunkPerKV)
 	for i := uint64(0); i < chunkPerKV; i++ {
 		hash := common.Hash{}
 		off := i * sstorage.CHUNK_SIZE
 
-		ps, err := getProof(val, sstorage.CHUNK_SIZE, chunkPerKVBits, i)
+		ps, err := sstorage.GetProof(val, chunkPerKVBits, i)
 		if err != nil {
 			test.Error("error:", err.Error())
 		}
@@ -783,12 +808,12 @@ func testWork_ProofsCreateAndVerifyWithMinTree(test *testing.T, val []byte, chun
 	chunkPerKV := uint64(1) << chunkPerKVBits
 	dataLen := uint64(len(val))
 
-	root := merkleRootWithMinTree(val, sstorage.CHUNK_SIZE)
+	root := sstorage.MerkleRootWithMinTree(val)
 	for i := uint64(0); i < chunkPerKV; i++ {
 		hash := common.Hash{}
 		off := i * sstorage.CHUNK_SIZE
 
-		ps, err := getProofWithMinTree(val, sstorage.CHUNK_SIZE, chunkPerKVBits, i)
+		ps, err := sstorage.GetProofWithMinTree(val, chunkPerKVBits, i)
 		if err != nil {
 			test.Error("error:", err.Error())
 		}
