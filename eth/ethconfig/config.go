@@ -92,8 +92,8 @@ var Defaults = Config{
 	},
 	SStorMiner: sstorminer.Config{
 		RandomChecks:      16,
-		MinimumDiff:       new(big.Int).SetUint64(1),
-		TargetIntervalSec: new(big.Int).SetUint64(60),
+		MinimumDiff:       new(big.Int).SetUint64(100),
+		TargetIntervalSec: new(big.Int).SetUint64(300),
 		Cutoff:            new(big.Int).SetUint64(40),
 		DiffAdjDivisor:    new(big.Int).SetUint64(1024),
 		Recommit:          15 * time.Second,
@@ -231,7 +231,7 @@ type Config struct {
 	ValChainId             uint64
 	ValidatorChangeEpochId uint64
 
-	//MindReading Config
+	// MindReading Config
 	IsMiner                      bool
 	MindReadingEnableBlockNumber *big.Int
 	MindReadingSupportChainId    uint64
