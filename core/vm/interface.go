@@ -76,7 +76,7 @@ type StateDB interface {
 	ForEachStorage(common.Address, func(common.Hash, common.Hash) bool) error
 
 	SstorageMaxKVSize(common.Address) uint64                                     // 0 means not exist
-	SstorageWrite(common.Address, uint64, []byte) error                          // following the same interface as ShardManager.TryWrite()
+	SstorageWrite(common.Address, uint64, common.Hash, []byte) error             // following the same interface as ShardManager.TryWrite()
 	SstorageRead(common.Address, uint64, int, common.Hash) ([]byte, bool, error) // following the same interface as ShardManager.TryRead()
 }
 

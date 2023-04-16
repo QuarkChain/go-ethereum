@@ -146,6 +146,10 @@ func (ds *DataShard) readWith(kvIdx uint64, readLen int, decoder func([]byte, ui
 	return data, nil
 }
 
+func CalcEncodeKey(commit common.Hash, chunkIdx uint64, miner common.Address) common.Hash {
+	return calcEncodeKey(commit, chunkIdx, miner)
+}
+
 // Obtain a unique encoding key with keccak256(chunkIdx || commit || miner).
 // This will make sure the encoded data will be unique in terms of idx, storage provider, and data
 func calcEncodeKey(commit common.Hash, chunkIdx uint64, miner common.Address) common.Hash {
@@ -154,6 +158,10 @@ func calcEncodeKey(commit common.Hash, chunkIdx uint64, miner common.Address) co
 	bb = append(bb, commit.Bytes()...)
 	bb = append(bb, miner.Bytes()...)
 	return crypto.Keccak256Hash(bb)
+}
+
+func EncodeChunk(bs []byte, encodeType uint64, encodeKey common.Hash) []byte {
+	return encodeChunk(bs, encodeType, encodeKey)
 }
 
 func encodeChunk(bs []byte, encodeType uint64, encodeKey common.Hash) []byte {
@@ -182,6 +190,23 @@ func encodeChunk(bs []byte, encodeType uint64, encodeKey common.Hash) []byte {
 	} else {
 		panic("unsupported encode type")
 	}
+}
+
+func IsValidEncodeType(encodeType uint64) bool {
+	switch encodeType {
+	case ENCODE_KECCAK_256:
+		return true
+	case NO_ENCODE:
+		return true
+	case ENCODE_ETHASH:
+		return true
+	default:
+		return false
+	}
+}
+
+func DecodeChunk(bs []byte, encodeType uint64, encodeKey common.Hash) []byte {
+	return decodeChunk(bs, encodeType, encodeKey)
 }
 
 func decodeChunk(bs []byte, encodeType uint64, encodeKey common.Hash) []byte {
