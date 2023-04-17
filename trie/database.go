@@ -792,7 +792,7 @@ func (db *Database) Commit(node common.Hash, report bool, callback func(common.H
 	for addr, m := range db.shardedStorage {
 		sm := db.contractToShardManager[addr]
 		for kvIdx, b := range m {
-			_, err := sm.TryWrite(kvIdx, b, common.BytesToHash(b[:KvHashLen]))
+			_, err := sm.TryWrite(kvIdx, b[KvHashLen:], common.BytesToHash(b[:KvHashLen]))
 			if err != nil {
 				log.Error("Failed to write sstorage", "kvIdx", kvIdx, "err", err)
 			}
