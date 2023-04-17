@@ -509,6 +509,7 @@ func (s *Syncer) loadSyncStatus() {
 				log.Debug("Scheduled sstorage sync task", "Contract", task.Contract.Hex(),
 					"shard", task.ShardId, "count", len(task.KvSubTasks))
 				task.HealTask.kvTask = task
+				task.statelessPeers = make(map[string]struct{})
 				for _, kvSubTask := range task.KvSubTasks {
 					kvSubTask.kvTask = task
 					kvSubTask.next = kvSubTask.First
