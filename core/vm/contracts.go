@@ -737,14 +737,13 @@ func (l *sstoragePisaPutRaw) Run(input []byte) ([]byte, error) {
 func (l *sstoragePisaPutRaw) RunWith(env *PrecompiledContractCallEnv, input []byte) ([]byte, error) {
 
 	// The solidity code to generate input as follows:
-	// function putRaw(address dkvAddr, uint256 kvIdx, bytes memory data) internal {
+	// function putRaw(uint256 kvIdx, bytes memory data) internal {
 	//     (bool success, ) = address(sstoragePisaPutRaw).call(
 	//         abi.encode(kvIdx, data)
 	//      );
 	//  }
 	//
 	// The generated input data format is as follows:
-	// 0000000000000000000000000000000000000000000000000000000003330003 (dkvAddr)
 	// 0000000000000000000000000000000000000000000000000000000000000001 (kvIdx)
 	// 0000000000000000000000000000000000000000000000000000000000001240 (kvHash low-24byte)
 	// 0000000000000000000000000000000000000000000000000000000000000040 (data offset)
@@ -777,7 +776,10 @@ func (l *sstoragePisaPutRaw) RunWith(env *PrecompiledContractCallEnv, input []by
 	if putLen > maxKVSize {
 		return nil, errors.New("put len too large")
 	}
-	evm.StateDB.SstorageWrite(caller, kvIdx, kvHash, getData(input, dataPtr+32, putLen))
+	err := evm.StateDB.SstorageWrite(caller, kvIdx, kvHash, getData(input, dataPtr+32, putLen))
+	if err != nil {
+		return nil, err
+	}
 	log.Info("sstoragePisaPutRaw() returns", "caller", caller, "kvidx", kvIdx, "dataPtr", dataPtr, "maxKVSize", maxKVSize)
 
 	return nil, nil

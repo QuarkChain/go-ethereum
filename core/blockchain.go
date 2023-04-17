@@ -2480,8 +2480,8 @@ func (bc *BlockChain) FillSstorWithEmptyKV(contract common.Address, start, limit
 		return start, fmt.Errorf("kv verify fail: contract not support, contract: %s", contract.Hex())
 	}
 
-	bc.chainmu.TryLock()
-	defer bc.chainmu.Unlock()
+	// bc.chainmu.TryLock()
+	// defer bc.chainmu.Unlock()
 
 	empty := make([]byte, 0)
 	lastKvIdx, err := bc.GetSstorageLastKvIdx(contract)
@@ -2558,7 +2558,7 @@ func (bc *BlockChain) VerifyAndWriteKV(contract common.Address, data map[uint64]
 
 		if metaHash != vkv.MetaHash {
 			// TODO: verify the storage data again before returning error
-			log.Warn("verify vkv fail", "error", err)
+			log.Warn("verify vkv fail", "kvIdx", vkv.Idx, "kvHash", common.Bytes2Hex(meta.HashInMeta), "error", err)
 			continue
 		}
 
