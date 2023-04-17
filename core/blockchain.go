@@ -20,7 +20,6 @@ package core
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -2444,17 +2443,6 @@ func GetSstorageMetadata(s *state.StateDB, contract common.Address, index uint64
 		nil
 }
 
-func GetDefaultMetadata(index uint64) (common.Hash, *SstorageMetadata) {
-	meta := &SstorageMetadata{
-		KVIdx:      index,
-		KVSize:     uint64(0),
-		HashInMeta: make([]byte, 24),
-	}
-	hashBytes := make([]byte, 32)
-	binary.BigEndian.PutUint32(hashBytes[27:], uint32(index))
-	return common.BytesToHash(hashBytes), meta
-}
-
 // VerifyKV verify kv using SstorageMetadata
 func VerifyKV(sm *sstorage.ShardManager, idx uint64, val []byte, meta *SstorageMetadata, isEncoded bool, providerAddr common.Address) ([]byte, error) {
 	if idx != meta.KVIdx {
@@ -2477,10 +2465,10 @@ func VerifyKV(sm *sstorage.ShardManager, idx uint64, val []byte, meta *SstorageM
 		data = d
 	}
 
-	hash := crypto.Keccak256Hash(data)
-	if !bytes.Equal(hash[:24], meta.HashInMeta) {
-		return nil, fmt.Errorf("verifyKV fail: size error; Data hash: %s; MetaHash hash (24): %s",
-			common.Bytes2Hex(hash[:24]), common.Bytes2Hex(meta.HashInMeta))
+	root := sstorage.MerkleRootWithMinTree(data)
+	if !bytes.Equal(root[:24], meta.HashInMeta) {
+		return nil, fmt.Errorf("verifyKV fail: Data hash: %s; MetaHash hash (24): %s",
+			common.Bytes2Hex(root[:24]), common.Bytes2Hex(meta.HashInMeta))
 	}
 
 	return data, nil
@@ -2492,8 +2480,8 @@ func (bc *BlockChain) FillSstorWithEmptyKV(contract common.Address, start, limit
 		return start, fmt.Errorf("kv verify fail: contract not support, contract: %s", contract.Hex())
 	}
 
-	bc.chainmu.TryLock()
-	defer bc.chainmu.Unlock()
+	// bc.chainmu.TryLock()
+	// defer bc.chainmu.Unlock()
 
 	empty := make([]byte, 0)
 	lastKvIdx, err := bc.GetSstorageLastKvIdx(contract)
@@ -2570,7 +2558,7 @@ func (bc *BlockChain) VerifyAndWriteKV(contract common.Address, data map[uint64]
 
 		if metaHash != vkv.MetaHash {
 			// TODO: verify the storage data again before returning error
-			log.Warn("verify vkv fail", "error", err)
+			log.Warn("verify vkv fail", "kvIdx", vkv.Idx, "kvHash", common.Bytes2Hex(meta.HashInMeta), "error", err)
 			continue
 		}
 

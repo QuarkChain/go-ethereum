@@ -19,7 +19,7 @@ type ShardInfo struct {
 
 // TODO: move to chain specific config?
 var ShardInfos = []*ShardInfo{
-	{common.HexToAddress("0x0000000000000000000000000000000003330001"), 17, 18},
+	{common.HexToAddress("0x0000000000000000000000000000000003330001"), 17, 10},
 }
 
 func InitializeConfig() {
@@ -80,26 +80,16 @@ func AddDataShardFromConfig(cfg string) error {
 }
 
 func AddDataFileFromConfig(cfg string) error {
-	// Format is kvSize,dataFile
-	ss := strings.Split(cfg, ",")
-	if len(ss) != 2 || len(ss[0]) == 0 || len(ss[1]) == 0 {
-		return fmt.Errorf("incorrect data shard cfg")
-	}
-
-	kvSize, err := parseKvSize(ss[0])
+	df, err := OpenDataFile(cfg)
 	if err != nil {
 		return err
 	}
 
-	sm := findShardManaager(kvSize)
+	sm := findShardManaager(df.maxKvSize)
 	if sm == nil {
-		return fmt.Errorf("shard with kv size %d not found", kvSize)
+		return fmt.Errorf("shard with kv size %d not found", df.maxKvSize)
 	}
 
-	df, err := OpenDataFile(ss[1])
-	if err != nil {
-		return err
-	}
 	return sm.AddDataFile(df)
 }
 

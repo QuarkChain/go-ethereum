@@ -121,6 +121,8 @@ func (s *Database) SstorageWrite(addr common.Address, kvIdx uint64, data []byte)
 	return nil
 }
 
+const KvHashLen = 32
+
 func (s *Database) SstorageRead(addr common.Address, kvIdx uint64, readLen int, commit common.Hash) ([]byte, bool, error) {
 	s.lock.RLock()
 	defer s.lock.RUnlock()
@@ -131,10 +133,11 @@ func (s *Database) SstorageRead(addr common.Address, kvIdx uint64, readLen int, 
 
 	if m, ok0 := s.shardedStorage[addr]; ok0 {
 		if b, ok1 := m[kvIdx]; ok1 {
-			if readLen > len(b) {
-				return append(b, bytes.Repeat([]byte{0}, readLen-len(b))...), true, nil
+			actualDataLen := len(b) - KvHashLen
+			if readLen > actualDataLen {
+				return append(b[KvHashLen:], bytes.Repeat([]byte{0}, readLen-actualDataLen)...), true, nil
 			}
-			return b[0:readLen], true, nil
+			return b[KvHashLen : KvHashLen+readLen], true, nil
 		}
 	}
 
@@ -789,7 +792,8 @@ func (db *Database) Commit(node common.Hash, report bool, callback func(common.H
 	for addr, m := range db.shardedStorage {
 		sm := db.contractToShardManager[addr]
 		for kvIdx, b := range m {
-			_, err := sm.TryWrite(kvIdx, b, common.Hash{})
+			log.Warn("Database::Commit:: Write into datafile", "kvIdx", kvIdx, "kvHash", b[:KvHashLen], "data", common.Bytes2Hex(b[KvHashLen:]))
+			_, err := sm.TryWrite(kvIdx, b, common.BytesToHash(b[:KvHashLen]))
 			if err != nil {
 				log.Error("Failed to write sstorage", "kvIdx", kvIdx, "err", err)
 			}

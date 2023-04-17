@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"github.com/ethereum/go-ethereum/event"
 	"math/rand"
 	"os"
 	"sync"
@@ -36,7 +37,6 @@ import (
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/sstorage"
 	"github.com/holiman/uint256"
-	"golang.org/x/crypto/sha3"
 )
 
 var (
@@ -342,7 +342,7 @@ func setupSyncer(shards map[common.Address][]uint64, stateDB *state.StateDB, las
 	rlp.DecodeBytes(blockEnc, &block)
 	chain := blockChain{block: &block, stateDB: stateDB}
 	chain.lastKvIdx = lastKvIdx
-	syncer := NewSyncer(db, &chain, shards)
+	syncer := NewSyncer(db, &chain, new(event.TypeMux), shards)
 	for _, peer := range peers {
 		syncer.Register(peer)
 		peer.remote = syncer
@@ -358,17 +358,7 @@ func getSKey(contract common.Address, idx uint64) common.Hash {
 	slotdata := slot[:]
 	data := append(keydata, slotdata...)
 
-	return hash(data)
-}
-
-func hash(data []byte) common.Hash {
-	hasher := sha3.NewLegacyKeccak256().(crypto.KeccakState)
-	hasher.Write(data)
-
-	hashRes := common.Hash{}
-	hasher.Read(hashRes[:])
-
-	return hashRes
+	return crypto.Keccak256Hash(data)
 }
 
 func checkStall(t *testing.T, term func()) chan struct{} {
@@ -431,7 +421,7 @@ func makeKVStorage(stateDB *state.StateDB, contract common.Address, shards []uin
 				key := getSlotHash(2, uint256.NewInt(i).Bytes32())
 				stateDB.SetState(contract, key, skey)
 
-				meta := generateMetadata(i, uint64(len(val)), hash(val))
+				meta := generateMetadata(i, uint64(len(val)), sstorage.MerkleRootWithMinTree(val))
 				key = getSlotHash(1, skey)
 				stateDB.SetState(contract, key, meta)
 			}

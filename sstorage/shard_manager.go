@@ -111,12 +111,12 @@ func (sm *ShardManager) GetShardMiner(shardIdx uint64) (common.Address, bool) {
 	return common.Address{}, false
 }
 
-// Decode the encoded KV data.
+// DecodeKV Decode the encoded KV data.
 func (sm *ShardManager) DecodeKV(kvIdx uint64, b []byte, hash common.Hash, providerAddr common.Address) ([]byte, bool, error) {
 	return sm.DecodeOrEncodeKV(kvIdx, b, hash, providerAddr, false)
 }
 
-// Encode the raw KV data.
+// EncodeKV Encode the raw KV data.
 func (sm *ShardManager) EncodeKV(kvIdx uint64, b []byte, hash common.Hash, providerAddr common.Address) ([]byte, bool, error) {
 	return sm.DecodeOrEncodeKV(kvIdx, b, hash, providerAddr, true)
 }
