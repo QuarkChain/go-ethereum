@@ -817,7 +817,8 @@ func (s *StateDB) Copy() *StateDB {
 	for addr, m := range s.shardedStorage {
 		state.shardedStorage[addr] = make(map[uint64][]byte)
 		for k, v := range m {
-			state.shardedStorage[addr][k] = v
+			newdata := common.CopyBytes(v)
+			state.shardedStorage[addr][k] = newdata
 		}
 	}
 	return state
