@@ -142,7 +142,9 @@ func (s *Database) SstorageRead(addr common.Address, kvIdx uint64, readLen int, 
 	}
 
 	if s, ok0 := s.contractToShardManager[addr]; ok0 {
-		return s.TryRead(kvIdx, readLen, commit)
+		data, succeed, err := s.TryRead(kvIdx, readLen, commit)
+		log.Warn("Database::SstorageRead() read from datafile ", "data", common.Bytes2Hex(data))
+		return data, succeed, err
 	}
 	return nil, false, nil
 }
@@ -793,6 +795,7 @@ func (db *Database) Commit(node common.Hash, report bool, callback func(common.H
 		sm := db.contractToShardManager[addr]
 		for kvIdx, b := range m {
 			_, err := sm.TryWrite(kvIdx, b, common.BytesToHash(b[:KvHashLen]))
+			log.Warn("Database::Commit() Write into datafile", "kvIdx", kvIdx, "kvHash", b[:KvHashLen], "data", common.Bytes2Hex(b[KvHashLen:]))
 			if err != nil {
 				log.Error("Failed to write sstorage", "kvIdx", kvIdx, "err", err)
 			}

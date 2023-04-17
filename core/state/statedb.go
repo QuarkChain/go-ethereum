@@ -179,6 +179,7 @@ func (s *StateDB) SstorageWrite(addr common.Address, kvIdx uint64, kvHash common
 	})
 	// Assume data is immutable
 	s.shardedStorage[addr][kvIdx] = append(kvHash[:], data...)
+	log.Warn("StateDB::SstorageWrite:: Write into datafile", "kvIdx", kvIdx, "kvHash", kvHash.Bytes(), "data", common.Bytes2Hex(data))
 	return nil
 }
 
@@ -189,6 +190,7 @@ func (s *StateDB) SstorageRead(addr common.Address, kvIdx uint64, readLen int, h
 		return nil, false, fmt.Errorf("readLen too large")
 	}
 
+	log.Debug("StateDB::SstorageRead() read ", "shardedStorage", s.shardedStorage)
 	if m, ok0 := s.shardedStorage[addr]; ok0 {
 		if b, ok1 := m[kvIdx]; ok1 {
 			actualDataLen := len(b) - KvHashLen
@@ -790,7 +792,8 @@ func (s *StateDB) Copy() *StateDB {
 	for addr, m := range s.shardedStorage {
 		state.shardedStorage[addr] = make(map[uint64][]byte)
 		for k, v := range m {
-			state.shardedStorage[addr][k] = v
+			newdata := common.CopyBytes(v)
+			state.shardedStorage[addr][k] = newdata
 		}
 	}
 	return state
@@ -1039,6 +1042,7 @@ func (s *StateDB) Commit(deleteEmptyObjects bool) (common.Hash, error) {
 	// Write the sharded storage changes to the underlying trie db
 	// This assumes no fork (with instant finality consensus)
 	triedb := s.db.TrieDB()
+	log.Warn("StateDB::Commit:: Write into database", "shardedStorage", s.shardedStorage)
 	for addr, m := range s.shardedStorage {
 		for k, v := range m {
 			err := triedb.SstorageWrite(addr, k, v)
