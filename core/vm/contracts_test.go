@@ -354,10 +354,12 @@ func TestUnmaskDaggerData(t *testing.T) {
 	var Miner common.Address = common.HexToAddress("0x5B38Da6a701c568545dCfcB03FcB875f56beddC4")
 	var EncodeType uint64 = sstorage.ENCODE_ETHASH
 	var ChunkIdx uint64 = 0
-	var KvHash common.Hash = common.Hash{}
+	var KvHash common.Hash = common.Hash{0}
+	t.Log(KvHash)
 	UnmaskedChunk := [4 * 1024]byte{0x01, 0x2}
 	encodedKey := sstorage.CalcEncodeKey(KvHash, ChunkIdx, Miner)
 	maskedChunk := sstorage.EncodeChunk(UnmaskedChunk[:], sstorage.ENCODE_ETHASH, encodedKey)
+	t.Log(common.Bytes2Hex(maskedChunk))
 
 	sstorage.InitializeConfig()
 	p := &sstoragePisaUnmaskDaggerData{}
