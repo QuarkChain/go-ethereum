@@ -2467,8 +2467,8 @@ func VerifyKV(sm *sstorage.ShardManager, idx uint64, val []byte, meta *SstorageM
 
 	root := sstorage.MerkleRootWithMinTree(data)
 	if !bytes.Equal(root[:24], meta.HashInMeta) {
-		return nil, fmt.Errorf("verifyKV fail: Data hash: %s; MetaHash hash (24): %s",
-			common.Bytes2Hex(root[:24]), common.Bytes2Hex(meta.HashInMeta))
+		return nil, fmt.Errorf("verifyKV fail: Data hash: %s; MetaHash hash (24): %s, providerAddr %s, data %s",
+			common.Bytes2Hex(root[:24]), common.Bytes2Hex(meta.HashInMeta), providerAddr.Hex(), common.Bytes2Hex(data))
 	}
 
 	return data, nil
