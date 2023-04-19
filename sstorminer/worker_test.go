@@ -232,7 +232,7 @@ func newTestWorker(t *testing.T, chainConfig *params.ChainConfig, engine consens
 			return types.SignTx(tx, types.NewEIP2930Signer(chainConfig.ChainID), testBankKey)
 		},
 	}
-	w := newWorker(defaultConfig, chainConfig, backend, &wchain, new(event.TypeMux), signer, minerContract, false)
+	w := newWorker(defaultConfig, chainConfig, backend, nil, &wchain, new(event.TypeMux), signer, minerContract, false)
 	return w, infos, files, backend
 }
 
@@ -487,11 +487,12 @@ func TestWork_MultiShards(test *testing.T) {
 
 	defer w.close()
 	defer engine.Close()
-	defer func(files []string) {
+	f := func(files []string) {
 		for _, file := range files {
 			os.Remove(file)
 		}
-	}(files)
+	}
+	defer f(files)
 
 	var (
 		taskMined int

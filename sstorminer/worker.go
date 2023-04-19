@@ -17,7 +17,11 @@
 package sstorminer
 
 import (
+	"context"
 	"fmt"
+	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ethereum/go-ethereum/internal/ethapi"
+	"github.com/ethereum/go-ethereum/rpc"
 	"math/big"
 	"math/rand"
 	"sort"
@@ -58,7 +62,7 @@ const (
 	// any newly arrived transactions.
 	minRecommitInterval = 1 * time.Second
 
-	mineTimeOut = uint64(10)
+	mineTimeOut = uint64(100)
 )
 
 var (
@@ -191,6 +195,8 @@ type result struct {
 	chunkIdxs    []uint64
 	encodedData  [][]byte
 	proofs       [][]common.Hash
+	hash1        common.Hash
+	requiredDiff *big.Int
 }
 
 type txSorter struct {
@@ -280,6 +286,7 @@ type worker struct {
 	chainConfig *params.ChainConfig
 	engine      consensus.Engine
 	eth         Backend
+	apiBackend  ethapi.Backend
 	chain       BlockChain
 	priceOracle *priceOracle
 
@@ -310,12 +317,13 @@ type worker struct {
 	newResultHook func(*result)
 }
 
-func newWorker(config *Config, chainConfig *params.ChainConfig, eth Backend, chain BlockChain, mux *event.TypeMux, txSigner *TXSigner,
+func newWorker(config *Config, chainConfig *params.ChainConfig, eth Backend, api ethapi.Backend, chain BlockChain, mux *event.TypeMux, txSigner *TXSigner,
 	minerContract common.Address, init bool) *worker {
 	worker := &worker{
 		config:             config,
 		chainConfig:        chainConfig,
 		eth:                eth,
+		apiBackend:         api,
 		mux:                mux,
 		chain:              chain,
 		tasks:              make([]*task, 0),
@@ -637,18 +645,17 @@ func (w *worker) calculateDiffAndInitHash(t *task, shardLen, minedTs uint64) (di
 }
 
 func (w *worker) hashimoto(t *task, shardLenBits uint64, hash0 common.Hash) (common.Hash, [][]byte, []uint64, []uint64, error) {
-	hash0Bytes := hash0.Bytes()
 	dataSet := make([][]byte, w.config.RandomChecks)
 	kvIdxs, chunkIdxs := make([]uint64, w.config.RandomChecks), make([]uint64, w.config.RandomChecks)
 	rowBits := t.kvEntriesBits + t.chunkSizeBits + shardLenBits
 	for i := 0; i < w.config.RandomChecks; i++ {
-		chunkIdx := new(big.Int).SetBytes(hash0Bytes).Uint64()%(uint64(1)<<rowBits) + t.shardIdx<<(t.kvEntriesBits+t.chunkSizeBits)
+		chunkIdx := new(big.Int).SetBytes(hash0.Bytes()).Uint64()%(uint64(1)<<rowBits) + t.shardIdx<<(t.kvEntriesBits+t.chunkSizeBits)
 		data, exist, err := t.shardManager.TryReadChunkEncoded(chunkIdx)
 		if exist && err == nil {
 			dataSet[i] = data
 			kvIdxs[i] = chunkIdx >> t.chunkSizeBits
 			chunkIdxs[i] = chunkIdx % (1 << t.chunkSizeBits)
-			hash0Bytes = crypto.Keccak256Hash(hash0Bytes, data).Bytes()
+			hash0 = crypto.Keccak256Hash(hash0.Bytes(), data)
 		} else {
 			if !exist {
 				err = fmt.Errorf("chunk not support: chunkIdxs %d", chunkIdx)
@@ -664,7 +671,7 @@ func (w *worker) mineTask(t *task) (bool, error) {
 	if t.getState() == TaskStateMined {
 		return true, nil
 	}
-	minedTs := uint64(time.Now().Unix())
+	minedTs := uint64(time.Now().Unix()) - 50
 	// using random nonce, so we can run multi mine with threads
 	rand.Seed(int64(minedTs))
 	nonce := rand.Uint64() % 1000000
@@ -693,7 +700,7 @@ func (w *worker) mineTask(t *task) (bool, error) {
 		hash1, dataSet, kvIdxs, chunkIdxs, err = w.hashimoto(t, shardLenBits, hash1)
 
 		if requiredDiff.Cmp(new(big.Int).SetBytes(hash1.Bytes())) >= 0 {
-			log.Warn("calculateDiffAndInitHash", "diff", diff, "hash1", hash1.Hex(), "minedTs", minedTs,
+			log.Warn("calculate a valid hash", "random check chunkIdxs", chunkIdxs, "diff", diff, "hash1", hash1.Hex(), "minedTs", minedTs,
 				"MiningHash", t.info.MiningHash, "LastMineTime", t.info.LastMineTime, "nonce", nonce, "miner", t.miner.Hex())
 			proofs := make([][]common.Hash, len(kvIdxs))
 			kvs, err := w.chain.ReadKVsByIndexList(t.storageContract, kvIdxs, true)
@@ -725,6 +732,8 @@ func (w *worker) mineTask(t *task) (bool, error) {
 				chunkIdxs:    chunkIdxs,
 				encodedData:  dataSet,
 				proofs:       proofs,
+				hash1:        hash1,
+				requiredDiff: new(big.Int).SetBytes(requiredDiff.Bytes()),
 			}
 
 			return true, nil
@@ -745,25 +754,58 @@ func (w *worker) submitMinedResult(result *result) error {
 	gasFeeCap := w.chain.CurrentBlock().BaseFee()
 	nonce := w.eth.TxPool().Nonce(result.task.miner)
 
-	baseTx := &types.DynamicFeeTx{
-		ChainID:   w.chainConfig.ChainID,
-		To:        &result.task.minerContract,
-		Nonce:     nonce,
-		GasTipCap: w.priceOracle.suggestGasTip,
-		GasFeeCap: gasFeeCap,
-		Gas:       gas,
-		Value:     new(big.Int).SetInt64(0),
-		Data:      data,
+	var estimateGas hexutil.Uint64
+	txArgs := &ethapi.TransactionArgs{
+		From:                 &w.signer.Account.Address,
+		To:                   &result.task.minerContract,
+		Nonce:                (*hexutil.Uint64)(&nonce),
+		MaxFeePerGas:         (*hexutil.Big)(gasFeeCap),
+		MaxPriorityFeePerGas: (*hexutil.Big)(w.priceOracle.suggestGasTip),
+		Value:                (*hexutil.Big)(new(big.Int).SetInt64(0)),
+		Data:                 (*hexutil.Bytes)(&data),
+	}
+	api := ethapi.NewPublicBlockChainAPI(w.apiBackend)
+	ctx := context.Background()
+	currentBlock := w.chain.CurrentBlock()
+	bnr := (rpc.BlockNumber)(currentBlock.Number().Int64())
+	numberOrHash := &rpc.BlockNumberOrHash{
+		BlockNumber: &bnr,
+	}
+	estimateGas, err = api.EstimateGas(ctx, *txArgs, numberOrHash)
+	if err != nil {
+		log.Error("worker::submitMinedResult() >>>>>> estimate gas for mine tx happened error <<<<<<",
+			"err", err.Error(), "hash1", result.hash1.Hex(), "requiredDiff", result.requiredDiff.Text(16),
+			"block timestamp", currentBlock.TimeMs(), "minedTs", result.minedTs,
+			"chunkIdxs", result.chunkIdxs, "kvIdxs", result.kvIdxs)
+		//fmt.Printf("Info: %v \n", *result)
+		//fmt.Printf("txdata: %v \n", txArgs.Data.String())
+		return err
 	}
 
-	signedTx, err := w.signer.SignFn(w.signer.Account, types.NewTx(baseTx), w.chainConfig.ChainID)
+	log.Warn("worker::submitMinedResult() >>>>>> estimate gas Succeed <<<<<<", "block timestamp", currentBlock.Time(), "minedTs", result.minedTs)
+	txArgs.Gas = &estimateGas
+	tx := txArgs.ToTransaction()
+	//baseTx := &types.DynamicFeeTx{
+	//	ChainID:   w.chainConfig.ChainID,
+	//	To:        &result.task.minerContract,
+	//	Nonce:     nonce,
+	//	GasTipCap: w.priceOracle.suggestGasTip,
+	//	GasFeeCap: gasFeeCap,
+	//	Gas:       (uint64)(estimateGas),
+	//	Value:     new(big.Int).SetInt64(0),
+	//	Data:      data,
+	//}
+
+	signedTx, err := w.signer.SignFn(w.signer.Account, tx, w.chainConfig.ChainID)
 	if err != nil {
+		log.Warn("worker::submitMinedResult() >>>>>> sign tx error <<<<<<", "err", err)
 		w.resultCh <- result
 		return err
 	}
 
 	log.Warn("submitMinedResult", "shard idx", result.task.shardIdx, "tx hash", signedTx.Hash(),
 		"kv idx list", result.kvIdxs, "chunk idx list", result.chunkIdxs)
+	fmt.Println("Submit Mine Result txHash:", signedTx.Hash())
 	return w.eth.TxPool().AddLocal(signedTx)
 }
 

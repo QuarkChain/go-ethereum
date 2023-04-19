@@ -295,6 +295,11 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	eth.miner = miner.New(eth, &config.Miner, chainConfig, eth.EventMux(), eth.engine, eth.isLocalBlock)
 	eth.miner.SetExtra(makeExtraData(config.Miner.ExtraData))
 
+	eth.APIBackend = &EthAPIBackend{stack.Config().ExtRPCEnabled(), stack.Config().AllowUnprotectedTxs, eth, nil}
+	if eth.APIBackend.allowUnprotectedTxs {
+		log.Info("Unprotected transactions allowed")
+	}
+
 	if config.SstorageMine {
 		if len(sstorage.Shards()) == 0 {
 			return nil, fmt.Errorf("no shards is exist")
@@ -313,14 +318,10 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			return nil, fmt.Errorf("signer missing: %v", err)
 		}
 
-		eth.sstorMiner = sstorminer.New(eth, &config.SStorMiner, chainConfig, eth.EventMux(), &sstorminer.TXSigner{signer, wallet.SignTx}, minerContract)
+		eth.sstorMiner = sstorminer.New(eth, eth.APIBackend, &config.SStorMiner, chainConfig, eth.EventMux(), &sstorminer.TXSigner{signer, wallet.SignTx}, minerContract)
 		eth.sstorMiner.Start()
 	}
 
-	eth.APIBackend = &EthAPIBackend{stack.Config().ExtRPCEnabled(), stack.Config().AllowUnprotectedTxs, eth, nil}
-	if eth.APIBackend.allowUnprotectedTxs {
-		log.Info("Unprotected transactions allowed")
-	}
 	gpoParams := config.GPO
 	if gpoParams.Default == nil {
 		gpoParams.Default = config.Miner.GasPrice
