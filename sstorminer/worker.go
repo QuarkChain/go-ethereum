@@ -779,6 +779,8 @@ func (w *worker) submitMinedResult(result *result) error {
 			"chunkIdxs", result.chunkIdxs, "kvIdxs", result.kvIdxs)
 		//fmt.Printf("Info: %v \n", *result)
 		//fmt.Printf("txdata: %v \n", txArgs.Data.String())
+		time.Sleep(3 * time.Second)
+		w.resultCh <- result
 		return err
 	}
 
@@ -806,7 +808,8 @@ func (w *worker) submitMinedResult(result *result) error {
 	log.Warn("submitMinedResult", "shard idx", result.task.shardIdx, "tx hash", signedTx.Hash(),
 		"kv idx list", result.kvIdxs, "chunk idx list", result.chunkIdxs)
 	fmt.Println("Submit Mine Result txHash:", signedTx.Hash())
-	return w.eth.TxPool().AddLocal(signedTx)
+	return w.apiBackend.SendTx(ctx, signedTx)
+	//return w.eth.TxPool().AddLocal(signedTx)
 }
 
 func uint64ToByte32(u uint64) []byte {
