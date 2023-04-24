@@ -18,15 +18,16 @@
 package sstorminer
 
 import (
+	"context"
 	"math/big"
 	"sync"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/eth/protocols/sstorage"
 	"github.com/ethereum/go-ethereum/event"
-	"github.com/ethereum/go-ethereum/internal/ethapi"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 )
@@ -36,6 +37,12 @@ import (
 type Backend interface {
 	BlockChain() *core.BlockChain
 	TxPool() *core.TxPool
+}
+
+type apiBackend interface {
+	GetPoolNonce(ctx context.Context, addr common.Address) (uint64, error)
+	SendTx(ctx context.Context, signedTx *types.Transaction) error
+	SuggestGasTipCap(ctx context.Context) (*big.Int, error)
 }
 
 // Config is the configuration parameters of mining.
@@ -60,7 +67,7 @@ type Miner struct {
 	wg sync.WaitGroup
 }
 
-func New(eth Backend, api ethapi.Backend, config *Config, chainConfig *params.ChainConfig, mux *event.TypeMux, txSigner *TXSigner, minerContract common.Address) *Miner {
+func New(eth Backend, api apiBackend, config *Config, chainConfig *params.ChainConfig, mux *event.TypeMux, txSigner *TXSigner, minerContract common.Address) *Miner {
 	miner := &Miner{
 		mux:     mux,
 		exitCh:  make(chan struct{}),

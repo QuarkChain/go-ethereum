@@ -19,9 +19,6 @@ package sstorminer
 import (
 	"context"
 	"fmt"
-	"github.com/ethereum/go-ethereum/common/hexutil"
-	"github.com/ethereum/go-ethereum/internal/ethapi"
-	"github.com/ethereum/go-ethereum/rpc"
 	"math/big"
 	"math/rand"
 	"sort"
@@ -286,7 +283,7 @@ type worker struct {
 	chainConfig *params.ChainConfig
 	engine      consensus.Engine
 	eth         Backend
-	apiBackend  ethapi.Backend
+	apiBackend  apiBackend
 	chain       BlockChain
 	priceOracle *priceOracle
 
@@ -303,6 +300,7 @@ type worker struct {
 	resultCh           chan *result
 	startCh            chan struct{}
 	taskStartCh        chan struct{}
+	resultSubmitFailCh chan struct{}
 	exitCh             chan struct{}
 	taskDoneCh         chan struct{}
 	resubmitIntervalCh chan time.Duration
@@ -317,8 +315,8 @@ type worker struct {
 	newResultHook func(*result)
 }
 
-func newWorker(config *Config, chainConfig *params.ChainConfig, eth Backend, api ethapi.Backend, chain BlockChain, mux *event.TypeMux, txSigner *TXSigner,
-	minerContract common.Address, init bool) *worker {
+func newWorker(config *Config, chainConfig *params.ChainConfig, eth Backend, api apiBackend, chain BlockChain,
+	mux *event.TypeMux, txSigner *TXSigner, minerContract common.Address, init bool) *worker {
 	worker := &worker{
 		config:             config,
 		chainConfig:        chainConfig,
@@ -336,6 +334,7 @@ func newWorker(config *Config, chainConfig *params.ChainConfig, eth Backend, api
 		resubmitIntervalCh: make(chan time.Duration),
 		taskDoneCh:         make(chan struct{}),
 		taskStartCh:        make(chan struct{}),
+		resultSubmitFailCh: make(chan struct{}),
 		signer:             txSigner,
 	}
 	for addr, sm := range sstor.ContractToShardManager {
@@ -517,6 +516,11 @@ func (w *worker) mainLoop() {
 			stopCh = make(chan struct{})
 			w.commitWork(stopCh)
 
+		case <-w.resultSubmitFailCh:
+			interrupt()
+			stopCh = make(chan struct{})
+			w.commitWork(stopCh)
+
 		case <-w.exitCh:
 			return
 		case <-w.chainHeadSub.Err():
@@ -560,7 +564,13 @@ func (w *worker) resultLoop() {
 			}
 
 			// todo refer to the current layer 2 to process submissions
-			w.submitMinedResult(result)
+			err := w.submitMinedResult(result)
+			if err != nil {
+				result.task.setState(TaskStateNoStart)
+				w.resultSubmitFailCh <- struct{}{}
+				log.Warn("w.submitMinedResult", "MiningHash", result.task.info.MiningHash.Hex(),
+					"LastMineTime", result.task.info.LastMineTime, "miner", result.miner, "error", err.Error())
+			}
 
 		case <-w.exitCh:
 			return
@@ -745,67 +755,41 @@ func (w *worker) mineTask(t *task) (bool, error) {
 }
 
 func (w *worker) submitMinedResult(result *result) error {
+	ctx := context.Background()
 	data, err := vABI.Pack(MineFunc, new(big.Int).SetUint64(result.task.shardIdx), new(big.Int).SetUint64(0), result.task.miner,
 		new(big.Int).SetUint64(result.minedTs), new(big.Int).SetUint64(result.nonce), result.proofs, result.encodedData)
 	if err != nil {
 		return err
 	}
 
-	gasFeeCap := w.chain.CurrentBlock().BaseFee()
-	nonce := w.eth.TxPool().Nonce(result.task.miner)
-
-	txArgs := &ethapi.TransactionArgs{
-		From:                 &w.signer.Account.Address,
-		To:                   &result.task.minerContract,
-		Nonce:                (*hexutil.Uint64)(&nonce),
-		MaxFeePerGas:         (*hexutil.Big)(gasFeeCap),
-		MaxPriorityFeePerGas: (*hexutil.Big)(w.priceOracle.suggestGasTip),
-		Value:                (*hexutil.Big)(new(big.Int).SetInt64(0)),
-		Data:                 (*hexutil.Bytes)(&data),
-	}
-	ctx := context.Background()
-	currentBlock := w.chain.CurrentBlock()
-	bnr := (rpc.BlockNumber)(currentBlock.Number().Int64())
-	numberOrHash := &rpc.BlockNumberOrHash{
-		BlockNumber: &bnr,
-	}
-	callRes, err := ethapi.DoCall(ctx, w.apiBackend, *txArgs, *numberOrHash, nil, w.apiBackend.RPCEVMTimeout(), w.apiBackend.RPCGasCap())
+	nonce, _ := w.apiBackend.GetPoolNonce(ctx, w.signer.Account.Address)
+	gasPrice, err := w.apiBackend.SuggestGasTipCap(ctx)
+	gasPrice = new(big.Int).Add(gasPrice, w.chain.CurrentBlock().BaseFee())
 	if err != nil {
-		log.Error("worker::submitMinedResult() >>>>>> DoCall: happened system error <<<<<<",
-			"err", err.Error(), "hash1", result.hash1.Hex(), "requiredDiff", result.requiredDiff.Text(16),
-			"block timestamp", currentBlock.TimeMs(), "minedTs", result.minedTs,
-			"chunkIdxs", result.chunkIdxs, "kvIdxs", result.kvIdxs)
-		time.Sleep(3 * time.Second)
-		w.resultCh <- result
 		return err
 	}
 
-	if callRes.Err != nil {
-		log.Error("worker::submitMinedResult() >>>>>> DoCall: happened evm err <<<<<<",
-			"evmErr", callRes.Err.Error(), "hash1", result.hash1.Hex(), "requiredDiff", result.requiredDiff.Text(16),
-			"block timestamp", currentBlock.TimeMs(), "minedTs", result.minedTs,
-			"chunkIdxs", result.chunkIdxs, "kvIdxs", result.kvIdxs)
-		time.Sleep(3 * time.Second)
-		w.resultCh <- result
-		return callRes.Err
+	baseTx := &types.LegacyTx{
+		To:       &result.task.minerContract,
+		Nonce:    nonce,
+		GasPrice: gasPrice,
+		Gas:      gas,
+		Value:    new(big.Int).SetInt64(0),
+		Data:     data,
 	}
 
-	log.Warn("worker::submitMinedResult() >>>>>> DoCall: simulate execution succeed <<<<<<", "block timestamp", currentBlock.Time(), "minedTs", result.minedTs, "gasUsed", callRes.UsedGas)
-	txArgs.Gas = (*hexutil.Uint64)(&callRes.UsedGas)
-	tx := txArgs.ToTransaction()
-
-	signedTx, err := w.signer.SignFn(w.signer.Account, tx, w.chainConfig.ChainID)
+	signedTx, err := w.signer.SignFn(w.signer.Account, types.NewTx(baseTx), w.chainConfig.ChainID)
 	if err != nil {
 		log.Warn("worker::submitMinedResult() >>>>>> sign tx error <<<<<<", "err", err)
-		w.resultCh <- result
 		return err
 	}
 
-	log.Warn("submitMinedResult", "shard idx", result.task.shardIdx, "tx hash", signedTx.Hash(),
-		"kv idx list", result.kvIdxs, "chunk idx list", result.chunkIdxs)
-	fmt.Println("Submit Mine Result txHash:", signedTx.Hash())
-	return w.apiBackend.SendTx(ctx, signedTx)
-	//return w.eth.TxPool().AddLocal(signedTx)
+	err = w.apiBackend.SendTx(ctx, signedTx)
+	if err != nil {
+		return fmt.Errorf("SendTransaction hash %s, ERROR %s ", signedTx.Hash().Hex(), err.Error())
+	}
+	log.Warn("Submit mining tx", "hash", signedTx.Hash().Hex())
+	return nil
 }
 
 func uint64ToByte32(u uint64) []byte {

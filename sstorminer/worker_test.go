@@ -18,6 +18,7 @@ package sstorminer
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -162,6 +163,23 @@ func (bc *wrapBlockChain) initMiningInfos(shardIdxList []uint64, diff *big.Int, 
 	return infos
 }
 
+type mockApiBackend struct {
+	nonce uint64
+}
+
+func (api *mockApiBackend) GetPoolNonce(ctx context.Context, addr common.Address) (uint64, error) {
+	api.nonce++
+	return api.nonce, nil
+}
+
+func (api *mockApiBackend) SendTx(ctx context.Context, signedTx *types.Transaction) error {
+	return nil
+}
+
+func (api *mockApiBackend) SuggestGasTipCap(ctx context.Context) (*big.Int, error) {
+	return new(big.Int).SetUint64(6000000), nil
+}
+
 // testWorkerBackend implements worker.Backend interfaces and wraps all information needed during the testing.
 type testWorkerBackend struct {
 	db          ethdb.Database
@@ -232,7 +250,7 @@ func newTestWorker(t *testing.T, chainConfig *params.ChainConfig, engine consens
 			return types.SignTx(tx, types.NewEIP2930Signer(chainConfig.ChainID), testBankKey)
 		},
 	}
-	w := newWorker(defaultConfig, chainConfig, backend, nil, &wchain, new(event.TypeMux), signer, minerContract, false)
+	w := newWorker(defaultConfig, chainConfig, backend, &mockApiBackend{nonce: 0}, &wchain, new(event.TypeMux), signer, minerContract, false)
 	return w, infos, files, backend
 }
 
@@ -250,10 +268,9 @@ func createSstorage(contract common.Address, shardIdxList []uint64, kvSizeBits,
 			fileId := shardIdx*filePerShard + i
 			fileName := fmt.Sprintf(".\\ss%d.dat", fileId)
 			files = append(files, fileName)
-			chunkPerfile := kvEntries * kvSize / sstorage.CHUNK_SIZE / filePerShard
-			startChunkId := fileId * chunkPerfile
-			endChunkId := (fileId + 1) * chunkPerfile
-			_, err := sstorage.Create(fileName, startChunkId, endChunkId, 0, kvSize, sstorage.ENCODE_KECCAK_256, miner)
+			kvPerfile := kvEntries / filePerShard
+			startKVId := fileId * kvPerfile
+			_, err := sstorage.Create(fileName, startKVId, kvPerfile, 0, kvSize, sstorage.ENCODE_KECCAK_256, miner)
 			if err != nil {
 				log.Crit("open failed", "error", err)
 			}
