@@ -150,7 +150,11 @@ func applyTransaction(msg types.Message, config *params.ChainConfig, bc ChainCon
 	// Apply the transaction to the current state (included in the env).
 	result, err := ApplyMessage(evm, msg, gp)
 	if err != nil {
+		log.Warn("ApplyMessage", "sender", msg.From().Hex(), "tx hash", tx.Hash(), "tx nonce", tx.Nonce(), "tx to", tx.To(), "err", err.Error())
 		return nil, nil, err
+	}
+	if result.Err != nil {
+		log.Warn("ApplyMessage", "sender", msg.From().Hex(), "tx hash", tx.Hash(), "tx nonce", tx.Nonce(), "tx to", tx.To(), "result.Err", result.Err.Error())
 	}
 
 	// Update the state with pending changes.

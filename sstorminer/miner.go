@@ -18,7 +18,6 @@
 package sstorminer
 
 import (
-	"github.com/ethereum/go-ethereum/internal/ethapi"
 	"math/big"
 	"sync"
 	"time"
@@ -27,6 +26,8 @@ import (
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/eth/protocols/sstorage"
 	"github.com/ethereum/go-ethereum/event"
+	"github.com/ethereum/go-ethereum/internal/ethapi"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 )
 
@@ -91,6 +92,7 @@ func (miner *Miner) update() {
 	canStart := false
 	dlEventCh := events.Chan()
 	for {
+		log.Warn("sstorage miner update", "shouldStart", shouldStart, "canStart", canStart)
 		select {
 		case ev := <-dlEventCh:
 			if ev == nil {

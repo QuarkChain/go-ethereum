@@ -515,6 +515,7 @@ func handleTransactions(backend Backend, msg Decoder, peer *Peer) error {
 			return fmt.Errorf("%w: transaction %d is nil", errDecode, i)
 		}
 		peer.markTransaction(tx.Hash())
+		log.Info("recieve transaction", "tx hash", tx.Hash().Hex(), "from peer", peer.id)
 	}
 	return backend.Handle(peer, &txs)
 }
