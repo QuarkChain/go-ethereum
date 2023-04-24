@@ -68,21 +68,25 @@ func UnmaskDataInPlace(userData []byte, maskData []byte) []byte {
 	return userData
 }
 
-func Create(filename string, chunkIdxStart uint64, chunkIdxLen uint64, epoch, maxKvSize uint64, encodeType uint64, miner common.Address) (*DataFile, error) {
+func Create(filename string, kvIdxStart uint64, kvIdxLen uint64, epoch, maxKvSize uint64, encodeType uint64, miner common.Address) (*DataFile, error) {
 	log.Info("Creating file", "filename", filename)
 	file, err := os.Create(filename)
 	if err != nil {
 		return nil, err
 	}
+	if maxKvSize%CHUNK_SIZE != 0 {
+		return nil, fmt.Errorf("max kv size %% CHUNK_SIZE should be 0")
+	}
+	chunkPerKV := maxKvSize / CHUNK_SIZE
 	// actual initialization is done when synchronize
-	err = fallocate.Fallocate(file, int64(CHUNK_SIZE*chunkIdxLen), int64(CHUNK_SIZE))
+	err = fallocate.Fallocate(file, int64(CHUNK_SIZE), int64(maxKvSize*kvIdxLen))
 	if err != nil {
 		return nil, err
 	}
 	dataFile := &DataFile{
 		file:          file,
-		chunkIdxStart: chunkIdxStart,
-		chunkIdxLen:   chunkIdxLen,
+		chunkIdxStart: kvIdxStart * chunkPerKV,
+		chunkIdxLen:   kvIdxLen * chunkPerKV,
 		encodeType:    encodeType,
 		maxKvSize:     maxKvSize,
 		miner:         miner,

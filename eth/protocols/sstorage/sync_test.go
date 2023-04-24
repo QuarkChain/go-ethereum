@@ -447,10 +447,9 @@ func createSstorage(contract common.Address, shardIdxList []uint64, kvSizeBits,
 			fileId := shardIdx*filePerShard + i
 			fileName := fmt.Sprintf(".\\ss%d.dat", fileId)
 			files = append(files, fileName)
-			chunkPerfile := kvEntries * kvSize / sstorage.CHUNK_SIZE / filePerShard
-			startChunkId := fileId * chunkPerfile
-			endChunkId := (fileId + 1) * chunkPerfile
-			_, err := sstorage.Create(fileName, startChunkId, endChunkId, 0, kvSize, sstorage.ENCODE_KECCAK_256, miner)
+			kvPerfile := kvEntries / filePerShard
+			startKVId := fileId * kvPerfile
+			_, err := sstorage.Create(fileName, startKVId, kvPerfile, 0, kvSize, sstorage.ENCODE_KECCAK_256, miner)
 			if err != nil {
 				log.Crit("open failed", "error", err)
 			}

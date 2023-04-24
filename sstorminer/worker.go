@@ -17,6 +17,7 @@
 package sstorminer
 
 import (
+	"context"
 	"fmt"
 	"math/big"
 	"math/rand"
@@ -280,6 +281,7 @@ type worker struct {
 	chainConfig *params.ChainConfig
 	engine      consensus.Engine
 	eth         Backend
+	apiBackend  apiBackend
 	chain       BlockChain
 	priceOracle *priceOracle
 
@@ -296,6 +298,7 @@ type worker struct {
 	resultCh           chan *result
 	startCh            chan struct{}
 	taskStartCh        chan struct{}
+	resultSubmitFailCh chan struct{}
 	exitCh             chan struct{}
 	taskDoneCh         chan struct{}
 	resubmitIntervalCh chan time.Duration
@@ -310,13 +313,14 @@ type worker struct {
 	newResultHook func(*result)
 }
 
-func newWorker(config *Config, chainConfig *params.ChainConfig, eth Backend, chain BlockChain, mux *event.TypeMux, txSigner *TXSigner,
+func newWorker(config *Config, chainConfig *params.ChainConfig, eth Backend, api apiBackend, chain BlockChain, mux *event.TypeMux, txSigner *TXSigner,
 	minerContract common.Address, init bool) *worker {
 	worker := &worker{
 		config:             config,
 		chainConfig:        chainConfig,
 		eth:                eth,
 		mux:                mux,
+		apiBackend:         api,
 		chain:              chain,
 		tasks:              make([]*task, 0),
 		chainHeadCh:        make(chan core.ChainHeadEvent, chainHeadChanSize),
@@ -328,6 +332,7 @@ func newWorker(config *Config, chainConfig *params.ChainConfig, eth Backend, cha
 		resubmitIntervalCh: make(chan time.Duration),
 		taskDoneCh:         make(chan struct{}),
 		taskStartCh:        make(chan struct{}),
+		resultSubmitFailCh: make(chan struct{}),
 		signer:             txSigner,
 	}
 	for addr, sm := range sstor.ContractToShardManager {
@@ -509,6 +514,11 @@ func (w *worker) mainLoop() {
 			stopCh = make(chan struct{})
 			w.commitWork(stopCh)
 
+		case <-w.resultSubmitFailCh:
+			interrupt()
+			stopCh = make(chan struct{})
+			w.commitWork(stopCh)
+
 		case <-w.exitCh:
 			return
 		case <-w.chainHeadSub.Err():
@@ -552,7 +562,13 @@ func (w *worker) resultLoop() {
 			}
 
 			// todo refer to the current layer 2 to process submissions
-			w.submitMinedResult(result)
+			err := w.submitMinedResult(result)
+			if err != nil {
+				result.task.setState(TaskStateNoStart)
+				w.resultSubmitFailCh <- struct{}{}
+				log.Warn("w.submitMinedResult", "MiningHash", result.task.info.MiningHash.Hex(),
+					"LastMineTime", result.task.info.LastMineTime, "miner", result.miner, "error", err.Error())
+			}
 
 		case <-w.exitCh:
 			return
@@ -637,18 +653,17 @@ func (w *worker) calculateDiffAndInitHash(t *task, shardLen, minedTs uint64) (di
 }
 
 func (w *worker) hashimoto(t *task, shardLenBits uint64, hash0 common.Hash) (common.Hash, [][]byte, []uint64, []uint64, error) {
-	hash0Bytes := hash0.Bytes()
 	dataSet := make([][]byte, w.config.RandomChecks)
 	kvIdxs, chunkIdxs := make([]uint64, w.config.RandomChecks), make([]uint64, w.config.RandomChecks)
 	rowBits := t.kvEntriesBits + t.chunkSizeBits + shardLenBits
 	for i := 0; i < w.config.RandomChecks; i++ {
-		chunkIdx := new(big.Int).SetBytes(hash0Bytes).Uint64()%(uint64(1)<<rowBits) + t.shardIdx<<(t.kvEntriesBits+t.chunkSizeBits)
+		chunkIdx := new(big.Int).SetBytes(hash0.Bytes()).Uint64()%(uint64(1)<<rowBits) + t.shardIdx<<(t.kvEntriesBits+t.chunkSizeBits)
 		data, exist, err := t.shardManager.TryReadChunkEncoded(chunkIdx)
 		if exist && err == nil {
 			dataSet[i] = data
 			kvIdxs[i] = chunkIdx >> t.chunkSizeBits
 			chunkIdxs[i] = chunkIdx % (1 << t.chunkSizeBits)
-			hash0Bytes = crypto.Keccak256Hash(hash0Bytes, data).Bytes()
+			hash0 = crypto.Keccak256Hash(hash0.Bytes(), data)
 		} else {
 			if !exist {
 				err = fmt.Errorf("chunk not support: chunkIdxs %d", chunkIdx)
@@ -736,35 +751,41 @@ func (w *worker) mineTask(t *task) (bool, error) {
 }
 
 func (w *worker) submitMinedResult(result *result) error {
+	ctx := context.Background()
 	data, err := vABI.Pack(MineFunc, new(big.Int).SetUint64(result.task.shardIdx), new(big.Int).SetUint64(0), result.task.miner,
 		new(big.Int).SetUint64(result.minedTs), new(big.Int).SetUint64(result.nonce), result.proofs, result.encodedData)
 	if err != nil {
 		return err
 	}
 
-	gasFeeCap := w.chain.CurrentBlock().BaseFee()
-	nonce := w.eth.TxPool().Nonce(result.task.miner)
+	nonce, _ := w.apiBackend.GetPoolNonce(ctx, w.signer.Account.Address)
+	gasPrice, err := w.apiBackend.SuggestGasTipCap(ctx)
+	gasPrice = new(big.Int).Add(gasPrice, w.chain.CurrentBlock().BaseFee())
+	if err != nil {
+		return err
+	}
 
-	baseTx := &types.DynamicFeeTx{
-		ChainID:   w.chainConfig.ChainID,
-		To:        &result.task.minerContract,
-		Nonce:     nonce,
-		GasTipCap: w.priceOracle.suggestGasTip,
-		GasFeeCap: gasFeeCap,
-		Gas:       gas,
-		Value:     new(big.Int).SetInt64(0),
-		Data:      data,
+	baseTx := &types.LegacyTx{
+		To:       &result.task.minerContract,
+		Nonce:    nonce,
+		GasPrice: gasPrice,
+		Gas:      gas,
+		Value:    new(big.Int).SetInt64(0),
+		Data:     data,
 	}
 
 	signedTx, err := w.signer.SignFn(w.signer.Account, types.NewTx(baseTx), w.chainConfig.ChainID)
 	if err != nil {
-		w.resultCh <- result
+		log.Warn("worker::submitMinedResult() >>>>>> sign tx error <<<<<<", "err", err)
 		return err
 	}
 
-	log.Warn("submitMinedResult", "shard idx", result.task.shardIdx, "tx hash", signedTx.Hash(),
-		"kv idx list", result.kvIdxs, "chunk idx list", result.chunkIdxs)
-	return w.eth.TxPool().AddLocal(signedTx)
+	err = w.apiBackend.SendTx(ctx, signedTx)
+	if err != nil {
+		return fmt.Errorf("SendTransaction hash %s, ERROR %s ", signedTx.Hash().Hex(), err.Error())
+	}
+	log.Warn("Submit mining tx", "hash", signedTx.Hash().Hex())
+	return nil
 }
 
 func uint64ToByte32(u uint64) []byte {

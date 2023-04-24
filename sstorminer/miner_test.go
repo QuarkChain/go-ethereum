@@ -186,7 +186,7 @@ func createMiner(t *testing.T) (*Miner, *event.TypeMux, func(skipMiner bool)) {
 	// Create event Mux
 	mux := new(event.TypeMux)
 	// Create Miner
-	miner := New(backend, &config, chainConfig, mux, nil, common.Address{})
+	miner := New(backend, nil, &config, chainConfig, mux, nil, common.Address{})
 	cleanup := func(skipMiner bool) {
 		bc.Stop()
 		engine.Close()

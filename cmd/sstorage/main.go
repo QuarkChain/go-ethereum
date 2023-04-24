@@ -15,7 +15,7 @@ import (
 )
 
 var (
-	chunkLen  *uint64
+	kvLen     *uint64
 	miner     *string
 	filenames *[]string
 
@@ -63,7 +63,7 @@ var ShardWriteCmd = &cobra.Command{
 }
 
 func init() {
-	chunkLen = CreateCmd.Flags().Uint64("len", 0, "Chunk idx len to create")
+	kvLen = CreateCmd.Flags().Uint64("kv_len", 0, "kv idx len to create")
 
 	filenames = rootCmd.PersistentFlags().StringArray("filename", []string{}, "Data filename")
 	miner = rootCmd.PersistentFlags().String("miner", "", "miner address")
@@ -110,9 +110,9 @@ func runCreate(cmd *cobra.Command, args []string) {
 	}
 	minerAddr := common.HexToAddress(*miner)
 
-	log.Info("Creating data file", "chunkIdx", *chunkIdx, "chunkLen", *chunkLen, "miner", minerAddr, "encodeType", *encodeType)
+	log.Info("Creating data file", "kvIdx", *kvIdx, "kvLen", *kvLen, "miner", minerAddr, "encodeType", *encodeType)
 
-	_, err := sstorage.Create((*filenames)[0], *chunkIdx, *chunkLen, 0, *kvSize, *encodeType, minerAddr)
+	_, err := sstorage.Create((*filenames)[0], *kvIdx, *kvLen, 0, *kvSize, *encodeType, minerAddr)
 	if err != nil {
 		log.Crit("create failed", "error", err)
 	}
