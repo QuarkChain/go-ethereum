@@ -754,7 +754,6 @@ func (w *worker) submitMinedResult(result *result) error {
 	gasFeeCap := w.chain.CurrentBlock().BaseFee()
 	nonce := w.eth.TxPool().Nonce(result.task.miner)
 
-	var estimateGas hexutil.Uint64
 	txArgs := &ethapi.TransactionArgs{
 		From:                 &w.signer.Account.Address,
 		To:                   &result.task.minerContract,
@@ -764,37 +763,36 @@ func (w *worker) submitMinedResult(result *result) error {
 		Value:                (*hexutil.Big)(new(big.Int).SetInt64(0)),
 		Data:                 (*hexutil.Bytes)(&data),
 	}
-	api := ethapi.NewPublicBlockChainAPI(w.apiBackend)
 	ctx := context.Background()
 	currentBlock := w.chain.CurrentBlock()
 	bnr := (rpc.BlockNumber)(currentBlock.Number().Int64())
 	numberOrHash := &rpc.BlockNumberOrHash{
 		BlockNumber: &bnr,
 	}
-	estimateGas, err = api.EstimateGas(ctx, *txArgs, numberOrHash)
+	callRes, err := ethapi.DoCall(ctx, w.apiBackend, *txArgs, *numberOrHash, nil, w.apiBackend.RPCEVMTimeout(), w.apiBackend.RPCGasCap())
 	if err != nil {
-		log.Error("worker::submitMinedResult() >>>>>> estimate gas for mine tx happened error <<<<<<",
+		log.Error("worker::submitMinedResult() >>>>>> DoCall: happened system error <<<<<<",
 			"err", err.Error(), "hash1", result.hash1.Hex(), "requiredDiff", result.requiredDiff.Text(16),
 			"block timestamp", currentBlock.TimeMs(), "minedTs", result.minedTs,
 			"chunkIdxs", result.chunkIdxs, "kvIdxs", result.kvIdxs)
-		//fmt.Printf("Info: %v \n", *result)
-		//fmt.Printf("txdata: %v \n", txArgs.Data.String())
+		time.Sleep(3 * time.Second)
+		w.resultCh <- result
 		return err
 	}
 
-	log.Warn("worker::submitMinedResult() >>>>>> estimate gas Succeed <<<<<<", "block timestamp", currentBlock.Time(), "minedTs", result.minedTs)
-	txArgs.Gas = &estimateGas
+	if callRes.Err != nil {
+		log.Error("worker::submitMinedResult() >>>>>> DoCall: happened evm err <<<<<<",
+			"evmErr", callRes.Err.Error(), "hash1", result.hash1.Hex(), "requiredDiff", result.requiredDiff.Text(16),
+			"block timestamp", currentBlock.TimeMs(), "minedTs", result.minedTs,
+			"chunkIdxs", result.chunkIdxs, "kvIdxs", result.kvIdxs)
+		time.Sleep(3 * time.Second)
+		w.resultCh <- result
+		return callRes.Err
+	}
+
+	log.Warn("worker::submitMinedResult() >>>>>> DoCall: simulate execution succeed <<<<<<", "block timestamp", currentBlock.Time(), "minedTs", result.minedTs, "gasUsed", callRes.UsedGas)
+	txArgs.Gas = (*hexutil.Uint64)(&callRes.UsedGas)
 	tx := txArgs.ToTransaction()
-	//baseTx := &types.DynamicFeeTx{
-	//	ChainID:   w.chainConfig.ChainID,
-	//	To:        &result.task.minerContract,
-	//	Nonce:     nonce,
-	//	GasTipCap: w.priceOracle.suggestGasTip,
-	//	GasFeeCap: gasFeeCap,
-	//	Gas:       (uint64)(estimateGas),
-	//	Value:     new(big.Int).SetInt64(0),
-	//	Data:      data,
-	//}
 
 	signedTx, err := w.signer.SignFn(w.signer.Account, tx, w.chainConfig.ChainID)
 	if err != nil {
@@ -806,7 +804,8 @@ func (w *worker) submitMinedResult(result *result) error {
 	log.Warn("submitMinedResult", "shard idx", result.task.shardIdx, "tx hash", signedTx.Hash(),
 		"kv idx list", result.kvIdxs, "chunk idx list", result.chunkIdxs)
 	fmt.Println("Submit Mine Result txHash:", signedTx.Hash())
-	return w.eth.TxPool().AddLocal(signedTx)
+	return w.apiBackend.SendTx(ctx, signedTx)
+	//return w.eth.TxPool().AddLocal(signedTx)
 }
 
 func uint64ToByte32(u uint64) []byte {
