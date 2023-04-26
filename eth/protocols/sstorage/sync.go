@@ -407,6 +407,7 @@ func (s *Syncer) Unregister(id string) error {
 // for storage shards the node support and reconstruct the node storage.
 // Previously downloaded segments will not be redownloaded of fixed.
 func (s *Syncer) Sync(cancel chan struct{}) error {
+	log.Warn("sstorage sync: Sync()")
 	if s.startTime == (time.Time{}) {
 		s.startTime = time.Now()
 	}
@@ -496,6 +497,7 @@ func (s *Syncer) Sync(cancel chan struct{}) error {
 // loadSyncStatus retrieves a previously aborted sync status from the database,
 // or generates a fresh one if none is available.
 func (s *Syncer) loadSyncStatus() {
+	log.Warn(">>>>>>>>>> sstorage sync: loadSyncStatus <<<<<<<<<<<")
 	// Start a fresh sync for retrieval.
 	s.kvSynced, s.kvBytes = 0, 0
 	s.emptyKVToFill, s.emptyKVFilled = 0, 0
@@ -639,6 +641,7 @@ func (s *Syncer) loadSyncStatus() {
 type SstorSyncDone struct{}
 
 func (s *Syncer) setSyncDone() {
+	log.Warn(">>>>>>>>>>>>>>>>>>>>> setSyncDone <<<<<<<<<<<<<<<<<<<<<<<")
 	s.syncDone = true
 	s.mux.Post(SstorSyncDone{})
 }

@@ -122,8 +122,10 @@ func (cs *chainSyncer) loop() {
 		case <-cs.doneCh:
 			cs.doneCh = nil
 			cs.force.Reset(forceSyncCycle)
+			log.Warn("eth sync loop forced change", "force", false)
 			cs.forced = false
 		case <-cs.force.C:
+			log.Warn("eth sync loop forced change", "force", true)
 			cs.forced = true
 
 		case <-cs.handler.quitSync:
@@ -147,6 +149,7 @@ func (cs *chainSyncer) nextSyncOp() *chainSyncOp {
 	}
 	// Disable the td based sync trigger after the transition
 	if cs.handler.merger.TDDReached() {
+		log.Warn("nextSyncOp return nil", "TDDReached", true)
 		return nil
 	}
 	// Ensure we're at minimum peer count.
@@ -157,19 +160,23 @@ func (cs *chainSyncer) nextSyncOp() *chainSyncOp {
 		minPeers = cs.handler.maxPeers
 	}
 	if cs.handler.peers.len() < minPeers {
+		log.Warn("nextSyncOp return nil", "peers len", cs.handler.peers.len(), "minPeers", minPeers)
 		return nil
 	}
 	// We have enough peers, check TD
 	peer := cs.handler.peers.peerWithHighestTD()
 	if peer == nil {
+		log.Warn("nextSyncOp: cannot find best peer")
 		return nil
 	}
 	mode, ourTD := cs.modeAndLocalHead()
 
 	op := peerToSyncOp(mode, peer)
 	if op.td.Cmp(ourTD) <= 0 {
+		log.Warn("nextSyncOp return nil", "ourTD", ourTD.Uint64(), "op.td", op.td.Uint64())
 		return nil // We're in sync.
 	}
+	log.Warn("nextSyncOp return op")
 	return op
 }
 
@@ -208,6 +215,7 @@ func (cs *chainSyncer) startSync(op *chainSyncOp) {
 
 // doSync synchronizes the local blockchain with a remote peer.
 func (h *handler) doSync(op *chainSyncOp) error {
+	log.Warn("start doSync")
 	if op.mode == downloader.SnapSync {
 		// Before launch the snap sync, we have to ensure user uses the same
 		// txlookup limit.
