@@ -43,6 +43,7 @@ type apiBackend interface {
 	GetPoolNonce(ctx context.Context, addr common.Address) (uint64, error)
 	SendTx(ctx context.Context, signedTx *types.Transaction) error
 	SuggestGasTipCap(ctx context.Context) (*big.Int, error)
+	GetPoolTransaction(txHash common.Hash) *types.Transaction
 }
 
 // Config is the configuration parameters of mining.

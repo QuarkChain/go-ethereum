@@ -60,6 +60,8 @@ const (
 	minRecommitInterval = 1 * time.Second
 
 	mineTimeOut = uint64(100)
+
+	waitForTransactionTimeout = 120 // Second
 )
 
 var (
@@ -98,6 +100,7 @@ type TXSigner struct {
 // task contains all information for consensus engine sealing and result submitting.
 type task struct {
 	worker          *worker
+	result          *result
 	storageContract common.Address
 	minerContract   common.Address
 	shardIdx        uint64
@@ -192,8 +195,8 @@ type result struct {
 	chunkIdxs    []uint64
 	encodedData  [][]byte
 	proofs       [][]common.Hash
-	hash1        common.Hash
-	requiredDiff *big.Int
+	submitTxHash common.Hash
+	submitTxTime int64
 }
 
 type txSorter struct {
@@ -578,6 +581,17 @@ func (w *worker) resultLoop() {
 	}
 }
 
+func (w *worker) needWaitTransactionToExecute(t *task) bool {
+	if t.result == nil {
+		return false
+	}
+	if t.result.submitTxTime+waitForTransactionTimeout < time.Now().Unix() {
+		return false
+	}
+	tx := w.apiBackend.GetPoolTransaction(t.result.submitTxHash)
+	return tx == nil
+}
+
 // updateTaskInfo aborts in-flight transaction execution with given signal and resubmits a new one.
 func (w *worker) updateTaskInfo(root common.Hash, timestamp int64) {
 	w.mu.Lock()
@@ -587,19 +601,23 @@ func (w *worker) updateTaskInfo(root common.Hash, timestamp int64) {
 		return
 	}
 	updated := false
-	for _, task := range w.tasks {
-		info, err := w.chain.GetSstorageMiningInfo(root, task.minerContract, task.shardIdx)
+	for _, t := range w.tasks {
+		info, err := w.chain.GetSstorageMiningInfo(root, t.minerContract, t.shardIdx)
 		if err != nil {
 			log.Warn("failed to get sstorage mining info", "error", err.Error())
 			continue
 		}
-		if task.info == nil || !info.Equal(task.info) {
-			task.info = info
-			task.setState(TaskStateNoStart)
+		waiting := w.needWaitTransactionToExecute(t)
+		if waiting {
+			log.Warn("need Wait Transaction To Execute", "tx hash", t.result.submitTxHash.Hex())
+		}
+		if t.info == nil || !info.Equal(t.info) || !waiting {
+			t.info = info
+			t.result = nil
+			t.setState(TaskStateNoStart)
 			updated = true
-			log.Info("update task info", "shard idx", task.shardIdx, "MiningHash",
-				info.MiningHash.Hex(), "LastMineTime", task.info.LastMineTime, "Difficulty",
-				info.Difficulty, "BlockMined", info.BlockMined)
+			log.Info("update t info", "shard idx", t.shardIdx, "MiningHash", info.MiningHash.Hex(),
+				"LastMineTime", t.info.LastMineTime, "Difficulty", info.Difficulty, "BlockMined", info.BlockMined)
 		}
 	}
 
@@ -710,8 +728,9 @@ func (w *worker) mineTask(t *task) (bool, error) {
 		hash1, dataSet, kvIdxs, chunkIdxs, err = w.hashimoto(t, shardLenBits, hash1)
 
 		if requiredDiff.Cmp(new(big.Int).SetBytes(hash1.Bytes())) >= 0 {
-			log.Warn("calculate a valid hash", "random check chunkIdxs", chunkIdxs, "diff", diff, "hash1", hash1.Hex(), "minedTs", minedTs,
-				"MiningHash", t.info.MiningHash, "LastMineTime", t.info.LastMineTime, "nonce", nonce, "miner", t.miner.Hex())
+			log.Warn("calculate a valid hash", "random check kvIdxs", kvIdxs, "random check chunkIdxs",
+				chunkIdxs, "diff", diff, "hash1", hash1.Hex(), "minedTs", minedTs, "MiningHash", t.info.MiningHash,
+				"LastMineTime", t.info.LastMineTime, "nonce", nonce, "miner", t.miner.Hex())
 			proofs := make([][]common.Hash, len(kvIdxs))
 			kvs, err := w.chain.ReadKVsByIndexList(t.storageContract, kvIdxs, true)
 			if err != nil {
@@ -731,7 +750,7 @@ func (w *worker) mineTask(t *task) (bool, error) {
 				}
 			}
 			t.setState(TaskStateMined)
-			w.resultCh <- &result{
+			t.result = &result{
 				task:         t,
 				startShardId: t.shardIdx,
 				shardLenBits: 0,
@@ -742,9 +761,9 @@ func (w *worker) mineTask(t *task) (bool, error) {
 				chunkIdxs:    chunkIdxs,
 				encodedData:  dataSet,
 				proofs:       proofs,
-				hash1:        hash1,
-				requiredDiff: new(big.Int).SetBytes(requiredDiff.Bytes()),
+				submitTxTime: 0,
 			}
+			w.resultCh <- t.result
 
 			return true, nil
 		}
@@ -788,6 +807,8 @@ func (w *worker) submitMinedResult(result *result) error {
 	if err != nil {
 		return fmt.Errorf("SendTransaction hash %s, ERROR %s ", signedTx.Hash().Hex(), err.Error())
 	}
+	result.submitTxTime = time.Now().Unix()
+	result.submitTxHash = signedTx.Hash()
 	log.Warn("Submit mining tx", "hash", signedTx.Hash().Hex())
 	return nil
 }

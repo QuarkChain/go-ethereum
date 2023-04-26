@@ -166,14 +166,12 @@ func (cs *chainSyncer) nextSyncOp() *chainSyncOp {
 	// We have enough peers, check TD
 	peer := cs.handler.peers.peerWithHighestTD()
 	if peer == nil {
-		log.Warn("nextSyncOp: cannot find best peer")
 		return nil
 	}
 	mode, ourTD := cs.modeAndLocalHead()
 
 	op := peerToSyncOp(mode, peer)
 	if op.td.Cmp(ourTD) <= 0 {
-		log.Warn("nextSyncOp return nil", "ourTD", ourTD.Uint64(), "op.td", op.td.Uint64())
 		return nil // We're in sync.
 	}
 	log.Warn("nextSyncOp return op")

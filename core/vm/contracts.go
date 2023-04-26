@@ -883,8 +883,9 @@ func (l *sstoragePisaUnmaskDaggerData) RunWith(env *PrecompiledContractCallEnv, 
 	binary.BigEndian.PutUint64(pb[64-8:64], uint64(len(unmaskedChunk)))
 
 	if bytes.Compare(unmaskedChunk[:20], make([]byte, 20)) != 0 {
-		log.Warn("sstoragePisaUnmaskDaggerData() returns", "encodeType", encodeType, "chunkIdx", chunkIdx, "kvHash",
-			kvHash, "miner", miner, "datalen", datalen, "masked chunk data", maskedChunkData[:20], "unmasked chunk data", unmaskedChunk[:20])
+		log.Warn("sstoragePisaUnmaskDaggerData() returns", "encodeType", encodeType, "chunkIdx", chunkIdx,
+			"kvHash", kvHash, "miner", miner, "datalen", datalen, "masked chunk data", maskedChunkData[:20],
+			"unmasked chunk data", unmaskedChunk[:20])
 	}
 	return append(pb, unmaskedChunk...), nil
 }
