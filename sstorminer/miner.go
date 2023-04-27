@@ -48,12 +48,11 @@ type apiBackend interface {
 
 // Config is the configuration parameters of mining.
 type Config struct {
-	RandomChecks      int
-	MinimumDiff       *big.Int
-	TargetIntervalSec *big.Int
-	Cutoff            *big.Int
-	DiffAdjDivisor    *big.Int
-	Recommit          time.Duration // The time interval for miner to re-create mining work.
+	RandomChecks   int
+	MinimumDiff    *big.Int
+	Cutoff         *big.Int
+	DiffAdjDivisor *big.Int
+	Recommit       time.Duration // The time interval for miner to re-create mining work.
 }
 
 // Miner creates blocks and searches for proof-of-work values.

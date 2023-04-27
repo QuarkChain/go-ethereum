@@ -116,10 +116,10 @@ type task struct {
 	mu              sync.RWMutex // The lock used to protect the state
 }
 
-func expectedDiff(lastMineTime uint64, difficulty *big.Int, minedTime uint64, targetIntervalSec, cutoff, diffAdjDivisor, minDiff *big.Int) *big.Int {
+func expectedDiff(lastMineTime uint64, difficulty *big.Int, minedTime uint64, cutoff, diffAdjDivisor, minDiff *big.Int) *big.Int {
 	interval := new(big.Int).SetUint64(minedTime - lastMineTime)
 	diff := difficulty
-	if interval.Cmp(targetIntervalSec) < 0 {
+	if interval.Cmp(cutoff) < 0 {
 		// diff = diff + (diff-interval*diff/cutoff)/diffAdjDivisor
 		diff = new(big.Int).Add(diff, new(big.Int).Div(
 			new(big.Int).Sub(diff, new(big.Int).Div(new(big.Int).Mul(interval, diff), cutoff)), diffAdjDivisor))
@@ -140,7 +140,7 @@ func expectedDiff(lastMineTime uint64, difficulty *big.Int, minedTime uint64, ta
 }
 
 func (t *task) expectedDiff(minedTime uint64) *big.Int {
-	return expectedDiff(t.info.LastMineTime, t.info.Difficulty, minedTime, t.worker.config.TargetIntervalSec,
+	return expectedDiff(t.info.LastMineTime, t.info.Difficulty, minedTime,
 		t.worker.config.Cutoff, t.worker.config.DiffAdjDivisor, t.worker.config.MinimumDiff)
 }
 
