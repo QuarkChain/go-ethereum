@@ -149,7 +149,7 @@ func (cs *chainSyncer) nextSyncOp() *chainSyncOp {
 	}
 	// Disable the td based sync trigger after the transition
 	if cs.handler.merger.TDDReached() {
-		log.Warn("nextSyncOp return nil", "TDDReached", true)
+		//		log.Warn("nextSyncOp return nil", "TDDReached", true)
 		return nil
 	}
 	// Ensure we're at minimum peer count.
@@ -160,7 +160,7 @@ func (cs *chainSyncer) nextSyncOp() *chainSyncOp {
 		minPeers = cs.handler.maxPeers
 	}
 	if cs.handler.peers.len() < minPeers {
-		log.Warn("nextSyncOp return nil", "peers len", cs.handler.peers.len(), "minPeers", minPeers)
+		//		log.Warn("nextSyncOp return nil", "peers len", cs.handler.peers.len(), "minPeers", minPeers)
 		return nil
 	}
 	// We have enough peers, check TD

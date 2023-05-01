@@ -17,6 +17,7 @@
 package sstorminer
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"math/big"
@@ -86,6 +87,8 @@ type BlockChain interface {
 	ReadKVsByIndexList(contract common.Address, indexes []uint64, useMaxKVsize bool) ([]*core.KV, error)
 
 	SubscribeChainHeadEvent(ch chan<- core.ChainHeadEvent) event.Subscription
+
+	GetSstorageLastKvIdx(contract common.Address) (uint64, error)
 
 	State() (*state.StateDB, error)
 }
@@ -672,6 +675,111 @@ func (w *worker) calculateDiffAndInitHash(t *task, shardLen, minedTs uint64) (di
 	return diff, diffs, hash0, nil
 }
 
+func (w *worker) verifyResult(r *result) error {
+	var (
+		shardLenBits uint64 = 0
+	)
+	diff, _, hash0, err := w.calculateDiffAndInitHash(r.task, uint64(1)<<shardLenBits, r.minedTs)
+	if err != nil {
+		return err
+	}
+	hash0 = crypto.Keccak256Hash(hash0.Bytes(), addressToByte32(r.miner), uint64ToByte32(r.minedTs), uint64ToByte32(r.nonce))
+	hash0, err = w.hashimotoMerkleProof(r.task, hash0, r.miner, r.proofs, r.encodedData, r.kvIdxs, r.chunkIdxs)
+	if err != nil {
+		return err
+	}
+	requiredDiff := new(big.Int).Div(maxUint256, diff)
+	if requiredDiff.Cmp(new(big.Int).SetBytes(hash0.Bytes())) < 0 {
+		return fmt.Errorf("diff not match")
+	}
+
+	return nil
+}
+
+func (w *worker) hashimotoMerkleProof(t *task, hash0 common.Hash, miner common.Address,
+	proofsDim2 [][]common.Hash, maskedData [][]byte, kvIdxes []uint64, chunkIdxes []uint64) (common.Hash, error) {
+	if len(proofsDim2) != w.config.RandomChecks {
+		return common.Hash{}, fmt.Errorf("data vs checks: length mismatch")
+	}
+	if len(maskedData) != w.config.RandomChecks {
+		return common.Hash{}, fmt.Errorf("proofs vs checks: length mismatch")
+	}
+	stateDB, err := w.chain.State()
+	if err != nil {
+		return common.Hash{}, err
+	}
+	rowBits := t.kvEntriesBits + t.chunkSizeBits
+	for i := 0; i < w.config.RandomChecks; i++ {
+		if len(maskedData[i]) != sstor.NO_ENCODE {
+			return common.Hash{}, fmt.Errorf("invalid proof size")
+		}
+		chunkIdx := new(big.Int).SetBytes(hash0.Bytes()).Uint64()%(uint64(1)<<rowBits) + t.shardIdx<<(t.kvEntriesBits+t.chunkSizeBits)
+		kvIdx := chunkIdx >> t.chunkSizeBits
+		cIdx := chunkIdx % (1 << t.chunkSizeBits)
+		if kvIdx != kvIdxes[i] || cIdx != chunkIdxes[i] {
+			return common.Hash{}, fmt.Errorf("kv idx %d vs %d, chunk idx %d vs %d", kvIdx, kvIdxes[i], cIdx, chunkIdxes[i])
+		}
+		meta, kvInfo, _ := core.GetSstorageMetadata(stateDB, t.storageContract, kvIdx)
+		if bytes.Compare(meta.Bytes(), make([]byte, 32)) == 0 {
+			kvInfo.HashInMeta = make([]byte, 24)
+			kvInfo.KVIdx = kvIdx
+			kvInfo.KVSize = 0
+		}
+
+		unmaskedData, err := unmaskData(maskedData[i], common.BytesToHash(kvInfo.HashInMeta), chunkIdx, miner)
+		if err != nil {
+			return common.Hash{}, err
+		}
+		hash := common.Hash{}
+		lastKvIdx, err := w.chain.GetSstorageLastKvIdx(t.storageContract)
+		if err != nil {
+			return common.Hash{}, err
+		}
+		if lastKvIdx > kvIdxes[i] {
+			off := sstor.CHUNK_SIZE * chunkIdxes[i]
+
+			if kvInfo.KVSize > off {
+				if kvInfo.KVSize < off+sstor.CHUNK_SIZE {
+					unmaskedData = unmaskedData[:kvInfo.KVSize-off]
+				}
+				hash = crypto.Keccak256Hash(unmaskedData)
+			}
+		}
+		verifyWithMinTree(kvInfo.HashInMeta, hash, chunkIdxes[i], proofsDim2[i])
+
+		hash0 = crypto.Keccak256Hash(hash0.Bytes(), maskedData[i])
+	}
+	return hash0, nil
+}
+
+func verifyWithMinTree(root []byte, dataHash common.Hash, chunkIdx uint64, proofs []common.Hash) bool {
+	nMinChunkBits := uint64(len(proofs))
+	if chunkIdx >= uint64(1)<<nMinChunkBits {
+		return bytes.Compare(dataHash.Bytes(), make([]byte, 32)) == 0
+	}
+	r, err := sstor.CalculateRootWithProof(dataHash, chunkIdx, proofs)
+	if err != nil {
+		return false
+	}
+
+	return bytes.Compare(root[:24], r.Bytes()[:24]) == 0
+}
+
+func unmaskData(maskedChunkData []byte, kvHash common.Hash, chunkIdx uint64, miner common.Address) ([]byte, error) {
+	if uint64(len(maskedChunkData)) != sstor.CHUNK_SIZE {
+		return nil, fmt.Errorf("the length of maskedChunk no equals to CHUNK_SIZE")
+	}
+
+	// get encoded key and decode masked chunk
+	encodeKey := sstor.CalcEncodeKey(kvHash, chunkIdx, miner)
+	unmaskedChunk := sstor.DecodeChunk(maskedChunkData, 2, encodeKey)
+	if bytes.Compare(unmaskedChunk[:20], make([]byte, 20)) != 0 {
+		log.Warn("worker unmaskData returns", "chunkIdx", chunkIdx, "kvHash", kvHash, "miner", miner,
+			"datalen", len(maskedChunkData), "masked chunk data", maskedChunkData[:20], "unmasked chunk data", unmaskedChunk[:20])
+	}
+	return unmaskedChunk, nil
+}
+
 func (w *worker) hashimoto(t *task, shardLenBits uint64, hash0 common.Hash) (common.Hash, [][]byte, []uint64, []uint64, error) {
 	dataSet := make([][]byte, w.config.RandomChecks)
 	kvIdxs, chunkIdxs := make([]uint64, w.config.RandomChecks), make([]uint64, w.config.RandomChecks)
@@ -750,7 +858,7 @@ func (w *worker) mineTask(t *task) (bool, error) {
 				}
 			}
 			t.setState(TaskStateMined)
-			t.result = &result{
+			r := &result{
 				task:         t,
 				startShardId: t.shardIdx,
 				shardLenBits: 0,
@@ -763,7 +871,11 @@ func (w *worker) mineTask(t *task) (bool, error) {
 				proofs:       proofs,
 				submitTxTime: 0,
 			}
-			w.resultCh <- t.result
+			if err := w.verifyResult(r); err != nil {
+				return false, err
+			}
+			t.result = r
+			w.resultCh <- r
 
 			return true, nil
 		}
