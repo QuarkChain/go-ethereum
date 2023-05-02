@@ -885,7 +885,7 @@ func (l *sstoragePisaUnmaskDaggerData) RunWith(env *PrecompiledContractCallEnv, 
 	if bytes.Compare(unmaskedChunk[:20], make([]byte, 20)) != 0 {
 		log.Warn("sstoragePisaUnmaskDaggerData() returns", "encodeType", encodeType, "chunkIdx", chunkIdx,
 			"kvHash", kvHash, "miner", miner, "datalen", datalen, "masked chunk data", maskedChunkData[:20],
-			"unmasked chunk data", unmaskedChunk[:20])
+			"unmasked chunk data", unmaskedChunk[:20], "kvidx", chunkIdx/32, "chunkidx", chunkIdx%32)
 	}
 	return append(pb, unmaskedChunk...), nil
 }

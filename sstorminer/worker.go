@@ -46,7 +46,7 @@ import (
 const (
 	ABI      = "[{\"inputs\":[{\"internalType\":\"uint256\",\"name\":\"startShardId\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"shardLenBits\",\"type\":\"uint256\"},{\"internalType\":\"address\",\"name\":\"miner\",\"type\":\"address\"},{\"internalType\":\"uint256\",\"name\":\"minedTs\",\"type\":\"uint256\"},{\"internalType\":\"uint256\",\"name\":\"nonce\",\"type\":\"uint256\"},{\"internalType\":\"bytes32[][]\",\"name\":\"proofsDim2\",\"type\":\"bytes32[][]\"},{\"internalType\":\"bytes[]\",\"name\":\"maskedData\",\"type\":\"bytes[]\"}],\"name\":\"mine\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"}]"
 	MineFunc = "mine"
-	gas      = uint64(3000000)
+	gas      = uint64(5000000)
 )
 
 const (
@@ -721,9 +721,7 @@ func (w *worker) hashimotoMerkleProof(t *task, hash0 common.Hash, miner common.A
 		}
 		meta, kvInfo, _ := core.GetSstorageMetadata(stateDB, t.storageContract, kvIdx)
 		if bytes.Compare(meta.Bytes(), make([]byte, 32)) == 0 {
-			kvInfo.HashInMeta = make([]byte, 24)
-			kvInfo.KVIdx = kvIdx
-			kvInfo.KVSize = 0
+			kvInfo = &core.SstorageMetadata{kvIdx, 0, make([]byte, 24)}
 		}
 
 		unmaskedData, err := unmaskData(maskedData[i], common.BytesToHash(kvInfo.HashInMeta), chunkIdx, miner)
