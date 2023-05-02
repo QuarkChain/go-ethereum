@@ -710,7 +710,7 @@ func (w *worker) hashimotoMerkleProof(t *task, hash0 common.Hash, miner common.A
 	}
 	rowBits := t.kvEntriesBits + t.chunkSizeBits
 	for i := 0; i < w.config.RandomChecks; i++ {
-		if len(maskedData[i]) != sstor.NO_ENCODE {
+		if uint64(len(maskedData[i])) != sstor.CHUNK_SIZE {
 			return common.Hash{}, fmt.Errorf("invalid proof size")
 		}
 		chunkIdx := new(big.Int).SetBytes(hash0.Bytes()).Uint64()%(uint64(1)<<rowBits) + t.shardIdx<<(t.kvEntriesBits+t.chunkSizeBits)
