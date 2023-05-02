@@ -255,3 +255,19 @@ func (df *DataFile) readHeader() error {
 
 	return nil
 }
+
+func (df *DataFile) Miner() common.Address {
+	return df.miner
+}
+
+func (df *DataFile) KVSize() uint64 {
+	return df.maxKvSize
+}
+
+func (df *DataFile) EndChunkIdx() uint64 {
+	return df.chunkIdxStart + df.chunkIdxLen - 1
+}
+
+func (df *DataFile) StartChunkIdx() uint64 {
+	return df.chunkIdxStart
+}
