@@ -256,7 +256,7 @@ func runCheckEmtpyKVs(cmd *cobra.Command, args []string) {
 	chunkPerKv := df.KVSize() / sstorage.CHUNK_SIZE
 	startChunkIdx := (*kvIdx) * chunkPerKv
 	log.Info("start to verify", "kvidx", *kvIdx, "startChunkIdx", startChunkIdx, "EndChunkIdx", df.EndChunkIdx())
-	for chunkIdx := startChunkIdx; startChunkIdx < df.EndChunkIdx(); chunkIdx++ {
+	for chunkIdx := startChunkIdx; chunkIdx < df.EndChunkIdx(); chunkIdx++ {
 		maskedChunkData, err := df.Read(chunkIdx, int(sstorage.CHUNK_SIZE))
 		if err != nil {
 			log.Warn("read sstorage file failed", "chunkidx", chunkIdx, "error", err)
