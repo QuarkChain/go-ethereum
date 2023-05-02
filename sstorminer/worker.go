@@ -62,7 +62,7 @@ const (
 
 	mineTimeOut = uint64(100)
 
-	waitForTransactionTimeout = 120 // Second
+	waitForTransactionTimeout = 10 // Second
 )
 
 var (
@@ -805,7 +805,7 @@ func (w *worker) mineTask(t *task) (bool, error) {
 	if t.getState() == TaskStateMined {
 		return true, nil
 	}
-	minedTs := uint64(time.Now().Unix()) - 50
+	minedTs := uint64(time.Now().Unix())
 	// using random nonce, so we can run multi mine with threads
 	rand.Seed(int64(minedTs))
 	nonce := rand.Uint64() % 1000000
