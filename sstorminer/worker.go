@@ -872,6 +872,7 @@ func (w *worker) mineTask(t *task) (bool, error) {
 				submitTxTime: 0,
 			}
 			if err := w.verifyResult(r); err != nil {
+				log.Warn("Got result but verify result fail", "err", err.Error())
 				return false, err
 			}
 			t.result = r
