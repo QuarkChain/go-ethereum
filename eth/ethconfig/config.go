@@ -92,7 +92,7 @@ var Defaults = Config{
 	},
 	SStorMiner: sstorminer.Config{
 		RandomChecks:      16,
-		MinimumDiff:       new(big.Int).SetUint64(100),
+		MinimumDiff:       new(big.Int).SetUint64(10000),
 		TargetIntervalSec: new(big.Int).SetUint64(300),
 		Cutoff:            new(big.Int).SetUint64(40),
 		DiffAdjDivisor:    new(big.Int).SetUint64(1024),
