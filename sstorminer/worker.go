@@ -60,9 +60,9 @@ const (
 	// any newly arrived transactions.
 	minRecommitInterval = 1 * time.Second
 
-	mineTimeOut = uint64(100)
+	mineTimeOut = uint64(10)
 
-	waitForTransactionTimeout = 10 // Second
+	transactionOutdatedTime = 120 // Second
 )
 
 var (
@@ -584,15 +584,12 @@ func (w *worker) resultLoop() {
 	}
 }
 
-func (w *worker) needWaitTransactionToExecute(t *task) bool {
-	if t.result == nil {
+func (w *worker) isTransactionOutdated(txHash common.Hash, submitTxTime int64) bool {
+	tx := w.apiBackend.GetPoolTransaction(txHash)
+	if tx != nil && submitTxTime+transactionOutdatedTime < time.Now().Unix() {
 		return false
 	}
-	if t.result.submitTxTime+waitForTransactionTimeout < time.Now().Unix() {
-		return false
-	}
-	tx := w.apiBackend.GetPoolTransaction(t.result.submitTxHash)
-	return tx == nil
+	return true
 }
 
 // updateTaskInfo aborts in-flight transaction execution with given signal and resubmits a new one.
@@ -610,17 +607,33 @@ func (w *worker) updateTaskInfo(root common.Hash, timestamp int64) {
 			log.Warn("failed to get sstorage mining info", "error", err.Error())
 			continue
 		}
-		waiting := w.needWaitTransactionToExecute(t)
-		if waiting {
-			log.Warn("need Wait Transaction To Execute", "tx hash", t.result.submitTxHash.Hex())
-		}
-		if t.info == nil || !info.Equal(t.info) || !waiting {
+		if t.info == nil || !info.Equal(t.info) {
 			t.info = info
 			t.result = nil
 			t.setState(TaskStateNoStart)
 			updated = true
 			log.Info("update t info", "shard idx", t.shardIdx, "MiningHash", info.MiningHash.Hex(),
 				"LastMineTime", t.info.LastMineTime, "Difficulty", info.Difficulty, "BlockMined", info.BlockMined)
+			continue
+		}
+		if t.result != nil && t.result.submitTxTime != 0 { // result has been submitted
+			ctx := context.Background()
+			receipts, _ := w.apiBackend.GetReceipts(ctx, t.result.submitTxHash)
+			if receipts != nil && receipts[0].Status == types.ReceiptStatusSuccessful {
+				// tx has been exec and success, this should not happen, it should be covered by info update.
+				continue
+			} else if receipts == nil {
+				// if tx in pool less than 120 seconds, then wait for tx to exec, otherwise re-mine task
+				isOutdated := w.isTransactionOutdated(t.result.submitTxHash, t.result.submitTxTime)
+				if !isOutdated {
+					continue
+				}
+				log.Warn("need Wait Transaction To Execute", "tx hash", t.result.submitTxHash.Hex())
+			}
+
+			t.result = nil
+			t.setState(TaskStateNoStart)
+			updated = true
 		}
 	}
 
