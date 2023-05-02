@@ -92,7 +92,7 @@ var Defaults = Config{
 	},
 	SStorMiner: sstorminer.Config{
 		RandomChecks:   16,
-		MinimumDiff:    new(big.Int).SetUint64(100),
+		MinimumDiff:    new(big.Int).SetUint64(10000),
 		Cutoff:         new(big.Int).SetUint64(300), // equal to TargetIntervalSec
 		DiffAdjDivisor: new(big.Int).SetUint64(1024),
 		Recommit:       15 * time.Second,
