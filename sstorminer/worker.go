@@ -586,7 +586,10 @@ func (w *worker) resultLoop() {
 
 func (w *worker) isTransactionOutdated(txHash common.Hash, submitTxTime int64) bool {
 	tx := w.apiBackend.GetPoolTransaction(txHash)
-	if tx != nil && submitTxTime+transactionOutdatedTime < time.Now().Unix() {
+	if tx == nil {
+		log.Warn("tx not found in pool", "tx", txHash.Hex(), "submitTxTime", submitTxTime)
+	}
+	if tx != nil && submitTxTime+transactionOutdatedTime > time.Now().Unix() {
 		return false
 	}
 	return true
@@ -628,7 +631,7 @@ func (w *worker) updateTaskInfo(root common.Hash, timestamp int64) {
 				if !isOutdated {
 					continue
 				}
-				log.Warn("need Wait Transaction To Execute", "tx hash", t.result.submitTxHash.Hex())
+				log.Warn("Transaction outdated", "submitTxTime", t.result.submitTxTime, "now", time.Now().Unix(), "tx hash", t.result.submitTxHash.Hex())
 			}
 
 			t.result = nil
@@ -886,7 +889,7 @@ func (w *worker) mineTask(t *task) (bool, error) {
 				log.Warn("Got result but verify result fail", "err", err.Error())
 				return false, err
 			}
-			if t.result == nil || t.result.submitTxTime+transactionOutdatedTime > time.Now().Unix() {
+			if t.result == nil || t.result.submitTxTime+transactionOutdatedTime < time.Now().Unix() {
 				t.result = r
 				w.resultCh <- r
 			}
