@@ -886,8 +886,10 @@ func (w *worker) mineTask(t *task) (bool, error) {
 				log.Warn("Got result but verify result fail", "err", err.Error())
 				return false, err
 			}
-			t.result = r
-			w.resultCh <- r
+			if t.result == nil || t.result.submitTxTime+transactionOutdatedTime > time.Now().Unix() {
+				t.result = r
+				w.resultCh <- r
+			}
 
 			return true, nil
 		}
