@@ -60,6 +60,8 @@ const (
 	minRecommitInterval = 1 * time.Second
 
 	mineTimeOut = uint64(10)
+
+	transactionOutdatedTime = 120 // Second
 )
 
 var (
@@ -85,6 +87,8 @@ type BlockChain interface {
 
 	SubscribeChainHeadEvent(ch chan<- core.ChainHeadEvent) event.Subscription
 
+	GetSstorageLastKvIdx(contract common.Address) (uint64, error)
+
 	State() (*state.StateDB, error)
 }
 
@@ -98,6 +102,7 @@ type TXSigner struct {
 // task contains all information for consensus engine sealing and result submitting.
 type task struct {
 	worker          *worker
+	result          *result
 	storageContract common.Address
 	minerContract   common.Address
 	shardIdx        uint64
@@ -113,10 +118,10 @@ type task struct {
 	mu              sync.RWMutex // The lock used to protect the state
 }
 
-func expectedDiff(lastMineTime uint64, difficulty *big.Int, minedTime uint64, targetIntervalSec, cutoff, diffAdjDivisor, minDiff *big.Int) *big.Int {
+func expectedDiff(lastMineTime uint64, difficulty *big.Int, minedTime uint64, cutoff, diffAdjDivisor, minDiff *big.Int) *big.Int {
 	interval := new(big.Int).SetUint64(minedTime - lastMineTime)
 	diff := difficulty
-	if interval.Cmp(targetIntervalSec) < 0 {
+	if interval.Cmp(cutoff) < 0 {
 		// diff = diff + (diff-interval*diff/cutoff)/diffAdjDivisor
 		diff = new(big.Int).Add(diff, new(big.Int).Div(
 			new(big.Int).Sub(diff, new(big.Int).Div(new(big.Int).Mul(interval, diff), cutoff)), diffAdjDivisor))
@@ -137,7 +142,7 @@ func expectedDiff(lastMineTime uint64, difficulty *big.Int, minedTime uint64, ta
 }
 
 func (t *task) expectedDiff(minedTime uint64) *big.Int {
-	return expectedDiff(t.info.LastMineTime, t.info.Difficulty, minedTime, t.worker.config.TargetIntervalSec,
+	return expectedDiff(t.info.LastMineTime, t.info.Difficulty, minedTime,
 		t.worker.config.Cutoff, t.worker.config.DiffAdjDivisor, t.worker.config.MinimumDiff)
 }
 
@@ -192,6 +197,8 @@ type result struct {
 	chunkIdxs    []uint64
 	encodedData  [][]byte
 	proofs       [][]common.Hash
+	submitTxHash common.Hash
+	submitTxTime int64
 }
 
 type txSorter struct {
@@ -218,57 +225,6 @@ func (s *txSorter) Less(i, j int) bool {
 	return tip1.Cmp(tip2) < 0
 }
 
-type priceOracle struct {
-	chainConfig   *params.ChainConfig
-	baseFee       *big.Int
-	suggestGasTip *big.Int
-	blockNumber   uint64
-	ignoreUnder   *big.Int
-	limit         int
-}
-
-// The TipGap provided in the SuggestGasTipCap method (provided by EthAPIBackend) will extract the smallest 3 TipGaps
-// from each of the latest n blocks, sort them, and take the median according to the set percentile.
-//
-// To make it simple, if the transaction volume is small, suggestGasTip set to 0, otherwise the third smallest GasTip
-// in the latest block is used.
-//
-// updatePriceOracle update suggestGasTip according to block.
-func (o *priceOracle) updatePriceOracle(block *types.Block) {
-	if block.NumberU64() < o.blockNumber {
-		return
-	}
-	// if block GasUsed smaller than GasLimit / 2, only baseFee is needed,
-	// so suggestGasTip can be set to 0.
-	if block.GasUsed() < block.GasLimit()/2 {
-		o.suggestGasTip = new(big.Int).SetUint64(0)
-		return
-	}
-
-	// otherwise, the third smallest GasTip is used.
-	signer := types.MakeSigner(o.chainConfig, block.Number())
-	sorter := newSorter(block.Transactions(), block.BaseFee())
-	sort.Sort(sorter)
-
-	var prices []*big.Int
-	for _, tx := range sorter.txs {
-		tip, _ := tx.EffectiveGasTip(block.BaseFee())
-		if o.ignoreUnder != nil && tip.Cmp(o.ignoreUnder) == -1 {
-			continue
-		}
-		sender, err := types.Sender(signer, tx)
-		if err == nil && sender != block.Coinbase() {
-			prices = append(prices, tip)
-			if len(prices) >= o.limit {
-				break
-			}
-		}
-	}
-	if len(prices) > 0 {
-		o.suggestGasTip = prices[len(prices)-1]
-	}
-}
-
 // newWorkReq represents a request for new sealing work submitting with relative interrupt notifier.
 type newWorkReq struct {
 	timestamp int64
@@ -283,7 +239,6 @@ type worker struct {
 	eth         Backend
 	apiBackend  apiBackend
 	chain       BlockChain
-	priceOracle *priceOracle
 
 	// Subscriptions
 	mux          *event.TypeMux
@@ -313,14 +268,14 @@ type worker struct {
 	newResultHook func(*result)
 }
 
-func newWorker(config *Config, chainConfig *params.ChainConfig, eth Backend, api apiBackend, chain BlockChain, mux *event.TypeMux, txSigner *TXSigner,
-	minerContract common.Address, init bool) *worker {
+func newWorker(config *Config, chainConfig *params.ChainConfig, eth Backend, api apiBackend, chain BlockChain,
+	mux *event.TypeMux, txSigner *TXSigner, minerContract common.Address, init bool) *worker {
 	worker := &worker{
 		config:             config,
 		chainConfig:        chainConfig,
 		eth:                eth,
-		mux:                mux,
 		apiBackend:         api,
+		mux:                mux,
 		chain:              chain,
 		tasks:              make([]*task, 0),
 		chainHeadCh:        make(chan core.ChainHeadEvent, chainHeadChanSize),
@@ -353,16 +308,6 @@ func newWorker(config *Config, chainConfig *params.ChainConfig, eth Backend, api
 			worker.tasks = append(worker.tasks, &task)
 		}
 	}
-
-	curBlock := eth.BlockChain().CurrentBlock()
-	worker.priceOracle = &priceOracle{
-		chainConfig: chainConfig,
-		baseFee:     curBlock.BaseFee(),
-		blockNumber: curBlock.NumberU64(),
-		ignoreUnder: new(big.Int).SetUint64(2 * params.GWei),
-		limit:       3,
-	}
-	worker.priceOracle.updatePriceOracle(curBlock)
 
 	// Subscribe events for blockchain
 	worker.chainHeadSub = eth.BlockChain().SubscribeChainHeadEvent(worker.chainHeadCh)
@@ -470,7 +415,6 @@ func (w *worker) newWorkLoop(recommit time.Duration) {
 		case interval := <-w.resubmitIntervalCh:
 			// Adjust resubmit interval explicitly by user.
 			if interval < minRecommitInterval {
-				log.Warn("Sanitizing miner recommit interval", "provided", interval, "updated", minRecommitInterval)
 				interval = minRecommitInterval
 			}
 			log.Info("Miner recommit interval update", "from", minRecommit, "to", interval)
@@ -576,6 +520,14 @@ func (w *worker) resultLoop() {
 	}
 }
 
+func (w *worker) isTransactionOutdated(txHash common.Hash, submitTxTime int64) bool {
+	tx := w.apiBackend.GetPoolTransaction(txHash)
+	if tx != nil && submitTxTime+transactionOutdatedTime > time.Now().Unix() {
+		return false
+	}
+	return true
+}
+
 // updateTaskInfo aborts in-flight transaction execution with given signal and resubmits a new one.
 func (w *worker) updateTaskInfo(root common.Hash, timestamp int64) {
 	w.mu.Lock()
@@ -585,19 +537,39 @@ func (w *worker) updateTaskInfo(root common.Hash, timestamp int64) {
 		return
 	}
 	updated := false
-	for _, task := range w.tasks {
-		info, err := w.chain.GetSstorageMiningInfo(root, task.minerContract, task.shardIdx)
+	for _, t := range w.tasks {
+		info, err := w.chain.GetSstorageMiningInfo(root, t.minerContract, t.shardIdx)
 		if err != nil {
 			log.Warn("failed to get sstorage mining info", "error", err.Error())
 			continue
 		}
-		if task.info == nil || !info.Equal(task.info) {
-			task.info = info
-			task.setState(TaskStateNoStart)
+		if t.info == nil || !info.Equal(t.info) {
+			t.info = info
+			t.result = nil
+			t.setState(TaskStateNoStart)
 			updated = true
-			log.Info("update task info", "shard idx", task.shardIdx, "MiningHash",
-				info.MiningHash.Hex(), "LastMineTime", task.info.LastMineTime, "Difficulty",
-				info.Difficulty, "BlockMined", info.BlockMined)
+			log.Info("update t info", "shard idx", t.shardIdx, "MiningHash", info.MiningHash.Hex(),
+				"LastMineTime", t.info.LastMineTime, "Difficulty", info.Difficulty, "BlockMined", info.BlockMined)
+			continue
+		}
+		if t.result != nil && t.result.submitTxTime != 0 { // result has been submitted
+			ctx := context.Background()
+			receipts, _ := w.apiBackend.GetReceipts(ctx, t.result.submitTxHash)
+			if receipts != nil && receipts[0].Status == types.ReceiptStatusSuccessful {
+				// tx has been exec and success, this should not happen, it should be covered by info update.
+				continue
+			} else if receipts == nil {
+				// if tx in pool less than 120 seconds, then wait for tx to exec, otherwise re-mine task
+				isOutdated := w.isTransactionOutdated(t.result.submitTxHash, t.result.submitTxTime)
+				if !isOutdated {
+					continue
+				}
+				log.Info("Transaction outdated", "submitTxTime", t.result.submitTxTime, "now", time.Now().Unix(), "tx hash", t.result.submitTxHash.Hex())
+			}
+
+			t.result = nil
+			t.setState(TaskStateNoStart)
+			updated = true
 		}
 	}
 
@@ -692,8 +664,6 @@ func (w *worker) mineTask(t *task) (bool, error) {
 
 	// todo shard len can be not 1 later
 	diff, _, hash0, err := w.calculateDiffAndInitHash(t, uint64(1)<<shardLenBits, minedTs)
-	log.Warn("calculateDiffAndInitHash", "diff", diff, "hash0", hash0.Hex(), "minedTs", minedTs,
-		"MiningHash", t.info.MiningHash, "LastMineTime", t.info.LastMineTime)
 	if err != nil {
 		return false, err
 	}
@@ -708,8 +678,6 @@ func (w *worker) mineTask(t *task) (bool, error) {
 		hash1, dataSet, kvIdxs, chunkIdxs, err = w.hashimoto(t, shardLenBits, hash1)
 
 		if requiredDiff.Cmp(new(big.Int).SetBytes(hash1.Bytes())) >= 0 {
-			log.Warn("calculateDiffAndInitHash", "diff", diff, "hash1", hash1.Hex(), "minedTs", minedTs,
-				"MiningHash", t.info.MiningHash, "LastMineTime", t.info.LastMineTime, "nonce", nonce, "miner", t.miner.Hex())
 			proofs := make([][]common.Hash, len(kvIdxs))
 			kvs, err := w.chain.ReadKVsByIndexList(t.storageContract, kvIdxs, true)
 			if err != nil {
@@ -729,7 +697,7 @@ func (w *worker) mineTask(t *task) (bool, error) {
 				}
 			}
 			t.setState(TaskStateMined)
-			w.resultCh <- &result{
+			t.result = &result{
 				task:         t,
 				startShardId: t.shardIdx,
 				shardLenBits: 0,
@@ -740,7 +708,9 @@ func (w *worker) mineTask(t *task) (bool, error) {
 				chunkIdxs:    chunkIdxs,
 				encodedData:  dataSet,
 				proofs:       proofs,
+				submitTxTime: 0,
 			}
+			w.resultCh <- t.result
 
 			return true, nil
 		}
@@ -776,7 +746,6 @@ func (w *worker) submitMinedResult(result *result) error {
 
 	signedTx, err := w.signer.SignFn(w.signer.Account, types.NewTx(baseTx), w.chainConfig.ChainID)
 	if err != nil {
-		log.Warn("worker::submitMinedResult() >>>>>> sign tx error <<<<<<", "err", err)
 		return err
 	}
 
@@ -784,7 +753,9 @@ func (w *worker) submitMinedResult(result *result) error {
 	if err != nil {
 		return fmt.Errorf("SendTransaction hash %s, ERROR %s ", signedTx.Hash().Hex(), err.Error())
 	}
-	log.Warn("Submit mining tx", "hash", signedTx.Hash().Hex())
+	result.submitTxTime = time.Now().Unix()
+	result.submitTxHash = signedTx.Hash()
+	log.Info("Submit mining tx", "hash", signedTx.Hash().Hex())
 	return nil
 }
 

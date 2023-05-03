@@ -91,12 +91,11 @@ var Defaults = Config{
 		Recommit: 3 * time.Second,
 	},
 	SStorMiner: sstorminer.Config{
-		RandomChecks:      16,
-		MinimumDiff:       new(big.Int).SetUint64(10000),
-		TargetIntervalSec: new(big.Int).SetUint64(300),
-		Cutoff:            new(big.Int).SetUint64(40),
-		DiffAdjDivisor:    new(big.Int).SetUint64(1024),
-		Recommit:          15 * time.Second,
+		RandomChecks:   16,
+		MinimumDiff:    new(big.Int).SetUint64(10000),
+		Cutoff:         new(big.Int).SetUint64(300), // equal to TargetIntervalSec
+		DiffAdjDivisor: new(big.Int).SetUint64(1024),
+		Recommit:       15 * time.Second,
 	},
 	TxPool:        core.DefaultTxPoolConfig,
 	RPCGasCap:     50000000,

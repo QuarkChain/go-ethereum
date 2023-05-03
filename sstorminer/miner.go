@@ -42,16 +42,17 @@ type apiBackend interface {
 	GetPoolNonce(ctx context.Context, addr common.Address) (uint64, error)
 	SendTx(ctx context.Context, signedTx *types.Transaction) error
 	SuggestGasTipCap(ctx context.Context) (*big.Int, error)
+	GetPoolTransaction(txHash common.Hash) *types.Transaction
+	GetReceipts(ctx context.Context, hash common.Hash) (types.Receipts, error)
 }
 
 // Config is the configuration parameters of mining.
 type Config struct {
-	RandomChecks      int
-	MinimumDiff       *big.Int
-	TargetIntervalSec *big.Int
-	Cutoff            *big.Int
-	DiffAdjDivisor    *big.Int
-	Recommit          time.Duration // The time interval for miner to re-create mining work.
+	RandomChecks   int
+	MinimumDiff    *big.Int
+	Cutoff         *big.Int
+	DiffAdjDivisor *big.Int
+	Recommit       time.Duration // The time interval for miner to re-create mining work.
 }
 
 // Miner creates blocks and searches for proof-of-work values.
