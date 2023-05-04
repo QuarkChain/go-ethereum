@@ -21,14 +21,14 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"runtime"
 	"sort"
 	"sync"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/rawdb"
-
-	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethdb"
@@ -45,7 +45,7 @@ const (
 
 	maxConcurrency = 16
 
-	minSubTaskSize = 512
+	minSubTaskSize = 16
 )
 
 // ErrCancelled is returned from sstorage syncing if the operation was prematurely
@@ -53,6 +53,8 @@ const (
 var ErrCancelled = errors.New("sync cancelled")
 
 var (
+	maxEmptyTaskTreads          int
+	empty                       = make([]byte, 0)
 	requestTimeoutInMillisecond = 1000 * time.Millisecond // Millisecond
 )
 
@@ -134,14 +136,27 @@ type kvHealResponse struct {
 // kvTask represents the sync task for a sstorage shard.
 type kvTask struct {
 	// These fields get serialized to leveldb on shutdown
-	Contract   common.Address // Contract address
-	ShardId    uint64         // ShardId
-	KvSubTasks []*kvSubTask
-	HealTask   *kvHealTask
+	Contract        common.Address // Contract address
+	ShardId         uint64         // ShardId
+	KvSubTasks      []*kvSubTask
+	HealTask        *kvHealTask
+	KvSubEmptyTasks []*kvSubEmptyTask
 
 	statelessPeers map[string]struct{} // Peers that failed to deliver kv Data
 
 	done bool // Flag whether the task can be removed
+}
+
+// task which is used to write empty to sstorage file, so the files will fill up with encode data
+type kvSubEmptyTask struct {
+	kvTask *kvTask
+
+	next  uint64
+	First uint64
+	Last  uint64
+
+	isRunning bool
+	done      bool // Flag whether the task can be removed
 }
 
 type kvSubTask struct {
@@ -172,7 +187,7 @@ type kvHealTask struct {
 func (h *kvHealTask) hasIndexInRange(first, last uint64) (bool, uint64) {
 	min, exist := last, false
 	for idx, _ := range h.Indexes {
-		if idx <= last && idx >= first {
+		if idx < last && idx >= first {
 			exist = true
 			if min > idx {
 				min = idx
@@ -207,8 +222,10 @@ type SyncProgress struct {
 	Tasks []*kvTask // The suspended kv tasks
 
 	// Status report during syncing phase
-	KVSynced uint64             // Number of kvs downloaded
-	KVBytes  common.StorageSize // Number of kv bytes downloaded
+	KVSynced      uint64             // Number of kvs downloaded
+	KVBytes       common.StorageSize // Number of kv bytes downloaded
+	EmptyKVToFill uint64
+	EmptyKVFilled uint64
 }
 
 // SyncPeer abstracts out the methods required for a peer to be synced against
@@ -246,13 +263,16 @@ type BlockChain interface {
 	// KVs to the sstorage file. And return the inserted KV index list.
 	VerifyAndWriteKV(contract common.Address, data map[uint64][]byte, providerAddress common.Address) (uint64, uint64, []uint64, error)
 
+	// FillSstorWithEmptyKV get the lastKVIndex and if the kv index need to fill is larger than or equal to lastKVIndex
+	// fill up the kv with empty ([]byte{}), so the data in the file will be filled with encode empty data
+	FillSstorWithEmptyKV(contract common.Address, start, limit uint64) (uint64, error)
+
 	// ReadEncodedKVsByIndexList Read the masked KVs by a list of KV index.
 	ReadEncodedKVsByIndexList(contract common.Address, shardId uint64, indexes []uint64) (common.Address, []*core.KV, error)
 
 	// ReadEncodedKVsByIndexRange Read masked KVs sequentially starting from origin until the index exceeds the limit or
 	// the amount of data read is greater than the bytes.
-	ReadEncodedKVsByIndexRange(contract common.Address, shardId uint64, origin uint64,
-		limit uint64, bytes uint64) (common.Address, []*core.KV, error)
+	ReadEncodedKVsByIndexRange(contract common.Address, shardId uint64, origin uint64, limit uint64, bytes uint64) (common.Address, []*core.KV, error)
 
 	// GetSstorageLastKvIdx get LastKvIdx from a sstorage contract with latest stateDB.
 	GetSstorageLastKvIdx(contract common.Address) (uint64, error)
@@ -270,6 +290,7 @@ type BlockChain interface {
 type Syncer struct {
 	db    ethdb.KeyValueStore // Database to store the sync state
 	chain BlockChain
+	mux   *event.TypeMux // Event multiplexer to announce sync operation events
 	tasks []*kvTask
 
 	sstorageInfo map[common.Address][]uint64 // Map for Contract address to support shardIds
@@ -288,9 +309,14 @@ type Syncer struct {
 	kvRangeReqs   map[uint64]*kvRangeRequest // KV requests currently running
 	kvHealReqs    map[uint64]*kvHealRequest  // KV heal requests currently running
 
+	runningEmptyTaskTreads int // Number of working threads for processing empty task
+
 	kvSynced  uint64             // Number of kvs downloaded
 	kvBytes   common.StorageSize // Number of kv bytes downloaded
 	kvSyncing uint64             // Number of kvs downloading
+
+	emptyKVToFill uint64
+	emptyKVFilled uint64
 
 	startTime time.Time // Time instance when sstorage sync started
 	logTime   time.Time // Time instance when status was Last reported
@@ -301,10 +327,14 @@ type Syncer struct {
 }
 
 // NewSyncer creates a new sstorage syncer to download the sharded storage content over the sstorage protocol.
-func NewSyncer(db ethdb.KeyValueStore, chain BlockChain, sstorageInfo map[common.Address][]uint64) *Syncer {
+func NewSyncer(db ethdb.KeyValueStore, chain BlockChain, mux *event.TypeMux, sstorageInfo map[common.Address][]uint64) *Syncer {
+	maxEmptyTaskTreads = runtime.NumCPU() - 2
+	if maxEmptyTaskTreads < 1 {
+		maxEmptyTaskTreads = 1
+	}
 	return &Syncer{
-		db: db,
-
+		db:           db,
+		mux:          mux,
 		tasks:        make([]*kvTask, 0),
 		sstorageInfo: sstorageInfo,
 		chain:        chain,
@@ -315,10 +345,11 @@ func NewSyncer(db ethdb.KeyValueStore, chain BlockChain, sstorageInfo map[common
 		rates:    msgrate.NewTrackers(log.New("proto", "sstorage")),
 		update:   make(chan struct{}, 1),
 
-		kvRangeIdlers: make(map[string]struct{}),
-		kvHealIdlers:  make(map[string]struct{}),
-		kvRangeReqs:   make(map[uint64]*kvRangeRequest),
-		kvHealReqs:    make(map[uint64]*kvHealRequest),
+		kvRangeIdlers:          make(map[string]struct{}),
+		kvHealIdlers:           make(map[string]struct{}),
+		runningEmptyTaskTreads: 0,
+		kvRangeReqs:            make(map[uint64]*kvRangeRequest),
+		kvHealReqs:             make(map[uint64]*kvHealRequest),
 	}
 }
 
@@ -431,6 +462,8 @@ func (s *Syncer) Sync(cancel chan struct{}) error {
 		// Assign all the Data retrieval tasks to any free peers
 		s.assignKVHealTasks(kvHealResps, kvHealReqFails, cancel)
 
+		s.assignKVEmptyTasks()
+
 		// Wait for something to happen
 		select {
 		case <-time.After(requestTimeoutInMillisecond):
@@ -465,6 +498,7 @@ func (s *Syncer) Sync(cancel chan struct{}) error {
 func (s *Syncer) loadSyncStatus() {
 	// Start a fresh sync for retrieval.
 	s.kvSynced, s.kvBytes = 0, 0
+	s.emptyKVToFill, s.emptyKVFilled = 0, 0
 	var progress SyncProgress
 
 	if status := rawdb.ReadSstorageSyncStatus(s.db); status != nil {
@@ -475,12 +509,19 @@ func (s *Syncer) loadSyncStatus() {
 				log.Debug("Scheduled sstorage sync task", "Contract", task.Contract.Hex(),
 					"shard", task.ShardId, "count", len(task.KvSubTasks))
 				task.HealTask.kvTask = task
+				task.statelessPeers = make(map[string]struct{})
 				for _, kvSubTask := range task.KvSubTasks {
 					kvSubTask.kvTask = task
 					kvSubTask.next = kvSubTask.First
 				}
+				for _, kvSubEmptyTask := range task.KvSubEmptyTasks {
+					kvSubEmptyTask.kvTask = task
+					kvSubEmptyTask.next = kvSubEmptyTask.First
+					s.emptyKVToFill += (kvSubEmptyTask.Last - kvSubEmptyTask.First)
+				}
 			}
 			s.kvSynced, s.kvBytes = progress.KVSynced, progress.KVBytes
+			s.emptyKVFilled = progress.EmptyKVFilled
 		}
 	}
 
@@ -504,13 +545,7 @@ func (s *Syncer) loadSyncStatus() {
 			if exist {
 				continue
 			}
-			first, limit := sm.KvEntries()*sid, sm.KvEntries()*(sid+1)-1
-			if lastKvIndex > 0 && first >= lastKvIndex {
-				continue
-			}
-			if lastKvIndex > 0 && limit >= lastKvIndex {
-				limit = lastKvIndex - 1
-			}
+
 			task := kvTask{
 				Contract:       contract,
 				ShardId:        sid,
@@ -522,6 +557,17 @@ func (s *Syncer) loadSyncStatus() {
 				kvTask:  &task,
 				Indexes: make(map[uint64]int64),
 			}
+
+			first, limit := sm.KvEntries()*sid, sm.KvEntries()*(sid+1)
+			firstEmpty, limitForEmpty := uint64(0), uint64(0)
+			if first >= lastKvIndex {
+				firstEmpty, limitForEmpty = first, limit
+				limit = first
+			} else if limit >= lastKvIndex {
+				firstEmpty, limitForEmpty = lastKvIndex, limit
+				limit = lastKvIndex
+			}
+
 			subTasks := make([]*kvSubTask, 0)
 			// split task for a shard to 16 subtasks and if one batch is too small
 			// set to minSubTaskSize
@@ -544,33 +590,68 @@ func (s *Syncer) loadSyncStatus() {
 				}
 
 				subTasks = append(subTasks, &subTask)
-				first = last + 1
+				first = last
 			}
 
-			task.HealTask, task.KvSubTasks = &healTask, subTasks
+			subEmptyTasks := make([]*kvSubEmptyTask, 0)
+			if limitForEmpty > 0 {
+				s.emptyKVToFill += limitForEmpty - firstEmpty
+				maxEmptyTaskSize := (limitForEmpty - firstEmpty + uint64(maxEmptyTaskTreads)) / uint64(maxEmptyTaskTreads)
+				if maxEmptyTaskSize < minSubTaskSize {
+					maxEmptyTaskSize = minSubTaskSize
+				}
+
+				for firstEmpty < limitForEmpty {
+					last := firstEmpty + maxEmptyTaskSize
+					if last > limitForEmpty {
+						last = limitForEmpty
+					}
+					subTask := kvSubEmptyTask{
+						kvTask: &task,
+						next:   firstEmpty,
+						First:  firstEmpty,
+						Last:   last,
+						done:   false,
+					}
+
+					subEmptyTasks = append(subEmptyTasks, &subTask)
+					firstEmpty = last
+				}
+			}
+
+			task.HealTask, task.KvSubTasks, task.KvSubEmptyTasks = &healTask, subTasks, subEmptyTasks
 			s.tasks = append(s.tasks, &task)
 		}
 	}
 
 	allDone := true
 	for _, task := range s.tasks {
-		if len(task.KvSubTasks) > 0 || len(task.HealTask.Indexes) > 0 {
+		if len(task.KvSubTasks) > 0 || len(task.HealTask.Indexes) > 0 || len(task.KvSubEmptyTasks) > 0 {
 			allDone = false
 			break
 		}
 	}
 	if allDone {
-		s.syncDone = true
+		s.setSyncDone()
 	}
+}
+
+type SstorSyncDone struct{}
+
+func (s *Syncer) setSyncDone() {
+	s.syncDone = true
+	s.mux.Post(SstorSyncDone{})
 }
 
 // saveSyncStatus marshals the remaining sync tasks into leveldb.
 func (s *Syncer) saveSyncStatus() {
 	// Store the actual progress markers
 	progress := &SyncProgress{
-		Tasks:    s.tasks,
-		KVSynced: s.kvSynced,
-		KVBytes:  s.kvBytes,
+		Tasks:         s.tasks,
+		KVSynced:      s.kvSynced,
+		KVBytes:       s.kvBytes,
+		EmptyKVToFill: s.emptyKVToFill,
+		EmptyKVFilled: s.emptyKVFilled,
 	}
 	status, err := json.Marshal(progress)
 	if err != nil {
@@ -585,8 +666,10 @@ func (s *Syncer) Progress() (*SyncProgress, uint64) {
 	defer s.lock.Unlock()
 
 	progress := &SyncProgress{
-		KVSynced: s.kvSynced,
-		KVBytes:  s.kvBytes,
+		KVSynced:      s.kvSynced,
+		KVBytes:       s.kvBytes,
+		EmptyKVFilled: s.emptyKVFilled,
+		EmptyKVToFill: s.emptyKVToFill,
 	}
 	return progress, s.kvSyncing
 }
@@ -606,7 +689,13 @@ func (s *Syncer) cleanKVTasks() {
 				i--
 			}
 		}
-		if len(task.KvSubTasks) > 0 {
+		for i := 0; i < len(task.KvSubEmptyTasks); i++ {
+			if task.KvSubEmptyTasks[i].done {
+				task.KvSubEmptyTasks = append(task.KvSubEmptyTasks[:i], task.KvSubEmptyTasks[i+1:]...)
+				i--
+			}
+		}
+		if len(task.KvSubTasks) > 0 || len(task.KvSubEmptyTasks) > 0 {
 			allDone = false
 		}
 	}
@@ -614,7 +703,7 @@ func (s *Syncer) cleanKVTasks() {
 	// If everything was just finalized, generate the account trie and start heal
 	if allDone {
 		s.lock.Lock()
-		s.syncDone = true
+		s.setSyncDone()
 		s.lock.Unlock()
 		log.Info("Sstorage sync done", "task count", len(s.tasks))
 
@@ -690,7 +779,7 @@ func (s *Syncer) assignKVRangeTasks(success chan *kvRangeResponse, fail chan *kv
 				contract: task.Contract,
 				shardId:  task.ShardId,
 				origin:   subTask.next,
-				limit:    subTask.Last,
+				limit:    subTask.Last - 1,
 				time:     time.Now(),
 				deliver:  success,
 				revert:   fail,
@@ -824,6 +913,50 @@ func (s *Syncer) assignKVHealTasks(success chan *kvHealResponse, fail chan *kvHe
 		defer req.task.lock.Unlock()
 		for _, idx := range indexes {
 			req.task.Indexes[idx] = time.Now().UnixMilli()
+		}
+	}
+}
+
+// assignKVEmptyTasks attempts to match idle peers to heal kv requests to retrieval missing kv from the kv range request.
+func (s *Syncer) assignKVEmptyTasks() {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+
+	// Iterate over all the tasks and try to find a pending one
+	for _, task := range s.tasks {
+		for _, subEmptyTask := range task.KvSubEmptyTasks {
+			if s.runningEmptyTaskTreads >= maxEmptyTaskTreads {
+				return
+			}
+			s.runningEmptyTaskTreads++
+			if subEmptyTask.isRunning {
+				continue
+			}
+			subTask := subEmptyTask
+			subTask.isRunning = true
+			start, last := subTask.next, subTask.Last
+			if last > start+minSubTaskSize {
+				last = start + minSubTaskSize
+			}
+			go func(eTask *kvSubEmptyTask, contract common.Address, start, limit uint64) {
+				t := time.Now()
+				next, err := s.chain.FillSstorWithEmptyKV(contract, start, limit)
+				if err != nil {
+					log.Warn("fill in empty fail", "err", err.Error())
+				}
+				log.Warn("FillSstorWithEmptyKV", "time", time.Now().Sub(t).Seconds())
+				eTask.next = next
+				filled := next - start
+				s.emptyKVFilled += filled
+				if s.emptyKVToFill > filled {
+					s.emptyKVToFill -= filled
+				}
+				if eTask.next >= eTask.Last {
+					eTask.done = true
+				}
+				eTask.isRunning = false
+				s.runningEmptyTaskTreads--
+			}(subTask, task.Contract, start, last-1)
 		}
 	}
 }
@@ -981,7 +1114,7 @@ func (s *Syncer) processKVRangeResponse(res *kvRangeResponse) {
 			res.task.kvTask.HealTask.Indexes[n] = 0
 		}
 	}
-	if max == res.task.Last {
+	if max == res.task.Last-1 {
 		res.task.done = true
 	} else {
 		res.task.next = max + 1
@@ -1079,7 +1212,7 @@ func (s *Syncer) OnKVs(peer SyncPeer, id uint64, providerAddr common.Address, kv
 	// get id range and check range
 	sm := sstorage.ContractToShardManager[req.contract]
 	if sm == nil {
-		logger.Debug("Peer rejected kv request")
+		logger.Debug("Peer rejected kv request", "len", len(req.task.kvTask.HealTask.Indexes))
 		req.task.kvTask.statelessPeers[peer.ID()] = struct{}{}
 		s.lock.Unlock()
 
@@ -1174,7 +1307,7 @@ func (s *Syncer) OnKVRange(peer SyncPeer, id uint64, providerAddr common.Address
 	// get id range and check range
 	sm := sstorage.ContractToShardManager[req.contract]
 	if sm == nil {
-		logger.Debug("Peer rejected kv request")
+		logger.Debug("Peer rejected kv request", "origin", req.origin, "limit", req.limit)
 		req.task.kvTask.statelessPeers[peer.ID()] = struct{}{}
 		s.lock.Unlock()
 
@@ -1250,6 +1383,7 @@ func (s *Syncer) report(force bool) {
 		progress = fmt.Sprintf("%.2f%%", float64(synced)*100/float64(kvsToSync+synced))
 		kv       = fmt.Sprintf("%v@%v", log.FormatLogfmtUint64(s.kvSynced), s.kvBytes.TerminalString())
 	)
-	log.Info("State sync in progress", "synced", progress, "state", synced, "kvsToSync", kvsToSync,
-		"sub task remain", subTaskRemain, "kv", kv, "eta", common.PrettyDuration(estTime-elapsed))
+	log.Info("Sstorage sync in progress", "synced", progress, "state", synced, "kvsToSync", kvsToSync,
+		"sub task remain", subTaskRemain, "kv", kv, "eta", common.PrettyDuration(estTime-elapsed),
+		"empty KV filled", s.emptyKVFilled, "empty KV to fill", s.emptyKVToFill)
 }

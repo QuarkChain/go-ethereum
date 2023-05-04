@@ -21,7 +21,8 @@ const (
 	MAGIC   = uint64(0xcf20bd770c22b2e1)
 	VERSION = uint64(1)
 
-	CHUNK_SIZE = uint64(4096)
+	CHUNK_SIZE      = uint64(4096)
+	CHUNK_SIZE_BITS = uint64(12)
 )
 
 // A DataFile represents a local file for a consective chunks
@@ -67,21 +68,25 @@ func UnmaskDataInPlace(userData []byte, maskData []byte) []byte {
 	return userData
 }
 
-func Create(filename string, chunkIdxStart uint64, chunkIdxLen uint64, epoch, maxKvSize uint64, encodeType uint64, miner common.Address) (*DataFile, error) {
+func Create(filename string, kvIdxStart uint64, kvIdxLen uint64, epoch, maxKvSize uint64, encodeType uint64, miner common.Address) (*DataFile, error) {
 	log.Info("Creating file", "filename", filename)
 	file, err := os.Create(filename)
 	if err != nil {
 		return nil, err
 	}
+	if maxKvSize%CHUNK_SIZE != 0 {
+		return nil, fmt.Errorf("max kv size %% CHUNK_SIZE should be 0")
+	}
+	chunkPerKV := maxKvSize / CHUNK_SIZE
 	// actual initialization is done when synchronize
-	err = fallocate.Fallocate(file, int64(CHUNK_SIZE*chunkIdxLen), int64(CHUNK_SIZE))
+	err = fallocate.Fallocate(file, int64(CHUNK_SIZE), int64(maxKvSize*kvIdxLen))
 	if err != nil {
 		return nil, err
 	}
 	dataFile := &DataFile{
 		file:          file,
-		chunkIdxStart: chunkIdxStart,
-		chunkIdxLen:   chunkIdxLen,
+		chunkIdxStart: kvIdxStart * chunkPerKV,
+		chunkIdxLen:   kvIdxLen * chunkPerKV,
 		encodeType:    encodeType,
 		maxKvSize:     maxKvSize,
 		miner:         miner,
@@ -249,4 +254,20 @@ func (df *DataFile) readHeader() error {
 	df.miner = header.miner
 
 	return nil
+}
+
+func (df *DataFile) Miner() common.Address {
+	return df.miner
+}
+
+func (df *DataFile) KVSize() uint64 {
+	return df.maxKvSize
+}
+
+func (df *DataFile) EndChunkIdx() uint64 {
+	return df.chunkIdxStart + df.chunkIdxLen - 1
+}
+
+func (df *DataFile) StartChunkIdx() uint64 {
+	return df.chunkIdxStart
 }
