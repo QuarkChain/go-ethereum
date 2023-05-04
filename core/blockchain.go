@@ -50,7 +50,6 @@ import (
 	"github.com/ethereum/go-ethereum/trie"
 	lru "github.com/hashicorp/golang-lru"
 	"github.com/holiman/uint256"
-	"golang.org/x/crypto/sha3"
 )
 
 var (
@@ -2410,13 +2409,7 @@ func getSlotHash(slotIdx uint64, key common.Hash) common.Hash {
 	slotdata := slot[:]
 	data := append(keydata, slotdata...)
 
-	hasher := sha3.NewLegacyKeccak256().(crypto.KeccakState)
-	hasher.Write(data)
-
-	hashRes := common.Hash{}
-	hasher.Read(hashRes[:])
-
-	return hashRes
+	return crypto.Keccak256Hash(data)
 }
 
 // GetSstorageMetadata get sstorage metadata for a given kv (specified by contract address and index)
@@ -2465,18 +2458,46 @@ func VerifyKV(sm *sstorage.ShardManager, idx uint64, val []byte, meta *SstorageM
 		}
 
 		if meta.KVSize != uint64(len(data)) {
-			return nil, fmt.Errorf("verifyKV fail: size error; Data size: %d; MetaHash KVSize: %d", len(val), meta.KVSize)
+			return nil, fmt.Errorf("verifyKV fail: size error; Data size: %d; MetaHash kvSize: %d", len(val), meta.KVSize)
 		}
 		data = d
 	}
 
-	hash := crypto.Keccak256Hash(data)
-	if !bytes.Equal(hash[:24], meta.HashInMeta) {
-		return nil, fmt.Errorf("verifyKV fail: size error; Data hash: %s; MetaHash hash (24): %s",
-			common.Bytes2Hex(hash[:24]), common.Bytes2Hex(meta.HashInMeta))
+	root := sstorage.MerkleRootWithMinTree(data)
+	if !bytes.Equal(root[:24], meta.HashInMeta) {
+		return nil, fmt.Errorf("verifyKV fail: Data hash: %s; MetaHash hash (24): %s, providerAddr %s, data %s",
+			common.Bytes2Hex(root[:24]), common.Bytes2Hex(meta.HashInMeta), providerAddr.Hex(), common.Bytes2Hex(data))
 	}
 
 	return data, nil
+}
+
+func (bc *BlockChain) FillSstorWithEmptyKV(contract common.Address, start, limit uint64) (uint64, error) {
+	sm := sstorage.ContractToShardManager[contract]
+	if sm == nil {
+		return start, fmt.Errorf("kv verify fail: contract not support, contract: %s", contract.Hex())
+	}
+
+	// bc.chainmu.TryLock()
+	// defer bc.chainmu.Unlock()
+
+	empty := make([]byte, 0)
+	lastKvIdx, err := bc.GetSstorageLastKvIdx(contract)
+	if err != nil {
+		return start, fmt.Errorf("get lastKvIdx for FillEmptyKV fail, err: %s", err.Error())
+	}
+	for idx := start; idx <= limit; idx++ {
+		if lastKvIdx > idx {
+			continue
+		}
+		_, err = sm.TryWrite(idx, empty, common.Hash{})
+		if err != nil {
+			err = fmt.Errorf("write empty to kv file fail, index: %d; error: %s", idx, err.Error())
+			return idx, err
+		}
+	}
+
+	return limit + 1, nil
 }
 
 // VerifyAndWriteKV verify a list of raw KV data using the metadata saved in the local level DB and write successfully verified
@@ -2535,13 +2556,13 @@ func (bc *BlockChain) VerifyAndWriteKV(contract common.Address, data map[uint64]
 
 		if metaHash != vkv.MetaHash {
 			// TODO: verify the storage data again before returning error
-			log.Warn("verify vkv fail", "error", err)
+			log.Warn("verify vkv fail", "kvIdx", vkv.Idx, "kvHash", common.Bytes2Hex(meta.HashInMeta), "error", err)
 			continue
 		}
 
-		success, err := sm.TryWrite(vkv.Idx, vkv.Data, vkv.MetaHash)
+		success, err := sm.TryWrite(vkv.Idx, vkv.Data, common.BytesToHash(meta.HashInMeta))
 		if err != nil {
-			log.Warn("write kv fail", "error", err)
+			log.Warn("write kv fail", "kvIdx", vkv.Idx, "kvHash", common.Bytes2Hex(meta.HashInMeta), "error", err)
 		}
 		if success {
 			inserted = append(inserted, vkv.Idx)
