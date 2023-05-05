@@ -20,6 +20,7 @@ package eth
 import (
 	"errors"
 	"fmt"
+	"github.com/ethereum/go-ethereum/sstorminer"
 	"math/big"
 	"runtime"
 	"sync"
@@ -92,9 +93,10 @@ type Ethereum struct {
 
 	APIBackend *EthAPIBackend
 
-	miner     *miner.Miner
-	gasPrice  *big.Int
-	etherbase common.Address
+	miner      *miner.Miner
+	sstorMiner *sstorminer.Miner
+	gasPrice   *big.Int
+	etherbase  common.Address
 
 	networkID     uint64
 	netRPCService *ethapi.PublicNetAPI
@@ -296,6 +298,27 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	if eth.APIBackend.allowUnprotectedTxs {
 		log.Info("Unprotected transactions allowed")
 	}
+	if config.SstorageMine {
+		if len(sstorage.Shards()) == 0 {
+			return nil, fmt.Errorf("no shards is exist")
+		}
+		if config.SstorageMinerContract == "" {
+			return nil, fmt.Errorf("miner contract is needed when the sstorage mine is enabled.")
+		}
+		minerContract := common.HexToAddress(config.SstorageMinerContract)
+		if config.SstorageTXSigner == "" {
+			return nil, fmt.Errorf("TX signer is needed when the sstorage mine is enabled.")
+		}
+		signer := accounts.Account{Address: common.HexToAddress(config.SstorageTXSigner)}
+		wallet, err := eth.accountManager.Find(signer)
+		if wallet == nil || err != nil {
+			log.Error("sstorage tx signer account unavailable locally", "err", err)
+			return nil, fmt.Errorf("signer missing: %v", err)
+		}
+
+		eth.sstorMiner = sstorminer.New(eth, eth.APIBackend, &config.SStorMiner, chainConfig, eth.EventMux(), &sstorminer.TXSigner{signer, wallet.SignTx}, minerContract)
+		eth.sstorMiner.Start()
+	}
 	gpoParams := config.GPO
 	if gpoParams.Default == nil {
 		gpoParams.Default = config.Miner.GasPrice
@@ -494,6 +517,24 @@ func (s *Ethereum) SetEtherbase(etherbase common.Address) {
 
 	s.miner.SetEtherbase(etherbase)
 }
+
+// StartSstorMining starts the sstorage miner. If mining
+// is already running, this method just return.
+func (s *Ethereum) StartSstorMining() {
+	// If the miner was not running, initialize it
+	if !s.IsSstorMining() {
+		go s.sstorMiner.Start()
+	}
+}
+
+// StopSstorMining terminates the sstorage miner.
+func (s *Ethereum) StopSstorMining() {
+	s.sstorMiner.Stop()
+}
+
+func (s *Ethereum) IsSstorMining() bool { return s.sstorMiner.Mining() }
+
+func (s *Ethereum) SstorMiner() *sstorminer.Miner { return s.sstorMiner }
 
 // StartMining starts the miner with the given number of CPU threads. If mining
 // is already running, this method adjust the number of threads allowed to use

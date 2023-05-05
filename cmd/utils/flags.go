@@ -578,6 +578,18 @@ var (
 		Usage: "Add sharded storage data file",
 		Value: nil,
 	}
+	SstorageMineFlag = cli.BoolFlag{
+		Name:  "sstorage.mine",
+		Usage: "Enable sstorage mining",
+	}
+	SstorageTXSignerFlag = cli.StringFlag{
+		Name:  "sstorage.txsigner",
+		Usage: "Account used to sign tx submit to sstorage miner contract",
+	}
+	SstorageMinerContractFlag = cli.StringFlag{
+		Name:  "sstorage.minercontract",
+		Usage: "Sstorage miner contract",
+	}
 	// Logging and debug settings
 	EthStatsURLFlag = cli.StringFlag{
 		Name:  "ethstats",
@@ -1136,6 +1148,15 @@ func setSstorage(ctx *cli.Context, cfg *ethconfig.Config) {
 	}
 	if ctx.GlobalIsSet(SstorageFileFlag.Name) {
 		cfg.SstorageFiles = ctx.GlobalStringSlice(SstorageFileFlag.Name)
+	}
+	if ctx.GlobalIsSet(SstorageMineFlag.Name) {
+		cfg.SstorageMine = ctx.GlobalBool(SstorageMineFlag.Name)
+	}
+	if ctx.GlobalIsSet(SstorageTXSignerFlag.Name) {
+		cfg.SstorageTXSigner = ctx.GlobalString(SstorageTXSignerFlag.Name)
+	}
+	if ctx.GlobalIsSet(SstorageMinerContractFlag.Name) {
+		cfg.SstorageMinerContract = ctx.GlobalString(SstorageMinerContractFlag.Name)
 	}
 
 	sstorage.InitializeConfig()
