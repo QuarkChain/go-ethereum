@@ -2472,14 +2472,16 @@ func VerifyKV(sm *sstorage.ShardManager, idx uint64, val []byte, meta *SstorageM
 	return data, nil
 }
 
+// FillSstorWithEmptyKV this func is used to fill empty KVs to storage file to make the whole file data encoded.
+// file in the KVs between start and limit(include limit). if the lastKvIdx larger than kv idx to fill, ignore it.
 func (bc *BlockChain) FillSstorWithEmptyKV(contract common.Address, start, limit uint64) (uint64, error) {
 	sm := sstorage.ContractToShardManager[contract]
 	if sm == nil {
 		return start, fmt.Errorf("kv verify fail: contract not support, contract: %s", contract.Hex())
 	}
 
-	// bc.chainmu.TryLock()
-	// defer bc.chainmu.Unlock()
+	bc.chainmu.TryLock()
+	defer bc.chainmu.Unlock()
 
 	empty := make([]byte, 0)
 	lastKvIdx, err := bc.GetSstorageLastKvIdx(contract)
