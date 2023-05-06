@@ -34,7 +34,7 @@ var (
 	SepoliaGenesisHash      = common.HexToHash("0x25a5cc106eea7138acab33231d7160d69cb777ee0c2c553fcddf5138993e6dd9")
 	RinkebyGenesisHash      = common.HexToHash("0x6341fd3daf94b748c72ced5a5b26028f2474f5f00d824504e4fa37a75767e177")
 	GoerliGenesisHash       = common.HexToHash("0xbf7e331f7f7c1dd2e05159666b3bf8bc7a8a3a9eb1d518969eab529dd9b88c1a")
-	Web3QTestnetGenesisHash = common.HexToHash("0xaba50efdf3572a2d25dab20e08bb5d9f30aea360c74aff451e702cf749094d70")
+	Web3QTestnetGenesisHash = common.HexToHash("0xe1b551a47236ea806a1a9f6a9082ab989cffd999a44caa6015edc27136e0aab5")
 	Web3QGalileoGenesisHash = common.HexToHash("0xa576a985390f3a643e2acdeaed074cc9866c99f6bdf3ca8c49ec959054703745")
 )
 
