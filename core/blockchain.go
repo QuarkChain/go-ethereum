@@ -50,7 +50,6 @@ import (
 	"github.com/ethereum/go-ethereum/trie"
 	lru "github.com/hashicorp/golang-lru"
 	"github.com/holiman/uint256"
-	"golang.org/x/crypto/sha3"
 )
 
 var (
@@ -2410,13 +2409,7 @@ func getSlotHash(slotIdx uint64, key common.Hash) common.Hash {
 	slotdata := slot[:]
 	data := append(keydata, slotdata...)
 
-	hasher := sha3.NewLegacyKeccak256().(crypto.KeccakState)
-	hasher.Write(data)
-
-	hashRes := common.Hash{}
-	hasher.Read(hashRes[:])
-
-	return hashRes
+	return crypto.Keccak256Hash(data)
 }
 
 // GetSstorageMetadata get sstorage metadata for a given kv (specified by contract address and index)
@@ -2451,7 +2444,7 @@ func GetSstorageMetadata(s *state.StateDB, contract common.Address, index uint64
 // VerifyKV verify kv using SstorageMetadata
 func VerifyKV(sm *sstorage.ShardManager, idx uint64, val []byte, meta *SstorageMetadata, isEncoded bool, providerAddr common.Address) ([]byte, error) {
 	if idx != meta.KVIdx {
-		return nil, fmt.Errorf("verifyKV fail: kv Idx mismatch; idx: %d; MetaHash KVIdx: %d", idx, meta.KVIdx)
+		return nil, fmt.Errorf("verifyKV fail: kv Idx mismatch; idx: %d; MetaHash kv Idx: %d", idx, meta.KVIdx)
 	}
 
 	data := val
@@ -2534,14 +2527,13 @@ func (bc *BlockChain) VerifyAndWriteKV(contract common.Address, data map[uint64]
 		}
 
 		if metaHash != vkv.MetaHash {
-			// TODO: verify the storage data again before returning error
-			log.Warn("verify vkv fail", "error", err)
+			log.Warn("verify vkv fail", "kvIdx", vkv.Idx, "metaHash", metaHash.Hex(), "vkv.MetaHash", vkv.MetaHash, "error", err)
 			continue
 		}
 
-		success, err := sm.TryWrite(vkv.Idx, vkv.Data, vkv.MetaHash)
+		success, err := sm.TryWrite(vkv.Idx, vkv.Data, common.BytesToHash(meta.HashInMeta))
 		if err != nil {
-			log.Warn("write kv fail", "error", err)
+			log.Warn("write kv fail", "kvIdx", vkv.Idx, "kvHash", common.Bytes2Hex(meta.HashInMeta), "error", err)
 		}
 		if success {
 			inserted = append(inserted, vkv.Idx)
