@@ -77,7 +77,7 @@ func (c *blockChain) VerifyAndWriteKV(contract common.Address, data map[uint64][
 		synced++
 		syncedBytes += uint64(len(val))
 
-		metaHash, meta, err := core.GetSstorageMetadata(c.stateDB, contract, idx)
+		_, meta, err := core.GetSstorageMetadata(c.stateDB, contract, idx)
 		if err != nil || meta == nil {
 			log.Warn("processKVResponse: get vkv MetaHash for verification fail", "error", err)
 			continue
@@ -89,7 +89,7 @@ func (c *blockChain) VerifyAndWriteKV(contract common.Address, data map[uint64][
 			continue
 		}
 
-		success, err := sm.TryWrite(idx, rawData, metaHash)
+		success, err := sm.TryWrite(idx, rawData, common.BytesToHash(meta.HashInMeta))
 		if err != nil {
 			log.Warn("write kv fail", "error", err)
 			continue
@@ -333,17 +333,7 @@ func getSKey(contract common.Address, idx uint64) common.Hash {
 	slotdata := slot[:]
 	data := append(keydata, slotdata...)
 
-	return hash(data)
-}
-
-func hash(data []byte) common.Hash {
-	hasher := sha3.NewLegacyKeccak256().(crypto.KeccakState)
-	hasher.Write(data)
-
-	hashRes := common.Hash{}
-	hasher.Read(hashRes[:])
-
-	return hashRes
+	return crypto.Keccak256Hash(data)
 }
 
 func checkStall(t *testing.T, term func()) chan struct{} {
@@ -412,7 +402,7 @@ func makeKVStorage(stateDB *state.StateDB, contract common.Address, shards []uin
 				key := getSlotHash(2, uint256.NewInt(i).Bytes32())
 				stateDB.SetState(contract, key, skey)
 
-				meta := generateMetadata(i, uint64(len(val)), hash(val))
+				meta := generateMetadata(i, uint64(len(val)), crypto.Keccak256Hash(val))
 				key = getSlotHash(1, skey)
 				stateDB.SetState(contract, key, meta)
 			}
