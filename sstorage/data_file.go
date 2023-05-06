@@ -74,7 +74,7 @@ func Create(filename string, chunkIdxStart uint64, chunkIdxLen uint64, epoch, ma
 		return nil, err
 	}
 	// actual initialization is done when synchronize
-	err = fallocate.Fallocate(file, int64(CHUNK_SIZE*chunkIdxLen), int64(CHUNK_SIZE))
+	err = fallocate.Fallocate(file, int64(CHUNK_SIZE), int64(CHUNK_SIZE*chunkIdxLen))
 	if err != nil {
 		return nil, err
 	}
