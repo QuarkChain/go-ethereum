@@ -123,14 +123,14 @@ func runCreate(cmd *cobra.Command, args []string) {
 	if *chunkLen == 0 && *kvLen == 0 {
 		log.Crit("chunk_Len or kv_Len is needed")
 	}
+	if *chunkLen > 0 && *kvLen > 0 {
+		log.Crit("only one of chunk_Len and kv_Len is nonzero")
+	}
 	if *chunkLen == 0 {
 		*chunkLen = *kvLen * chunkPerKV
-	}
-
-	if *chunkIdx == 0 && *kvIdx > 0 {
 		*chunkIdx = *kvIdx * chunkPerKV
 	}
-	
+
 	_, err := sstorage.Create((*filenames)[0], *chunkIdx, *chunkLen, 0, *kvSize, *encodeType, minerAddr)
 	if err != nil {
 		log.Crit("create failed", "error", err)
