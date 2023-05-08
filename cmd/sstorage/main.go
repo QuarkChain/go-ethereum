@@ -16,6 +16,7 @@ import (
 )
 
 var (
+	chunkLen  *uint64
 	kvLen     *uint64
 	miner     *string
 	filenames *[]string
@@ -71,6 +72,7 @@ var CheckEmtpyKVsCmd = &cobra.Command{
 
 func init() {
 	kvLen = CreateCmd.Flags().Uint64("kv_len", 0, "kv idx len to create")
+	chunkLen = CreateCmd.Flags().Uint64("chunk_len", 0, "Chunk idx len to create")
 
 	filenames = rootCmd.PersistentFlags().StringArray("filename", []string{}, "Data filename")
 	miner = rootCmd.PersistentFlags().String("miner", "", "miner address")
@@ -112,14 +114,31 @@ func runCreate(cmd *cobra.Command, args []string) {
 		log.Crit("must provide single filename")
 	}
 
+	if *kvSize%sstorage.CHUNK_SIZE != 0 {
+		log.Crit("max kv size %% CHUNK_SIZE should be 0")
+	}
+
+	chunkPerKV := *kvSize / sstorage.CHUNK_SIZE
 	if *miner == "" {
 		log.Crit("must provide miner")
 	}
 	minerAddr := common.HexToAddress(*miner)
 
-	log.Info("Creating data file", "kvIdx", *kvIdx, "kvLen", *kvLen, "miner", minerAddr, "encodeType", *encodeType)
+	log.Info("Creating data file", "chunkIdx", *chunkIdx, "chunkLen", *chunkLen,
+		"kvIdx", *kvIdx, "kvLen", *kvLen, "miner", minerAddr, "encodeType", *encodeType)
 
-	_, err := sstorage.Create((*filenames)[0], *kvIdx, *kvLen, 0, *kvSize, *encodeType, minerAddr)
+	if *chunkLen == 0 && *kvLen == 0 {
+		log.Crit("chunk_Len or kv_Len is needed")
+	}
+	if *chunkLen > 0 && *kvLen > 0 {
+		log.Crit("only one of chunk_Len and kv_Len is nonzero")
+	}
+	if *chunkLen == 0 {
+		*chunkLen = *kvLen * chunkPerKV
+		*chunkIdx = *kvIdx * chunkPerKV
+	}
+
+	_, err := sstorage.Create((*filenames)[0], *chunkIdx, *chunkLen, 0, *kvSize, *encodeType, minerAddr)
 	if err != nil {
 		log.Crit("create failed", "error", err)
 	}

@@ -2444,7 +2444,7 @@ func GetSstorageMetadata(s *state.StateDB, contract common.Address, index uint64
 // VerifyKV verify kv using SstorageMetadata
 func VerifyKV(sm *sstorage.ShardManager, idx uint64, val []byte, meta *SstorageMetadata, isEncoded bool, providerAddr common.Address) ([]byte, error) {
 	if idx != meta.KVIdx {
-		return nil, fmt.Errorf("verifyKV fail: kv Idx mismatch; idx: %d; MetaHash KVIdx: %d", idx, meta.KVIdx)
+		return nil, fmt.Errorf("verifyKV fail: kv Idx mismatch; idx: %d; MetaHash kv Idx: %d", idx, meta.KVIdx)
 	}
 
 	data := val
@@ -2557,8 +2557,7 @@ func (bc *BlockChain) VerifyAndWriteKV(contract common.Address, data map[uint64]
 		}
 
 		if metaHash != vkv.MetaHash {
-			// TODO: verify the storage data again before returning error
-			log.Warn("verify vkv fail", "kvIdx", vkv.Idx, "kvHash", common.Bytes2Hex(meta.HashInMeta), "error", err)
+			log.Warn("verify vkv fail", "kvIdx", vkv.Idx, "metaHash", metaHash.Hex(), "vkv.MetaHash", vkv.MetaHash, "error", err)
 			continue
 		}
 

@@ -420,7 +420,6 @@ func makeKVStorage(stateDB *state.StateDB, contract common.Address, shards []uin
 				skey := getSKey(contract, i)
 				key := getSlotHash(2, uint256.NewInt(i).Bytes32())
 				stateDB.SetState(contract, key, skey)
-
 				meta := generateMetadata(i, uint64(len(val)), sstorage.MerkleRootWithMinTree(val))
 				key = getSlotHash(1, skey)
 				stateDB.SetState(contract, key, meta)
