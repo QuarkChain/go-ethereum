@@ -453,13 +453,14 @@ func verifyKVs(stateDB *state.StateDB, data map[common.Address]map[uint64][]byte
 		}
 		for idx, val := range shards {
 			_, meta, err := core.GetSstorageMetadata(stateDB, contract, idx)
-			if _, ok := destroyedList[idx]; ok {
-				val = make([]byte, shardData.MaxKvSize())
-			}
 			if err != nil {
 				t.Fatalf("get MetaHash data fail with err: %s.", err.Error())
 			}
 			sval, ok, err := shardData.TryRead(idx, len(val), common.BytesToHash(meta.HashInMeta))
+			if _, ok := destroyedList[idx]; ok {
+				val = make([]byte, shardData.MaxKvSize())
+				sval, ok, err = shardData.TryReadEncoded(idx, len(val))
+			}
 			if err != nil {
 				t.Fatalf("TryRead sstorage Data fail. err: %s", err.Error())
 			}
@@ -846,7 +847,7 @@ func TestSyncWithNoResponse(t *testing.T) {
 		}
 	)
 
-	shards, files := createSstorage(contract, []uint64{0}, sstorage.CHUNK_SIZE_BITS, kvEntries)
+	shards, files := createSstorage(contract, []uint64{0}, sstorage.CHUNK_SIZE_BITS, kvEntriesBits)
 	if shards == nil {
 		t.Fatalf("createSstorage failed")
 	}
