@@ -21,7 +21,8 @@ const (
 	MAGIC   = uint64(0xcf20bd770c22b2e1)
 	VERSION = uint64(1)
 
-	CHUNK_SIZE = uint64(4096)
+	CHUNK_SIZE      = uint64(4096)
+	CHUNK_SIZE_BITS = uint64(12)
 )
 
 // A DataFile represents a local file for a consective chunks
@@ -249,4 +250,20 @@ func (df *DataFile) readHeader() error {
 	df.miner = header.miner
 
 	return nil
+}
+
+func (df *DataFile) Miner() common.Address {
+	return df.miner
+}
+
+func (df *DataFile) KVSize() uint64 {
+	return df.maxKvSize
+}
+
+func (df *DataFile) EndChunkIdx() uint64 {
+	return df.chunkIdxStart + df.chunkIdxLen - 1
+}
+
+func (df *DataFile) StartChunkIdx() uint64 {
+	return df.chunkIdxStart
 }
