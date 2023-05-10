@@ -9,27 +9,53 @@ import (
 type ShardManager struct {
 	shardMap        map[uint64]*DataShard
 	contractAddress common.Address
+	kvSizeBits      uint64
 	kvSize          uint64
+	chunksPerKvBits uint64
 	chunksPerKv     uint64
+	kvEntriesBits   uint64
 	kvEntries       uint64
 }
 
-func NewShardManager(contractAddress common.Address, kvSize uint64, kvEntries uint64) *ShardManager {
+func NewShardManager(contractAddress common.Address, kvSizeBits uint64, kvEntriesBits uint64) *ShardManager {
 	return &ShardManager{
 		shardMap:        make(map[uint64]*DataShard),
 		contractAddress: contractAddress,
-		kvSize:          kvSize,
-		chunksPerKv:     kvSize / CHUNK_SIZE,
-		kvEntries:       kvEntries,
+		kvSizeBits:      kvSizeBits,
+		kvSize:          1 << kvSizeBits,
+		kvEntriesBits:   kvEntriesBits,
+		kvEntries:       1 << kvEntriesBits,
+		chunksPerKvBits: kvSizeBits - CHUNK_SIZE_BITS,
+		chunksPerKv:     1 << (kvSizeBits - CHUNK_SIZE_BITS),
 	}
+}
+
+func (sm *ShardManager) ShardMap() map[uint64]*DataShard {
+	return sm.shardMap
+}
+
+func (sm *ShardManager) ChunksPerKv() uint64 {
+	return sm.chunksPerKv
+}
+
+func (sm *ShardManager) ChunksPerKvBits() uint64 {
+	return sm.chunksPerKvBits
 }
 
 func (sm *ShardManager) KvEntries() uint64 {
 	return sm.kvEntries
 }
 
+func (sm *ShardManager) KvEntriesBits() uint64 {
+	return sm.kvEntriesBits
+}
+
 func (sm *ShardManager) MaxKvSize() uint64 {
 	return sm.kvSize
+}
+
+func (sm *ShardManager) MaxKvSizeBits() uint64 {
+	return sm.kvSizeBits
 }
 
 func (sm *ShardManager) AddDataShard(shardIdx uint64) error {
