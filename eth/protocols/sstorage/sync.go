@@ -45,7 +45,7 @@ const (
 
 	maxConcurrency = 16
 
-	minSubTaskSize = 16
+	minSubTaskSize = 512
 )
 
 // ErrCancelled is returned from sstorage syncing if the operation was prematurely
@@ -172,7 +172,7 @@ type kvHealTask struct {
 func (h *kvHealTask) hasIndexInRange(first, last uint64) (bool, uint64) {
 	min, exist := last, false
 	for idx, _ := range h.Indexes {
-		if idx < last && idx >= first {
+		if idx <= last && idx >= first {
 			exist = true
 			if min > idx {
 				min = idx
@@ -690,7 +690,7 @@ func (s *Syncer) assignKVRangeTasks(success chan *kvRangeResponse, fail chan *kv
 				contract: task.Contract,
 				shardId:  task.ShardId,
 				origin:   subTask.next,
-				limit:    subTask.Last - 1,
+				limit:    subTask.Last,
 				time:     time.Now(),
 				deliver:  success,
 				revert:   fail,
@@ -981,7 +981,7 @@ func (s *Syncer) processKVRangeResponse(res *kvRangeResponse) {
 			res.task.kvTask.HealTask.Indexes[n] = 0
 		}
 	}
-	if max == res.task.Last-1 {
+	if max == res.task.Last {
 		res.task.done = true
 	} else {
 		res.task.next = max + 1
@@ -1079,7 +1079,7 @@ func (s *Syncer) OnKVs(peer SyncPeer, id uint64, providerAddr common.Address, kv
 	// get id range and check range
 	sm := sstorage.ContractToShardManager[req.contract]
 	if sm == nil {
-		logger.Debug("Peer rejected kv request", "len", len(req.task.kvTask.HealTask.Indexes))
+		logger.Debug("Peer rejected kv request")
 		req.task.kvTask.statelessPeers[peer.ID()] = struct{}{}
 		s.lock.Unlock()
 
@@ -1174,7 +1174,7 @@ func (s *Syncer) OnKVRange(peer SyncPeer, id uint64, providerAddr common.Address
 	// get id range and check range
 	sm := sstorage.ContractToShardManager[req.contract]
 	if sm == nil {
-		logger.Debug("Peer rejected kv request", "origin", req.origin, "limit", req.limit)
+		logger.Debug("Peer rejected kv request")
 		req.task.kvTask.statelessPeers[peer.ID()] = struct{}{}
 		s.lock.Unlock()
 

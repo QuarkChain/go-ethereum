@@ -43,6 +43,7 @@ var (
 	contract      = common.HexToAddress("0x0000000000000000000000000000000003330001")
 	kvEntriesBits = uint64(4)
 	kvEntries     = uint64(1) << 4
+	filePerShard  = uint64(1)
 )
 
 type (
@@ -409,8 +410,7 @@ func makeKVStorage(stateDB *state.StateDB, contract common.Address, shards []uin
 	return shardData, shardList
 }
 
-func createSstorage(contract common.Address, shardIdxList []uint64, kvSizeBits,
-	kvEntriesBits, filePerShard uint64) (map[common.Address][]uint64, []string) {
+func createSstorage(contract common.Address, shardIdxList []uint64, kvSizeBits, kvEntriesBits uint64) (map[common.Address][]uint64, []string) {
 	sm := sstorage.NewShardManager(contract, kvSizeBits, kvEntriesBits)
 	sstorage.ContractToShardManager[contract] = sm
 	kvSize := uint64(1) << kvSizeBits
@@ -464,18 +464,7 @@ func verifyKVs(stateDB *state.StateDB, data map[common.Address]map[uint64][]byte
 				t.Fatalf("TryRead sstorage Data fail. err: %s", err.Error())
 			}
 			if !ok {
-				t.Fatalf("TryRead sstroage Data fail. err: %s, index %d", "shard Idx not support", idx)
-			}
-
-			if _, ok := destroyedList[idx]; ok {
-				val = make([]byte, sstorage.CHUNK_SIZE)
-				sval, ok, err = shardData.TryReadChunk(idx, common.BytesToHash(make([]byte, 24)))
-				if err != nil {
-					t.Fatalf("TryReadChunk fail. err: %s", err.Error())
-				}
-				if !ok {
-					t.Fatalf("TryReadChunk fail. err: %s", "shard Idx not support")
-				}
+				t.Fatalf("TryRead sstroage Data fail. err: %s", "shard Idx not support")
 			}
 
 			if !bytes.Equal(val, sval) {
@@ -632,7 +621,7 @@ func checkTasksWithBaskTasks(baseTasks, tasks []*kvTask) error {
 
 // TestReadWrite tests a basic sstorage read/wrtie
 func TestReadWrite(t *testing.T) {
-	shards, files := createSstorage(contract, []uint64{0}, sstorage.CHUNK_SIZE_BITS, kvEntriesBits, 1)
+	shards, files := createSstorage(contract, []uint64{0}, sstorage.CHUNK_SIZE_BITS, kvEntriesBits)
 	if shards == nil {
 		t.Fatalf("createSstorage failed")
 	}
@@ -671,7 +660,7 @@ func TestSync(t *testing.T) {
 		}
 	)
 
-	shards, files := createSstorage(contract, []uint64{0}, sstorage.CHUNK_SIZE_BITS, kvEntriesBits, 1)
+	shards, files := createSstorage(contract, []uint64{0}, sstorage.CHUNK_SIZE_BITS, kvEntriesBits)
 	if shards == nil {
 		t.Fatalf("createSstorage failed")
 	}
@@ -714,7 +703,7 @@ func TestMultiSubTasksSync(t *testing.T) {
 		}
 	)
 
-	shards, files := createSstorage(contract, []uint64{0}, sstorage.CHUNK_SIZE_BITS, kvEntriesBits, 1)
+	shards, files := createSstorage(contract, []uint64{0}, sstorage.CHUNK_SIZE_BITS, kvEntriesBits)
 	if shards == nil {
 		t.Fatalf("createSstorage failed")
 	}
@@ -757,7 +746,7 @@ func TestMultiSync(t *testing.T) {
 		}
 	)
 
-	shards, files := createSstorage(contract, []uint64{0, 1, 2}, sstorage.CHUNK_SIZE_BITS, kvEntriesBits, 1)
+	shards, files := createSstorage(contract, []uint64{0, 1, 2}, sstorage.CHUNK_SIZE_BITS, kvEntriesBits)
 	if shards == nil {
 		t.Fatalf("createSstorage failed")
 	}
@@ -810,7 +799,7 @@ func TestSyncWithEmptyResponse(t *testing.T) {
 		}
 	)
 
-	shards, files := createSstorage(contract, []uint64{0}, sstorage.CHUNK_SIZE_BITS, kvEntriesBits, 1)
+	shards, files := createSstorage(contract, []uint64{0}, sstorage.CHUNK_SIZE_BITS, kvEntriesBits)
 	if shards == nil {
 		t.Fatalf("createSstorage failed")
 	}
@@ -857,7 +846,7 @@ func TestSyncWithNoResponse(t *testing.T) {
 		}
 	)
 
-	shards, files := createSstorage(contract, []uint64{0}, sstorage.CHUNK_SIZE, kvEntries, 1)
+	shards, files := createSstorage(contract, []uint64{0}, sstorage.CHUNK_SIZE_BITS, kvEntries)
 	if shards == nil {
 		t.Fatalf("createSstorage failed")
 	}
@@ -905,7 +894,7 @@ func TestSyncWithFewerResult(t *testing.T) {
 		reduce = rand.Uint64() % (kvEntries / 2)
 	)
 
-	shards, files := createSstorage(contract, []uint64{0}, sstorage.CHUNK_SIZE_BITS, kvEntriesBits, 1)
+	shards, files := createSstorage(contract, []uint64{0}, sstorage.CHUNK_SIZE_BITS, kvEntriesBits)
 	if shards == nil {
 		t.Fatalf("createSstorage failed")
 	}
@@ -947,7 +936,7 @@ func TestSyncMismatchWithMeta(t *testing.T) {
 		}
 	)
 
-	shards, files := createSstorage(contract, []uint64{0}, sstorage.CHUNK_SIZE_BITS, kvEntriesBits, 1)
+	shards, files := createSstorage(contract, []uint64{0}, sstorage.CHUNK_SIZE_BITS, kvEntriesBits)
 	if shards == nil {
 		t.Fatalf("createSstorage failed")
 	}
@@ -991,7 +980,7 @@ func TestMultiSyncWithDataOverlay(t *testing.T) {
 		}
 	)
 
-	_, files := createSstorage(contract, []uint64{0, 1, 2, 3}, sstorage.CHUNK_SIZE_BITS, kvEntriesBits, 1)
+	_, files := createSstorage(contract, []uint64{0, 1, 2, 3}, sstorage.CHUNK_SIZE_BITS, kvEntriesBits)
 
 	defer func(files []string) {
 		for _, file := range files {
@@ -1036,7 +1025,7 @@ func TestMultiSyncWithDataOverlayWithDestroyed(t *testing.T) {
 	)
 
 	requestTimeoutInMillisecond = 50 * time.Millisecond // Millisecond
-	_, files := createSstorage(contract, []uint64{0, 1, 2}, sstorage.CHUNK_SIZE_BITS, kvEntriesBits, 1)
+	_, files := createSstorage(contract, []uint64{0, 1, 2}, sstorage.CHUNK_SIZE_BITS, kvEntriesBits)
 
 	defer func(files []string) {
 		for _, file := range files {
@@ -1083,7 +1072,7 @@ func TestAddPeerDuringSyncing(t *testing.T) {
 	)
 
 	requestTimeoutInMillisecond = 50 * time.Millisecond // Millisecond
-	_, files := createSstorage(contract, []uint64{0, 1, 2}, sstorage.CHUNK_SIZE_BITS, kvEntriesBits, 1)
+	_, files := createSstorage(contract, []uint64{0, 1, 2}, sstorage.CHUNK_SIZE_BITS, kvEntriesBits)
 
 	defer func(files []string) {
 		for _, file := range files {
@@ -1129,7 +1118,7 @@ func TestSaveAndLoadSyncStatus(t *testing.T) {
 		stateDB, _  = state.New(common.Hash{}, state.NewDatabase(rawdb.NewMemoryDatabase()), nil)
 		lastKvIndex = kvEntries*3 - kvEntriesBits - 1
 	)
-	shards, files := createSstorage(contract, []uint64{0, 1, 2}, sstorage.CHUNK_SIZE_BITS, kvEntriesBits, 1)
+	shards, files := createSstorage(contract, []uint64{0, 1, 2}, sstorage.CHUNK_SIZE_BITS, kvEntriesBits)
 	if shards == nil {
 		t.Fatalf("createSstorage failed")
 	}
