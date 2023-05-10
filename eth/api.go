@@ -94,6 +94,21 @@ func NewPrivateMinerAPI(e *Ethereum) *PrivateMinerAPI {
 	return &PrivateMinerAPI{e: e}
 }
 
+// StartSstorMining starts the Sstorage miner. If mining is already running, this method just return.
+func (api *PrivateMinerAPI) StartSstorMining() {
+	api.e.StartSstorMining()
+}
+
+// StopSstorMining terminates the Sstorage miner.
+func (api *PrivateMinerAPI) StopSstorMining() {
+	api.e.StopSstorMining()
+}
+
+// SetSstorRecommitInterval updates the interval for sstorage miner sealing work recommitting.
+func (api *PrivateMinerAPI) SetSstorRecommitInterval(interval int) {
+	api.e.SstorMiner().SetRecommitInterval(time.Duration(interval) * time.Millisecond)
+}
+
 // Start starts the miner with the given number of threads. If threads is nil,
 // the number of workers started is equal to the number of logical CPUs that are
 // usable by this process. If mining is already running, this method adjust the

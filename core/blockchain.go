@@ -2572,6 +2572,48 @@ func (bc *BlockChain) VerifyAndWriteKV(contract common.Address, data map[uint64]
 	return synced, syncedBytes, inserted, nil
 }
 
+// ReadKVsByIndexList Read the KVs by a list of KV index.
+func (bc *BlockChain) ReadKVsByIndexList(contract common.Address, indexes []uint64, returnEmpty bool) ([]*KV, error) {
+	stateDB, err := bc.StateAt(bc.CurrentBlock().Root())
+	if err != nil {
+		return nil, err
+	}
+
+	return bc.ReadKVsByIndexListWithState(stateDB, contract, indexes, returnEmpty)
+}
+
+func (bc *BlockChain) ReadKVsByIndexListWithState(stateDB *state.StateDB, contract common.Address, indexes []uint64, returnEmpty bool) ([]*KV, error) {
+	sm := sstorage.ContractToShardManager[contract]
+	if sm == nil {
+		return nil, fmt.Errorf("shard manager for contract %s is not support", contract.Hex())
+	}
+
+	val := stateDB.GetState(contract, uint256.NewInt(0).Bytes32())
+	lastIndex := new(big.Int).SetBytes(val.Bytes()).Uint64()
+
+	res := make([]*KV, 0)
+	for _, idx := range indexes {
+		if idx >= lastIndex {
+			if returnEmpty {
+				kv := KV{idx, make([]byte, 0)}
+				res = append(res, &kv)
+			}
+			continue
+		}
+		_, meta, err := GetSstorageMetadata(stateDB, contract, idx)
+		if err != nil {
+			return nil, fmt.Errorf("get storage metadata fail, err: ", err.Error())
+		}
+		data, ok, err := sm.TryRead(idx, int(meta.KVSize), common.BytesToHash(meta.HashInMeta))
+		if ok && err == nil {
+			kv := KV{idx, data}
+			res = append(res, &kv)
+		}
+	}
+
+	return res, nil
+}
+
 // ReadEncodedKVsByIndexList Read the masked KVs by a list of KV index.
 func (bc *BlockChain) ReadEncodedKVsByIndexList(contract common.Address, shardId uint64, indexes []uint64) (common.Address, []*KV, error) {
 	sm := sstorage.ContractToShardManager[contract]
@@ -2651,6 +2693,58 @@ func (bc *BlockChain) GetSstorageLastKvIdx(contract common.Address) (uint64, err
 	val := stateDB.GetState(contract, uint256.NewInt(0).Bytes32())
 	log.Warn("GetSstorageLastKvIdx", "val", common.Bytes2Hex(val.Bytes()))
 	return new(big.Int).SetBytes(val.Bytes()).Uint64(), nil
+}
+
+type MiningInfo struct {
+	MiningHash   common.Hash
+	LastMineTime uint64
+	Difficulty   *big.Int
+	BlockMined   *big.Int
+}
+
+func (a *MiningInfo) Equal(b *MiningInfo) bool {
+	if b == nil {
+		return false
+	}
+	if a.LastMineTime != b.LastMineTime {
+		return false
+	}
+	if !bytes.Equal(a.MiningHash.Bytes(), b.MiningHash.Bytes()) {
+		return false
+	}
+	if a.BlockMined.Cmp(b.BlockMined) != 0 {
+		return false
+	}
+	if a.Difficulty.Cmp(b.Difficulty) != 0 {
+		return false
+	}
+	return true
+}
+
+func (bc *BlockChain) GetSstorageMiningInfo(root common.Hash, contract common.Address, shardId uint64) (*MiningInfo, error) {
+	stateDB, err := bc.StateAt(root)
+	if err != nil {
+		return nil, err
+	}
+
+	return bc.GetSstorageMiningInfoWithStateDB(stateDB, contract, shardId)
+}
+
+func (bc *BlockChain) GetSstorageMiningInfoWithStateDB(stateDB *state.StateDB, contract common.Address, shardId uint64) (*MiningInfo, error) {
+	info := new(MiningInfo)
+	position := getSlotHash(3, uint256.NewInt(shardId).Bytes32())
+	info.MiningHash = stateDB.GetState(contract, position)
+	if info.MiningHash == emptyHash {
+		return nil, fmt.Errorf("fail to get mining info for shard %d", shardId)
+	}
+	info.LastMineTime = stateDB.GetState(contract, hashAdd(position, 1)).Big().Uint64()
+	info.Difficulty = stateDB.GetState(contract, hashAdd(position, 2)).Big()
+	info.BlockMined = stateDB.GetState(contract, hashAdd(position, 3)).Big()
+	return info, nil
+}
+
+func hashAdd(hash common.Hash, i uint64) common.Hash {
+	return common.BytesToHash(new(big.Int).Add(hash.Big(), new(big.Int).SetUint64(i)).Bytes())
 }
 
 func (bc *BlockChain) setMindReading(chainConfig *params.ChainConfig) error {

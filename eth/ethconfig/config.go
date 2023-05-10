@@ -18,6 +18,7 @@
 package ethconfig
 
 import (
+	"github.com/ethereum/go-ethereum/sstorminer"
 	"math/big"
 	"os"
 	"os/user"
@@ -88,6 +89,13 @@ var Defaults = Config{
 		GasCeil:  8000000,
 		GasPrice: big.NewInt(params.GWei),
 		Recommit: 3 * time.Second,
+	},
+	SStorMiner: sstorminer.Config{
+		RandomChecks:   16,
+		MinimumDiff:    new(big.Int).SetUint64(10000),
+		Cutoff:         new(big.Int).SetUint64(300), // equal to TargetIntervalSec
+		DiffAdjDivisor: new(big.Int).SetUint64(1024),
+		Recommit:       15 * time.Second,
 	},
 	TxPool:        core.DefaultTxPoolConfig,
 	RPCGasCap:     50000000,
@@ -174,6 +182,9 @@ type Config struct {
 	// Mining options
 	Miner miner.Config
 
+	// Sstorage Mining options
+	SStorMiner sstorminer.Config
+
 	// Ethash options
 	Ethash ethash.Config
 
@@ -219,15 +230,18 @@ type Config struct {
 	ValChainId             uint64
 	ValidatorChangeEpochId uint64
 
-	//MindReading Config
+	// MindReading Config
 	IsMiner                      bool
 	MindReadingEnableBlockNumber *big.Int
 	MindReadingSupportChainId    uint64
 	MindReadingCallRpc           string
 
 	// Sstorage config
-	SstorageFiles  []string `toml:",omitempty"`
-	SstorageShards []string `toml:",omitempty"`
+	SstorageFiles         []string `toml:",omitempty"`
+	SstorageShards        []string `toml:",omitempty"`
+	SstorageMine          bool
+	SstorageTXSigner      string
+	SstorageMinerContract string
 }
 
 // CreateConsensusEngine creates a consensus engine for the given chain configuration.
