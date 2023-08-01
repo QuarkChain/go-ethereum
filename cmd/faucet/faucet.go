@@ -51,6 +51,7 @@ import (
 )
 
 var (
+	ethRpcFlag  = flag.String("ethrpc", "", "Ethereum mainnet rpc URL for ethclient to get address balance")
 	wsRpcFlag   = flag.String("wsrpc", "", "websocket rpc URL for ethclient to get data and submit tx")
 	apiPortFlag = flag.Int("apiport", 81, "Listener port for the HTTP API connection")
 
@@ -73,7 +74,8 @@ var (
 )
 
 var (
-	ether = new(big.Int).Exp(big.NewInt(10), big.NewInt(16), nil)
+	minEthNoAuthAddrNeed = new(big.Int).Exp(big.NewInt(10), big.NewInt(17), nil)
+	ether                = new(big.Int).Exp(big.NewInt(10), big.NewInt(16), nil)
 )
 
 func main() {
@@ -143,7 +145,7 @@ func main() {
 		log.Crit("Failed to unlock faucet signer account", "err", err)
 	}
 	// Assemble and start the faucet light service
-	faucet, err := newFaucet(*wsRpcFlag, ks, website.Bytes())
+	faucet, err := newFaucet(*wsRpcFlag, *ethRpcFlag, ks, website.Bytes())
 	if err != nil {
 		log.Crit("Failed to start faucet", "err", err)
 	}
@@ -163,8 +165,9 @@ type request struct {
 
 // faucet represents a crypto faucet backed by an Ethereum light client.
 type faucet struct {
-	client *ethclient.Client // Client connection to the Ethereum chain
-	index  []byte            // Index page to serve up on the web
+	ethClient *ethclient.Client // Client connection to the Ethereum chain
+	client    *ethclient.Client // Client connection to the EthStorage chain
+	index     []byte            // Index page to serve up on the web
 
 	keystore *keystore.KeyStore // Keystore containing the single signer
 	account  accounts.Account   // Account funding user faucet requests
@@ -189,7 +192,7 @@ type wsConn struct {
 	wlock sync.Mutex
 }
 
-func newFaucet(rpcFlag string, ks *keystore.KeyStore, index []byte) (*faucet, error) {
+func newFaucet(rpcFlag string, ethRpcFlag string, ks *keystore.KeyStore, index []byte) (*faucet, error) {
 	client, err := ethclient.Dial(rpcFlag)
 	if err != nil {
 		return nil, err
@@ -199,14 +202,23 @@ func newFaucet(rpcFlag string, ks *keystore.KeyStore, index []byte) (*faucet, er
 		return nil, err
 	}
 
+	var ethClient *ethclient.Client
+	if *noauthFlag {
+		ethClient, err = ethclient.Dial(ethRpcFlag)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	return &faucet{
-		client:   client,
-		index:    index,
-		keystore: ks,
-		chainId:  chainId,
-		account:  ks.Accounts()[0],
-		timeouts: make(map[string]time.Time),
-		update:   make(chan struct{}, 1),
+		ethClient: ethClient,
+		client:    client,
+		index:     index,
+		keystore:  ks,
+		chainId:   chainId,
+		account:   ks.Accounts()[0],
+		timeouts:  make(map[string]time.Time),
+		update:    make(chan struct{}, 1),
 	}, nil
 }
 
@@ -379,7 +391,7 @@ func (f *faucet) apiHandler(w http.ResponseWriter, r *http.Request) {
 			username, avatar, address, err = authFacebook(msg.URL)
 			id = username
 		case *noauthFlag:
-			username, avatar, address, err = authNoAuth(msg.URL)
+			username, avatar, address, err = authNoAuth(f.ethClient, msg.URL)
 			id = username
 		default:
 			//lint:ignore ST1005 This error is to be displayed in the browser
@@ -713,6 +725,10 @@ func authTwitterWithTokenV2(tweetID string, token string) (string, string, strin
 	}
 	defer res.Body.Close()
 
+	if res.StatusCode == 429 {
+		return "", "", "", common.Address{}, errors.New("the tweet API request rate limit has been reached, please try again in a few minutes")
+	}
+
 	var result struct {
 		Data struct {
 			AuthorID string `json:"author_id"`
@@ -788,11 +804,20 @@ func authFacebook(url string) (string, string, common.Address, error) {
 // authNoAuth tries to interpret a faucet request as a plain Ethereum address,
 // without actually performing any remote authentication. This mode is prone to
 // Byzantine attack, so only ever use for truly private networks.
-func authNoAuth(url string) (string, string, common.Address, error) {
+func authNoAuth(ethClient *ethclient.Client, url string) (string, string, common.Address, error) {
 	address := common.HexToAddress(regexp.MustCompile("0x[0-9a-fA-F]{40}").FindString(url))
 	if address == (common.Address{}) {
 		//lint:ignore ST1005 This error is to be displayed in the browser
-		return "", "", common.Address{}, errors.New("No Web3Q Chain address found to fund")
+		return "", "", common.Address{}, errors.New("No Web3Q Chain address found to fund.")
 	}
+	bal, err := ethClient.BalanceAt(context.Background(), address, nil)
+	if err != nil {
+		return "", "", common.Address{}, errors.New("Fail to get user balance from Ethereum mainnet.")
+	}
+	if bal.Cmp(minEthNoAuthAddrNeed) < 0 {
+		return "", "", common.Address{}, errors.New(
+			fmt.Sprintf("Your address %s need to have at less 0.1 eth in Ethereum mainnet.", address.Hex()))
+	}
+
 	return address.Hex() + "@noauth", "", address, nil
 }
