@@ -816,7 +816,7 @@ func authNoAuth(ethClient *ethclient.Client, url string) (string, string, common
 	}
 	if bal.Cmp(minEthNoAuthAddrNeed) < 0 {
 		return "", "", common.Address{}, errors.New(
-			fmt.Sprintf("Your address %s need to have at less 0.1 eth in Ethereum mainnet.", address.Hex()))
+			fmt.Sprintf("Your address %s need to have at least 0.1 eth in Ethereum mainnet.", address.Hex()))
 	}
 
 	return address.Hex() + "@noauth", "", address, nil
