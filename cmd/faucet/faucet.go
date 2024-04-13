@@ -74,7 +74,7 @@ var (
 )
 
 var (
-	minEthNoAuthAddrNeed = new(big.Int).Exp(big.NewInt(10), big.NewInt(17), nil)
+	minEthNoAuthAddrNeed = new(big.Int).Exp(big.NewInt(10), big.NewInt(16), nil)
 	ether                = new(big.Int).Exp(big.NewInt(10), big.NewInt(16), nil)
 )
 
