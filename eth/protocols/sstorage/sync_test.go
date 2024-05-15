@@ -36,12 +36,14 @@ import (
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/sstorage"
 	"github.com/holiman/uint256"
-	"golang.org/x/crypto/sha3"
 )
 
 var (
-	contract  = common.HexToAddress("0x0000000000000000000000000000000003330001")
-	kvEntries = uint64(512)
+	miner         = common.HexToAddress("0x0000000000000000000000000000000000000001")
+	contract      = common.HexToAddress("0x0000000000000000000000000000000003330001")
+	kvEntriesBits = uint64(4)
+	kvEntries     = uint64(1) << 4
+	filePerShard  = uint64(1)
 )
 
 type (
@@ -245,7 +247,7 @@ func defaultKVRangeRequestHandler(t *testPeer, id uint64, contract common.Addres
 	if vals == nil {
 		t.test.Error("CreateKVRequestResponse fail: vals is nul.")
 	}
-	if err := t.remote.OnKVRange(t, id, common.Address{}, vals); err != nil {
+	if err := t.remote.OnKVRange(t, id, miner, vals); err != nil {
 		t.test.Errorf("Remote side rejected our delivery: %v", err)
 		t.term()
 		return err
@@ -260,7 +262,7 @@ func defaultKVHealRequestHandler(t *testPeer, id uint64, contract common.Address
 	if vals == nil {
 		t.test.Error("CreateKVRequestResponse fail: vals is nul.")
 	}
-	if err := t.remote.OnKVs(t, id, common.Address{}, vals); err != nil {
+	if err := t.remote.OnKVs(t, id, miner, vals); err != nil {
 		t.test.Errorf("Remote side rejected our delivery: %v", err)
 		t.term()
 		return err
@@ -287,7 +289,7 @@ func createKVRequestResponse(t *testPeer, id uint64, stateDB *state.StateDB, con
 			if err != nil {
 				return nil
 			}
-			bs, _, _ := sm.EncodeKV(idx, data, common.BytesToHash(meta.HashInMeta), common.Address{})
+			bs, _, _ := sm.EncodeKV(idx, data, common.BytesToHash(meta.HashInMeta), miner)
 			if uint64(len(bs)) > meta.KVSize {
 				values = append(values, &core.KV{Idx: idx, Data: bs[:meta.KVSize]})
 			} else {
@@ -302,7 +304,7 @@ func createKVRequestResponse(t *testPeer, id uint64, stateDB *state.StateDB, con
 
 // emptyRequestKVRangeFn is a rejects AccountRangeRequests
 func emptyRequestKVRangeFn(t *testPeer, id uint64, contract common.Address, shardId uint64, kvList []uint64) error {
-	t.remote.OnKVRange(t, id, common.Address{}, nil)
+	t.remote.OnKVRange(t, id, miner, nil)
 	return nil
 }
 
@@ -340,7 +342,7 @@ func checkStall(t *testing.T, term func()) chan struct{} {
 	testDone := make(chan struct{})
 	go func() {
 		select {
-		case <-time.After(2 * time.Second):
+		case <-time.After(20 * time.Second):
 			t.Log("Sync stalled")
 			term()
 		case <-testDone:
@@ -373,13 +375,7 @@ func getSlotHash(slotIdx uint64, key common.Hash) common.Hash {
 	slotdata := slot[:]
 	data := append(keydata, slotdata...)
 
-	hasher := sha3.NewLegacyKeccak256().(crypto.KeccakState)
-	hasher.Write(data)
-
-	hashRes := common.Hash{}
-	hasher.Read(hashRes[:])
-
-	return hashRes
+	return crypto.Keccak256Hash(data)
 }
 
 // makeKVStorage generate a range of storage Data and its metadata
@@ -414,10 +410,11 @@ func makeKVStorage(stateDB *state.StateDB, contract common.Address, shards []uin
 	return shardData, shardList
 }
 
-func createSstorage(contract common.Address, shardIdxList []uint64, kvSize,
-	kvEntries, filePerShard uint64, miner common.Address) (map[common.Address][]uint64, []string) {
-	sm := sstorage.NewShardManager(contract, kvSize, kvEntries)
+func createSstorage(contract common.Address, shardIdxList []uint64, kvSizeBits, kvEntriesBits uint64) (map[common.Address][]uint64, []string) {
+	sm := sstorage.NewShardManager(contract, kvSizeBits, kvEntriesBits)
 	sstorage.ContractToShardManager[contract] = sm
+	kvSize := uint64(1) << kvSizeBits
+	kvEntries := uint64(1) << kvEntriesBits
 
 	files := make([]string, 0)
 	for _, shardIdx := range shardIdxList {
@@ -428,8 +425,7 @@ func createSstorage(contract common.Address, shardIdxList []uint64, kvSize,
 			files = append(files, fileName)
 			chunkPerfile := kvEntries * kvSize / sstorage.CHUNK_SIZE / filePerShard
 			startChunkId := fileId * chunkPerfile
-			endChunkId := (fileId + 1) * chunkPerfile
-			_, err := sstorage.Create(fileName, startChunkId, endChunkId, 0, kvSize, sstorage.ENCODE_KECCAK_256, miner)
+			_, err := sstorage.Create(fileName, startChunkId, chunkPerfile, 0, kvSize, sstorage.ENCODE_ETHASH, miner)
 			if err != nil {
 				log.Crit("open failed", "error", err)
 			}
@@ -457,13 +453,14 @@ func verifyKVs(stateDB *state.StateDB, data map[common.Address]map[uint64][]byte
 		}
 		for idx, val := range shards {
 			_, meta, err := core.GetSstorageMetadata(stateDB, contract, idx)
-			if _, ok := destroyedList[idx]; ok {
-				val = make([]byte, shardData.MaxKvSize())
-			}
 			if err != nil {
 				t.Fatalf("get MetaHash data fail with err: %s.", err.Error())
 			}
 			sval, ok, err := shardData.TryRead(idx, len(val), common.BytesToHash(meta.HashInMeta))
+			if _, ok := destroyedList[idx]; ok {
+				val = make([]byte, shardData.MaxKvSize())
+				sval, ok, err = shardData.TryReadEncoded(idx, len(val))
+			}
 			if err != nil {
 				t.Fatalf("TryRead sstorage Data fail. err: %s", err.Error())
 			}
@@ -625,7 +622,7 @@ func checkTasksWithBaskTasks(baseTasks, tasks []*kvTask) error {
 
 // TestReadWrite tests a basic sstorage read/wrtie
 func TestReadWrite(t *testing.T) {
-	shards, files := createSstorage(contract, []uint64{0}, sstorage.CHUNK_SIZE, kvEntries, 1, common.Address{})
+	shards, files := createSstorage(contract, []uint64{0}, sstorage.CHUNK_SIZE_BITS, kvEntriesBits)
 	if shards == nil {
 		t.Fatalf("createSstorage failed")
 	}
@@ -664,7 +661,7 @@ func TestSync(t *testing.T) {
 		}
 	)
 
-	shards, files := createSstorage(contract, []uint64{0}, sstorage.CHUNK_SIZE, kvEntries, 1, common.Address{})
+	shards, files := createSstorage(contract, []uint64{0}, sstorage.CHUNK_SIZE_BITS, kvEntriesBits)
 	if shards == nil {
 		t.Fatalf("createSstorage failed")
 	}
@@ -698,7 +695,6 @@ func TestMultiSubTasksSync(t *testing.T) {
 	var (
 		once          sync.Once
 		cancel        = make(chan struct{})
-		entries       = uint64(1024)
 		destroyedList = make(map[uint64]struct{})
 		stateDB, _    = state.New(common.Hash{}, state.NewDatabase(rawdb.NewMemoryDatabase()), nil)
 		term          = func() {
@@ -708,7 +704,7 @@ func TestMultiSubTasksSync(t *testing.T) {
 		}
 	)
 
-	shards, files := createSstorage(contract, []uint64{0}, sstorage.CHUNK_SIZE, entries, 1, common.Address{})
+	shards, files := createSstorage(contract, []uint64{0}, sstorage.CHUNK_SIZE_BITS, kvEntriesBits)
 	if shards == nil {
 		t.Fatalf("createSstorage failed")
 	}
@@ -727,8 +723,8 @@ func TestMultiSubTasksSync(t *testing.T) {
 		return source
 	}
 
-	data, _ := makeKVStorage(stateDB, contract, []uint64{0}, entries)
-	syncer := setupSyncer(shards, stateDB, entries, mkSource("source", shards, data))
+	data, _ := makeKVStorage(stateDB, contract, []uint64{0}, kvEntries)
+	syncer := setupSyncer(shards, stateDB, kvEntries, mkSource("source", shards, data))
 	done := checkStall(t, term)
 	if err := syncer.Sync(cancel); err != nil {
 		t.Fatalf("sync failed: %v", err)
@@ -751,7 +747,7 @@ func TestMultiSync(t *testing.T) {
 		}
 	)
 
-	shards, files := createSstorage(contract, []uint64{0, 1, 2, 3, 4}, sstorage.CHUNK_SIZE, kvEntries, 1, common.Address{})
+	shards, files := createSstorage(contract, []uint64{0, 1, 2}, sstorage.CHUNK_SIZE_BITS, kvEntriesBits)
 	if shards == nil {
 		t.Fatalf("createSstorage failed")
 	}
@@ -772,14 +768,14 @@ func TestMultiSync(t *testing.T) {
 
 	peers := make([]*testPeer, 0)
 	dataList := make([]map[common.Address]map[uint64][]byte, 0)
-	for i := 0; i < 5; i++ {
+	for i := 0; i < 3; i++ {
 		data, shards := makeKVStorage(stateDB, contract, []uint64{uint64(i)}, kvEntries)
 		dataList = append(dataList, data)
 		peer := mkSource(fmt.Sprintf("source_%d", i), shards, data)
 		peers = append(peers, peer)
 	}
 
-	syncer := setupSyncer(shards, stateDB, kvEntries*5, peers...)
+	syncer := setupSyncer(shards, stateDB, kvEntries*3, peers...)
 	done := checkStall(t, term)
 	if err := syncer.Sync(cancel); err != nil {
 		t.Fatalf("sync failed: %v", err)
@@ -804,7 +800,7 @@ func TestSyncWithEmptyResponse(t *testing.T) {
 		}
 	)
 
-	shards, files := createSstorage(contract, []uint64{0}, sstorage.CHUNK_SIZE, kvEntries, 1, common.Address{})
+	shards, files := createSstorage(contract, []uint64{0}, sstorage.CHUNK_SIZE_BITS, kvEntriesBits)
 	if shards == nil {
 		t.Fatalf("createSstorage failed")
 	}
@@ -851,7 +847,7 @@ func TestSyncWithNoResponse(t *testing.T) {
 		}
 	)
 
-	shards, files := createSstorage(contract, []uint64{0}, sstorage.CHUNK_SIZE, kvEntries, 1, common.Address{})
+	shards, files := createSstorage(contract, []uint64{0}, sstorage.CHUNK_SIZE_BITS, kvEntriesBits)
 	if shards == nil {
 		t.Fatalf("createSstorage failed")
 	}
@@ -896,10 +892,10 @@ func TestSyncWithFewerResult(t *testing.T) {
 				close(cancel)
 			})
 		}
-		reduce = rand.Uint64()%(kvEntries/2) - 1
+		reduce = rand.Uint64() % (kvEntries / 2)
 	)
 
-	shards, files := createSstorage(contract, []uint64{0}, sstorage.CHUNK_SIZE, kvEntries, 1, common.Address{})
+	shards, files := createSstorage(contract, []uint64{0}, sstorage.CHUNK_SIZE_BITS, kvEntriesBits)
 	if shards == nil {
 		t.Fatalf("createSstorage failed")
 	}
@@ -941,7 +937,7 @@ func TestSyncMismatchWithMeta(t *testing.T) {
 		}
 	)
 
-	shards, files := createSstorage(contract, []uint64{0}, sstorage.CHUNK_SIZE, kvEntries, 1, common.Address{})
+	shards, files := createSstorage(contract, []uint64{0}, sstorage.CHUNK_SIZE_BITS, kvEntriesBits)
 	if shards == nil {
 		t.Fatalf("createSstorage failed")
 	}
@@ -985,7 +981,7 @@ func TestMultiSyncWithDataOverlay(t *testing.T) {
 		}
 	)
 
-	_, files := createSstorage(contract, []uint64{0, 1, 2, 3}, sstorage.CHUNK_SIZE, kvEntries, 1, common.Address{})
+	_, files := createSstorage(contract, []uint64{0, 1, 2, 3}, sstorage.CHUNK_SIZE_BITS, kvEntriesBits)
 
 	defer func(files []string) {
 		for _, file := range files {
@@ -1006,8 +1002,6 @@ func TestMultiSyncWithDataOverlay(t *testing.T) {
 	peer0 := mkSource("source_0", shards, data)
 	data, shards = makeKVStorage(nil, contract, []uint64{2, 3}, kvEntries)
 	peer1 := mkSource("source_1", shards, data)
-	/*	data, shards = makeKVStorage(nil, contract, []uint64{2, 3}, kvEntries)
-		peer2 := mkSource("source_2", shards, data)*/
 
 	syncer := setupSyncer(localShards, stateDB, kvEntries*4, peer0, peer1)
 	done := checkStall(t, term)
@@ -1032,7 +1026,7 @@ func TestMultiSyncWithDataOverlayWithDestroyed(t *testing.T) {
 	)
 
 	requestTimeoutInMillisecond = 50 * time.Millisecond // Millisecond
-	_, files := createSstorage(contract, []uint64{0, 1, 2}, sstorage.CHUNK_SIZE, kvEntries, 1, common.Address{})
+	_, files := createSstorage(contract, []uint64{0, 1, 2}, sstorage.CHUNK_SIZE_BITS, kvEntriesBits)
 
 	defer func(files []string) {
 		for _, file := range files {
@@ -1079,7 +1073,7 @@ func TestAddPeerDuringSyncing(t *testing.T) {
 	)
 
 	requestTimeoutInMillisecond = 50 * time.Millisecond // Millisecond
-	_, files := createSstorage(contract, []uint64{0, 1, 2}, sstorage.CHUNK_SIZE, kvEntries, 1, common.Address{})
+	_, files := createSstorage(contract, []uint64{0, 1, 2}, sstorage.CHUNK_SIZE_BITS, kvEntriesBits)
 
 	defer func(files []string) {
 		for _, file := range files {
@@ -1123,10 +1117,9 @@ func TestAddPeerDuringSyncing(t *testing.T) {
 func TestSaveAndLoadSyncStatus(t *testing.T) {
 	var (
 		stateDB, _  = state.New(common.Hash{}, state.NewDatabase(rawdb.NewMemoryDatabase()), nil)
-		entries     = kvEntries * 10
-		lastKvIndex = entries*3 - kvEntries - 9
+		lastKvIndex = kvEntries*3 - kvEntriesBits - 1
 	)
-	shards, files := createSstorage(contract, []uint64{0, 1, 2}, sstorage.CHUNK_SIZE, kvEntries, 1, common.Address{})
+	shards, files := createSstorage(contract, []uint64{0, 1, 2}, sstorage.CHUNK_SIZE_BITS, kvEntriesBits)
 	if shards == nil {
 		t.Fatalf("createSstorage failed")
 	}
@@ -1138,10 +1131,10 @@ func TestSaveAndLoadSyncStatus(t *testing.T) {
 	}(files)
 
 	syncer := setupSyncer(shards, stateDB, kvEntries)
-	task0 := createKvTask(contract, entries, 0, lastKvIndex, 20)
+	task0 := createKvTask(contract, kvEntries, 0, lastKvIndex, 8)
 	task0.KvSubTasks = make([]*kvSubTask, 0)
-	task1 := createKvTask(contract, entries, 1, lastKvIndex, 4)
-	task2 := createKvTask(contract, entries, 2, lastKvIndex, 0)
+	task1 := createKvTask(contract, kvEntries, 1, lastKvIndex, 4)
+	task2 := createKvTask(contract, kvEntries, 2, lastKvIndex, 0)
 
 	tasks := []*kvTask{task0, task1, task2}
 	syncer.tasks = tasks

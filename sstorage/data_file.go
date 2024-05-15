@@ -21,7 +21,8 @@ const (
 	MAGIC   = uint64(0xcf20bd770c22b2e1)
 	VERSION = uint64(1)
 
-	CHUNK_SIZE = uint64(4096)
+	CHUNK_SIZE      = uint64(4096)
+	CHUNK_SIZE_BITS = uint64(12)
 )
 
 // A DataFile represents a local file for a consective chunks
