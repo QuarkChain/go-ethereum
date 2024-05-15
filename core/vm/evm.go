@@ -542,14 +542,28 @@ func (evm *EVM) checkContractStaking(contract *Contract, codeSize uint64) error 
 		codeSize = uint64(evm.StateDB.GetCodeSize(contract.Address()))
 	}
 	// Check if the remaining balance of the contract can cover the staking requirement
-	if !evm.StateDB.HasSuicided(contract.Address()) && codeSize > params.MaxCodeSizeSoft {
-		staking := big.NewInt(int64((codeSize - 1) / params.ExtcodeCopyChunkSize))
-		staking.Mul(staking, big.NewInt(int64(params.CodeStakingPerChunk)))
-
-		if !evm.Context.CanTransfer(evm.StateDB, contract.Address(), staking) {
-			return ErrCodeInsufficientStake
-		}
+	if evm.StateDB.HasSuicided(contract.Address()) {
+		return nil
 	}
+
+	if codeSize <= params.MaxCodeSizeSoft {
+		return nil
+	}
+
+	var staking *big.Int
+	if evm.chainRules.IsPisa {
+		staking = big.NewInt(int64(codeSize - params.MaxCodeSizeSoft))
+		staking.Mul(staking, big.NewInt(int64(params.CodeStakingPerChunk)))
+		staking.Div(staking, big.NewInt(int64(params.ExtcodeCopyChunkSize)))
+	} else {
+		staking = big.NewInt(int64((codeSize - 1) / params.ExtcodeCopyChunkSize))
+		staking.Mul(staking, big.NewInt(int64(params.CodeStakingPerChunk)))
+	}
+
+	if !evm.Context.CanTransfer(evm.StateDB, contract.Address(), staking) {
+		return ErrCodeInsufficientStake
+	}
+
 	return nil
 }
 
