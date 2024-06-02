@@ -212,13 +212,16 @@ type BlockChain interface {
 	// KVs to the sstorage file. And return the inserted KV index list.
 	VerifyAndWriteKV(contract common.Address, data map[uint64][]byte, provderAddr common.Address) (uint64, uint64, []uint64, error)
 
+	// FillSstorWithEmptyKV get the lastKVIndex and if the kv index need to fill is larger than or equal to lastKVIndex
+	// fill up the kv with empty ([]byte{}), so the data in the file will be filled with encode empty data
+	FillSstorWithEmptyKV(contract common.Address, start, limit uint64) (uint64, error)
+
 	// ReadEncodedKVsByIndexList Read the encoded KVs by a list of KV index.
 	ReadEncodedKVsByIndexList(contract common.Address, shardId uint64, indexes []uint64) (common.Address, []*core.KV, error)
 
 	// ReadEncodedKVsByIndexRange Read encoded KVs sequentially starting from origin until the index exceeds the limit or
 	// the amount of data read is greater than the bytes.
-	ReadEncodedKVsByIndexRange(contract common.Address, shardId uint64, origin uint64,
-		limit uint64, bytes uint64) (common.Address, []*core.KV, error)
+	ReadEncodedKVsByIndexRange(contract common.Address, shardId uint64, origin uint64, limit uint64, bytes uint64) (common.Address, []*core.KV, error)
 
 	// GetSstorageLastKvIdx get LastKvIdx from a sstorage contract with latest stateDB.
 	GetSstorageLastKvIdx(contract common.Address) (uint64, error)
@@ -241,7 +244,7 @@ func New(checkpoint uint64, stateDb ethdb.Database, mux *event.TypeMux, chain Bl
 		headerProcCh:   make(chan *headerTask, 1),
 		quitCh:         make(chan struct{}),
 		SnapSyncer:     snap.NewSyncer(stateDb),
-		SstorSyncer:    sstorage.NewSyncer(stateDb, chain, sstor.Shards()),
+		SstorSyncer:    sstorage.NewSyncer(stateDb, chain, mux, sstor.Shards()),
 		stateSyncStart: make(chan *stateSync),
 		sstorSyncStart: make(chan *sstorSync),
 	}

@@ -2458,18 +2458,48 @@ func VerifyKV(sm *sstorage.ShardManager, idx uint64, val []byte, meta *SstorageM
 		}
 
 		if meta.KVSize != uint64(len(data)) {
-			return nil, fmt.Errorf("verifyKV fail: size error; Data size: %d; MetaHash KVSize: %d", len(val), meta.KVSize)
+			return nil, fmt.Errorf("verifyKV fail: size error; Data size: %d; MetaHash kvSize: %d", len(val), meta.KVSize)
 		}
 		data = d
 	}
 
-	hash := crypto.Keccak256Hash(data)
-	if !bytes.Equal(hash[:24], meta.HashInMeta) {
-		return nil, fmt.Errorf("verifyKV fail: size error; Data hash: %s; MetaHash hash (24): %s",
-			common.Bytes2Hex(hash[:24]), common.Bytes2Hex(meta.HashInMeta))
+	root := sstorage.MerkleRootWithMinTree(data)
+	if !bytes.Equal(root[:24], meta.HashInMeta) {
+		return nil, fmt.Errorf("verifyKV fail: Data hash: %s; MetaHash hash (24): %s, providerAddr %s, data %s",
+			common.Bytes2Hex(root[:24]), common.Bytes2Hex(meta.HashInMeta), providerAddr.Hex(), common.Bytes2Hex(data))
 	}
 
 	return data, nil
+}
+
+// FillSstorWithEmptyKV this func is used to fill empty KVs to storage file to make the whole file data encoded.
+// file in the KVs between start and limit(include limit). if the lastKvIdx larger than kv idx to fill, ignore it.
+func (bc *BlockChain) FillSstorWithEmptyKV(contract common.Address, start, limit uint64) (uint64, error) {
+	sm := sstorage.ContractToShardManager[contract]
+	if sm == nil {
+		return start, fmt.Errorf("kv verify fail: contract not support, contract: %s", contract.Hex())
+	}
+
+	bc.chainmu.TryLock()
+	defer bc.chainmu.Unlock()
+
+	empty := make([]byte, 0)
+	lastKvIdx, err := bc.GetSstorageLastKvIdx(contract)
+	if err != nil {
+		return start, fmt.Errorf("get lastKvIdx for FillEmptyKV fail, err: %s", err.Error())
+	}
+	for idx := start; idx <= limit; idx++ {
+		if lastKvIdx > idx {
+			continue
+		}
+		_, err = sm.TryWrite(idx, empty, common.Hash{})
+		if err != nil {
+			err = fmt.Errorf("write empty to kv file fail, index: %d; error: %s", idx, err.Error())
+			return idx, err
+		}
+	}
+
+	return limit + 1, nil
 }
 
 // VerifyAndWriteKV verify a list of raw KV data using the metadata saved in the local level DB and write successfully verified
