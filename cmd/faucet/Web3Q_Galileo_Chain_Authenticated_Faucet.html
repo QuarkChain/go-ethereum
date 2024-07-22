@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+		<meta http-equiv="X-UA-Compatible" content="IE=edge">
+		<meta name="viewport" content="width=device-width, initial-scale=1">
+
+		<title>Web3Q Galileo Chain: Authenticated Faucet</title>
+
+		<link href="https://cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/3.3.7/css/bootstrap.min.css" rel="stylesheet" />
+		<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css" rel="stylesheet" />
+
+		<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.1.1/jquery.min.js"></script>
+		<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery-noty/2.4.1/packaged/jquery.noty.packaged.min.js"></script>
+		<script src="https://cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/3.3.7/js/bootstrap.min.js"></script>
+		<script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.18.0/moment.min.js"></script>
+
+		<style>
+			.vertical-center {
+				min-height: 100%;
+				min-height: 100vh;
+				display: flex;
+				align-items: center;
+			}
+			.progress {
+				position: relative;
+			}
+			.progress span {
+				position: absolute;
+				display: block;
+				width: 100%;
+				color: white;
+			 }
+			 pre {
+				 padding: 6px;
+				 margin: 0;
+			 }
+			.mark {
+				background-color:#fff;
+				line-height:36px;
+				color:#000;
+				justify-content:center;
+				display:flex;
+				align-items:center;
+				font-size: 12px;
+				text-align: center;
+				font-weight: 700!important;
+				font-family: Futura!important;
+			 }
+		</style>
+	</head>
+
+	<body>
+	    <div class="mark" style="background: #2F6FFF; color: #ffffff; font-size: 14px"><img src="data:image/bmp;base64,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" class="img" style="width: 20px; height: 20px; margin-right: 10px; user-select: auto;"><span style="user-select: auto;"> The webpage is generated by EVM on EthStorage blockchain </span></div>
+		<div class="vertical-center">
+			<div class="container">
+				<div class="row" style="margin-bottom: 16px;">
+					<div class="col-lg-12">
+						<h1 style="text-align: center;"><i class="fa fa-bath" aria-hidden="true"></i> Web3Q Galileo Chain Authenticated Faucet</h1>
+					</div>
+				</div>
+				<div class="row">
+					<div class="col-lg-8 col-lg-offset-2">
+						<div class="input-group">
+							<input id="url" name="url" type="text" class="form-control" placeholder="Your Web3Q address...">
+							<span class="input-group-btn">
+								<button class="btn btn-default dropdown-toggle" type="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">Give me W3Q<i class="fa fa-caret-down" aria-hidden="true"></i></button>
+								<ul class="dropdown-menu dropdown-menu-right">
+								  <li><a style="text-align: center;" onclick="tier= 0 ; submit( 0 )">10 W3Qs / 1 day</a></li>
+								  <li><a style="text-align: center;" onclick="tier= 1 ; submit( 1 )">25 W3Qs / 3 days</a></li>
+								  <li><a style="text-align: center;" onclick="tier= 2 ; submit( 2 )">62.5 W3Qs / 9 days</a></li>
+								</ul>
+							</span>
+						</div>
+					</div>
+				</div>
+				<div class="row" style="margin-top: 32px;">
+						<div class="col-lg-6 col-lg-offset-3">
+						<div class="panel panel-small panel-default">
+							<div class="panel-body" style="padding: 0; overflow: auto; max-height: 300px;">
+								<table id="requests" class="table table-condensed" style="margin: 0;"></table>
+							</div>
+							<div class="panel-footer">
+								<table style="width: 100%"><tbody><tr>
+									<td style="text-align: center;"><i class="fa fa-database" aria-hidden="true"></i> <span id="block">0</span> blocks</td>
+									<td style="text-align: center;"><i class="fa fa-heartbeat" aria-hidden="true"></i> <span id="funds">0</span> W3Qs</td>
+									<td style="text-align: center;"><i class="fa fa-university" aria-hidden="true"></i> <span id="funded">0</span> funded</td>
+								</tr></tbody></table>
+							</div>
+						</div>
+					</div>
+				</div>
+				<div class="row" style="margin-top: 32px;">
+					<div class="col-lg-12">
+						<h3>How does this work?</h3>
+						<p>This W3Q faucet is running on the Web3Q Galileo Chain network. To prevent malicious actors from exhausting all available funds or accumulating enough W3Q to mount long running spam attacks, requests are tied to Ethereum mainnet accounts. Anyone having at least 0.01 ETH in Ethereum mainnet may request funds within the permitted limits.</p>
+						<p>You can track the current pending requests below the input field to see how much you have to wait until your turn comes.</p>
+						
+					</div>
+				</div>
+			</div>
+		</div>
+
+		<script>
+			
+			var attempt = 0;
+			var server;
+			var tier = 0;
+			var requests = [];
+
+			
+			var dropper = function(hash) {
+				return function() {
+					for (var i=0; i<requests.length; i++) {
+						if (requests[i].tx.hash == hash) {
+							requests.splice(i, 1);
+							break;
+						}
+					}
+				}
+			};
+			
+			var submit = function() {
+				server.send(JSON.stringify({url: $("#url")[0].value, tier: tier}));
+			};
+			
+			var reconnect = function() {
+				server = new WebSocket("wss://galileo.web3q.io:81/api");
+
+				server.onmessage = function(event) {
+					var msg = JSON.parse(event.data);
+					if (msg === null) {
+						return;
+					}
+
+					if (msg.funds !== undefined) {
+						$("#funds").text(msg.funds);
+					}
+					if (msg.funded !== undefined) {
+						$("#funded").text(msg.funded);
+					}
+					if (msg.number !== undefined) {
+						$("#block").text(parseInt(msg.number, 16));
+					}
+					if (msg.error !== undefined) {
+						noty({layout: 'topCenter', text: msg.error, type: 'error', timeout: 5000, progressBar: true});
+					}
+					if (msg.success !== undefined) {
+						noty({layout: 'topCenter', text: msg.success, type: 'success', timeout: 5000, progressBar: true});
+					}
+					if (msg.requests !== undefined && msg.requests !== null) {
+						
+						for (var i=0; i<requests.length; i++) {
+							if (msg.requests.length > 0 && msg.requests[0].tx.hash == requests[i].tx.hash) {
+								break;
+							}
+							if (requests[i].time != "") {
+								requests[i].time = "";
+								setTimeout(dropper(requests[i].tx.hash), 3000);
+							}
+						}
+						
+						var common = -1;
+						if (requests.length > 0) {
+							for (var i=0; i<msg.requests.length; i++) {
+								if (requests[requests.length-1].tx.hash == msg.requests[i].tx.hash) {
+									common = i;
+									break;
+								}
+							}
+						}
+						for (var i=common+1; i<msg.requests.length; i++) {
+							requests.push(msg.requests[i]);
+						}
+						
+						var content = "";
+						for (var i=requests.length-1; i >= 0; i--) {
+							var done    = requests[i].time == "";
+							var elapsed = moment().unix()-moment(requests[i].time).unix();
+
+							content += "<tr id='" + requests[i].tx.hash + "'>";
+							content += "  <td><div style=\"background: url('" + requests[i].avatar + "'); background-size: cover; width:32px; height: 32px; border-radius: 4px;\"></div></td>";
+							content += "  <td><pre>" + requests[i].account + "</pre></td>";
+							content += "  <td style=\"width: 100%; text-align: center; vertical-align: middle;\">";
+							if (done) {
+								content += "    funded";
+							} else {
+								content += "    <span id='time-" + i + "' class='timer'>" + moment.duration(-elapsed, 'seconds').humanize(true) + "</span>";
+							}
+							content += "    <div class='progress' style='height: 4px; margin: 0;'>";
+							if (done) {
+								content += "      <div class='progress-bar progress-bar-success' role='progressbar' aria-valuenow='30' style='width:100%;'></div>";
+							} else if (elapsed > 30) {
+								content += "      <div class='progress-bar progress-bar-danger progress-bar-striped active' role='progressbar' aria-valuenow='30' style='width:100%;'></div>";
+							} else {
+								content += "      <div class='progress-bar progress-bar-striped active' role='progressbar' aria-valuenow='" + elapsed + "' style='width:" + (elapsed * 100 / 30) + "%;'></div>";
+							}
+							content += "    </div>";
+							content += "  </td>";
+							content += "</tr>";
+						}
+						$("#requests").html("<tbody>" + content + "</tbody>");
+					}
+				}
+				server.onclose = function() { setTimeout(reconnect, 3000); };
+			}
+			
+			setInterval(function() {
+				$('.progress-bar').each(function() {
+					var progress = Number($(this).attr('aria-valuenow')) + 1;
+					if (progress < 30) {
+						$(this).attr('aria-valuenow', progress);
+						$(this).css('width', (progress * 100 / 30) + '%');
+					} else if (progress == 30) {
+						$(this).css('width', '100%');
+						$(this).addClass("progress-bar-danger");
+					}
+				})
+				$('.timer').each(function() {
+					var index = Number($(this).attr('id').substring(5));
+					$(this).html(moment.duration(moment(requests[index].time).unix()-moment().unix(), 'seconds').humanize(true));
+				})
+			}, 1000);
+
+			
+			reconnect();
+		</script>
+	
+</body></html>
